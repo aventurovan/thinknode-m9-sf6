@@ -155,7 +155,7 @@ void UITask::render() {
   // 12: companion
   snprintf(line, sizeof(line), "BT %s  PIN 123456  %s", _connected ? "polaczony" : "czeka",
            _node_prefs ? _node_prefs->node_name : "");
-  d.setCursor(0, ROW(12)); d.print(line);
+  d.setCursor(0, 59); d.print(line);   // ostatni wiersz tuż nad dolną krawędzią (240 px)
 
   d.endFrame();
 }
