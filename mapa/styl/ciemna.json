@@ -1,0 +1,539 @@
+{
+ "version": 8,
+ "name": "MC SF6 ciemna",
+ "metadata": {
+  "opis": "Ciemny styl mapy dla ekranu 320x240 ThinkNode M9 (schemat OpenMapTiles)"
+ },
+ "sources": {
+  "openmaptiles": {
+   "type": "vector",
+   "url": "mbtiles://{polska}"
+  }
+ },
+ "glyphs": "{fontstack}/{range}.pbf",
+ "layers": [
+  {
+   "id": "tlo",
+   "type": "background",
+   "paint": {
+    "background-color": "#10171F"
+   }
+  },
+  {
+   "id": "zabudowa",
+   "type": "fill",
+   "source": "openmaptiles",
+   "source-layer": "landuse",
+   "minzoom": 9,
+   "filter": [
+    "in",
+    "class",
+    "residential",
+    "commercial",
+    "industrial",
+    "retail"
+   ],
+   "paint": {
+    "fill-color": "#18212C"
+   }
+  },
+  {
+   "id": "las",
+   "type": "fill",
+   "source": "openmaptiles",
+   "source-layer": "landcover",
+   "filter": [
+    "==",
+    "class",
+    "wood"
+   ],
+   "paint": {
+    "fill-color": "#12261C"
+   }
+  },
+  {
+   "id": "park",
+   "type": "fill",
+   "source": "openmaptiles",
+   "source-layer": "park",
+   "paint": {
+    "fill-color": "#13291E",
+    "fill-opacity": 0.5
+   }
+  },
+  {
+   "id": "woda",
+   "type": "fill",
+   "source": "openmaptiles",
+   "source-layer": "water",
+   "paint": {
+    "fill-color": "#15344D"
+   }
+  },
+  {
+   "id": "rzeki",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "waterway",
+   "minzoom": 8,
+   "filter": [
+    "in",
+    "class",
+    "river",
+    "canal",
+    "stream"
+   ],
+   "paint": {
+    "line-color": "#1E4A6B",
+    "line-width": {
+     "stops": [
+      [
+       8,
+       0.8
+      ],
+      [
+       15,
+       3
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "id": "budynki",
+   "type": "fill",
+   "source": "openmaptiles",
+   "source-layer": "building",
+   "minzoom": 14,
+   "paint": {
+    "fill-color": "#232E3B"
+   }
+  },
+  {
+   "id": "sciezki",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "transportation",
+   "filter": [
+    "all",
+    [
+     "in",
+     "class",
+     "path",
+     "track"
+    ]
+   ],
+   "layout": {
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#4A5666",
+    "line-width": {
+     "stops": [
+      [
+       13,
+       0.6
+      ],
+      [
+       15,
+       1.2
+      ]
+     ]
+    },
+    "line-dasharray": [
+     3,
+     2
+    ]
+   },
+   "minzoom": 13
+  },
+  {
+   "id": "kolej",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "transportation",
+   "filter": [
+    "all",
+    [
+     "in",
+     "class",
+     "rail"
+    ]
+   ],
+   "layout": {
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#5E6878",
+    "line-width": {
+     "stops": [
+      [
+       10,
+       0.8
+      ],
+      [
+       15,
+       1.6
+      ]
+     ]
+    },
+    "line-dasharray": [
+     4,
+     3
+    ]
+   },
+   "minzoom": 10
+  },
+  {
+   "id": "drogi-lokalne",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "transportation",
+   "filter": [
+    "all",
+    [
+     "in",
+     "class",
+     "minor",
+     "service"
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#3A4656",
+    "line-width": {
+     "stops": [
+      [
+       12,
+       0.7
+      ],
+      [
+       15,
+       3
+      ]
+     ]
+    }
+   },
+   "minzoom": 12
+  },
+  {
+   "id": "drogi-powiatowe",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "transportation",
+   "filter": [
+    "all",
+    [
+     "in",
+     "class",
+     "tertiary",
+     "secondary"
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#66727F",
+    "line-width": {
+     "stops": [
+      [
+       9,
+       0.7
+      ],
+      [
+       15,
+       4
+      ]
+     ]
+    }
+   },
+   "minzoom": 9
+  },
+  {
+   "id": "drogi-glowne",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "transportation",
+   "filter": [
+    "all",
+    [
+     "in",
+     "class",
+     "primary",
+     "trunk"
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#8A7436",
+    "line-width": {
+     "stops": [
+      [
+       6,
+       0.8
+      ],
+      [
+       15,
+       5
+      ]
+     ]
+    }
+   },
+   "minzoom": 6
+  },
+  {
+   "id": "autostrady",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "transportation",
+   "filter": [
+    "all",
+    [
+     "in",
+     "class",
+     "motorway"
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#C89A2E",
+    "line-width": {
+     "stops": [
+      [
+       5,
+       1
+      ],
+      [
+       15,
+       6
+      ]
+     ]
+    }
+   },
+   "minzoom": 5
+  },
+  {
+   "id": "granica-wojewodztw",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "boundary",
+   "minzoom": 6,
+   "filter": [
+    "==",
+    "admin_level",
+    4
+   ],
+   "paint": {
+    "line-color": "#4A4F68",
+    "line-width": 1,
+    "line-dasharray": [
+     4,
+     3
+    ]
+   }
+  },
+  {
+   "id": "granica-panstwa",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "boundary",
+   "filter": [
+    "==",
+    "admin_level",
+    2
+   ],
+   "paint": {
+    "line-color": "#9A5A68",
+    "line-width": {
+     "stops": [
+      [
+       5,
+       1
+      ],
+      [
+       12,
+       2.5
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "id": "nazwy-drog",
+   "type": "symbol",
+   "source": "openmaptiles",
+   "source-layer": "transportation_name",
+   "minzoom": 14,
+   "layout": {
+    "text-field": "{name}",
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 10,
+    "text-max-width": 7,
+    "text-padding": 4,
+    "symbol-placement": "line"
+   },
+   "paint": {
+    "text-color": "#9AA7B4",
+    "text-halo-color": "#0B0F14",
+    "text-halo-width": 1.6
+   }
+  },
+  {
+   "id": "nazwy-wod",
+   "type": "symbol",
+   "source": "openmaptiles",
+   "source-layer": "water_name",
+   "minzoom": 11,
+   "layout": {
+    "text-field": "{name}",
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 11,
+    "text-max-width": 7,
+    "text-padding": 4
+   },
+   "paint": {
+    "text-color": "#6FA8D6",
+    "text-halo-color": "#0B0F14",
+    "text-halo-width": 1.6
+   }
+  },
+  {
+   "id": "szczyty",
+   "type": "symbol",
+   "source": "openmaptiles",
+   "source-layer": "mountain_peak",
+   "minzoom": 11,
+   "layout": {
+    "text-field": "{name} {ele} m",
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 11,
+    "text-max-width": 7,
+    "text-padding": 4
+   },
+   "paint": {
+    "text-color": "#C9D2DA",
+    "text-halo-color": "#0B0F14",
+    "text-halo-width": 1.6
+   }
+  },
+  {
+   "id": "wsie",
+   "type": "symbol",
+   "source": "openmaptiles",
+   "source-layer": "place",
+   "minzoom": 11,
+   "layout": {
+    "text-field": "{name}",
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 11,
+    "text-max-width": 7,
+    "text-padding": 4
+   },
+   "paint": {
+    "text-color": "#C9D2DA",
+    "text-halo-color": "#0B0F14",
+    "text-halo-width": 1.6
+   },
+   "filter": [
+    "in",
+    "class",
+    "village",
+    "hamlet",
+    "suburb"
+   ]
+  },
+  {
+   "id": "miasteczka",
+   "type": "symbol",
+   "source": "openmaptiles",
+   "source-layer": "place",
+   "minzoom": 8,
+   "layout": {
+    "text-field": "{name}",
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": {
+     "stops": [
+      [
+       8,
+       11
+      ],
+      [
+       13,
+       14
+      ]
+     ]
+    },
+    "text-max-width": 7,
+    "text-padding": 4
+   },
+   "paint": {
+    "text-color": "#F2F5F7",
+    "text-halo-color": "#0B0F14",
+    "text-halo-width": 1.6
+   },
+   "filter": [
+    "==",
+    "class",
+    "town"
+   ]
+  },
+  {
+   "id": "miasta",
+   "type": "symbol",
+   "source": "openmaptiles",
+   "source-layer": "place",
+   "minzoom": 5,
+   "layout": {
+    "text-field": "{name}",
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": {
+     "stops": [
+      [
+       5,
+       12
+      ],
+      [
+       12,
+       17
+      ]
+     ]
+    },
+    "text-max-width": 7,
+    "text-padding": 4
+   },
+   "paint": {
+    "text-color": "#F2F5F7",
+    "text-halo-color": "#0B0F14",
+    "text-halo-width": 1.6
+   },
+   "filter": [
+    "==",
+    "class",
+    "city"
+   ]
+  }
+ ]
+}

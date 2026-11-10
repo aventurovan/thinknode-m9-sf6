@@ -1,6 +1,6 @@
 #pragma once
-// ThinkNode M9 — WERSJA TESTOWA: zamiast interfejsu jeden ekran testu klawiatury.
-// Companion (Bluetooth, radio SF6) działa normalnie w tle.
+// ThinkNode M9 — WERSJA TESTOWA: zamiast interfejsu trzy strony testowe
+// (klawiatura, karta SD + GPS, mapa z karty). Companion (Bluetooth, radio SF6) działa normalnie w tle.
 
 #include <MeshCore.h>
 #include <helpers/ui/DisplayDriver.h>
@@ -11,33 +11,61 @@
 #include <AbstractUITask.h>
 #include <NodePrefs.h>
 #include "M9Keyboard.h"
+#include "M9Map.h"
 
 #define KBT_HISTORY 18
 
 class UITask : public AbstractUITask {
+  enum { PAGE_KB = 0, PAGE_SD = 1, PAGE_MAP = 2, PAGE_COUNT = 3 };
+
   DisplayDriver* _display;
   SensorManager* _sensors;
   NodePrefs* _node_prefs;
   M9Keyboard _kb;
+  M9Map _map;
 
+  int _page;
   unsigned long _next_refresh, _next_poll, _next_scan, _backlight_until;
   int _msgcount;
-  uint32_t _reads;                       // liczba odczytów po przerwaniu
-  int16_t _regs_irq[M9KB_NUM_REGS];      // rejestry odczytane zaraz po przerwaniu
-  int16_t _regs_now[M9KB_NUM_REGS];      // rejestry odczytywane co sekundę
+
+  // klawiatura
+  uint32_t _reads;
+  int16_t _regs_irq[M9KB_NUM_REGS];
+  int16_t _regs_now[M9KB_NUM_REGS];
   bool _have_irq_regs;
   struct { int16_t r1, r5; } _hist[KBT_HISTORY];
   int _hist_len;
+  int16_t _last_key; int _same_count; unsigned long _last_key_ms;
+
+  // karta SD
+  bool _sd_ok, _sd_tested;
+  uint8_t _sd_type;
+  uint32_t _sd_size_mb, _sd_free_mb, _sd_write_kbs, _sd_read_kbs;
+  unsigned long _next_sd_try;
+
+  // GPS
+  bool _gps_detected;
+  uint32_t _gps_probe_bytes;
+  bool _gps_probe;
+
+  // mapa
+  bool _map_mem, _map_dirty, _map_follow;
+  double _map_lat, _map_lon;
+  int _map_zoom, _map_tiles;
+  unsigned long _map_ms, _next_map;
 
   void addHistory(int16_t r1, int16_t r5);
-  void render();
+  void handleKey(int16_t r1, int16_t r5);
+  void nextPage();
+  void mountSD();
+  void testSD();
+  bool gpsFix(double* lat, double* lon, long* sats);
+  void renderKeyboard();
+  void renderSD();
+  void renderMap();
 
 public:
-  UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractUITask(board, serial), _display(NULL), _sensors(NULL) {
-    _next_refresh = _next_poll = _next_scan = _backlight_until = 0;
-    _msgcount = 0; _reads = 0; _hist_len = 0; _have_irq_regs = false;
-    _node_prefs = NULL;
-  }
+  UITask(mesh::MainBoard* board, MultiSerialInterface* serial);
   void begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* node_prefs);
 
   // z AbstractUITask

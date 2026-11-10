@@ -56,12 +56,22 @@ jobs:
           pio run -e $PIO_ENV -t mergebin
           ls -la .pio/build/$PIO_ENV/*.bin
 
+      - name: Test dekodera mapy i mapa testowa
+        run: |
+          pip install pillow numpy
+          cd m9/mapa
+          python3 pakuj_mape.py testowa --wyjscie ../../mapa-testowa/mapa > /dev/null
+          g++ -O2 -o /tmp/test_dekoder test/test_dekoder.cpp ../m9_sf6/ui-test/McmMap.cpp
+          /tmp/test_dekoder ../../mapa-testowa/mapa/z13_x4510.mcm 4529 2784 /tmp/kafelek.raw
+          cd ../../mapa-testowa && zip -q -r ../mapa-testowa.zip mapa
+
       - name: Zbierz pliki
         run: |
           VER=$(grep -oP 'M9_FW_VERSION\s+"\K[^"]+' m9/m9_sf6/Version.h)
           mkdir -p out
           cp MeshCore/.pio/build/$PIO_ENV/firmware-merged.bin out/MC-SF6-ThinkNode-M9-test-$VER-pelny.bin
           cp MeshCore/.pio/build/$PIO_ENV/firmware.bin out/MC-SF6-ThinkNode-M9-test-$VER-aktualizacja.bin
+          cp mapa-testowa.zip out/mapa-testowa.zip
 
       - uses: actions/upload-artifact@v4
         with:
@@ -76,7 +86,7 @@ jobs:
         run: |
           cd m9
           VER=$(grep -oP 'M9_FW_VERSION\s+"\K[^"]+' m9_sf6/Version.h)
-          NOTES="Automatyczny build z gałęzi main (wersja $VER, commit ${GITHUB_SHA::7}). Plik „pelny” wgraj od adresu 0x0 przy pierwszym wgraniu; plik „aktualizacja” służy do późniejszych aktualizacji."
+          NOTES="Automatyczny build z gałęzi main (wersja $VER, commit ${GITHUB_SHA::7}). Plik „pelny” wgraj od adresu 0x0 przy pierwszym wgraniu; plik „aktualizacja” służy do późniejszych aktualizacji. mapa-testowa.zip rozpakuj na kartę SD (folder mapa w głównym katalogu)."
           if ! gh release view latest-build >/dev/null 2>&1; then
             gh release create latest-build --prerelease --title "Najnowszy build ($VER)" --notes "$NOTES" --target "$GITHUB_SHA"
           else
