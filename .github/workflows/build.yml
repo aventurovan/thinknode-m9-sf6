@@ -1,0 +1,95 @@
+name: Build MC SF6 (ThinkNode M9)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  release:
+    types: [ published ]   # nowe wydanie z numerem wersji: build i dołączenie plików .bin
+
+env:
+  # wersja MeshCore, na ktorej budujemy (ta sama co firmware Wio; zmien, zeby przejsc na nowsza)
+  MESHCORE_REF: a366955cb2f67b8e6842d4f00d2b6a554dddd88a
+  PIO_ENV: ThinkNode_M9_sf6_test
+
+permissions:
+  contents: write   # publikacja plików .bin w wydaniu „Najnowszy build”
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pobierz nasz kod
+        uses: actions/checkout@v4
+        with:
+          path: m9
+
+      - name: Pobierz MeshCore
+        uses: actions/checkout@v4
+        with:
+          repository: meshcore-dev/MeshCore
+          ref: ${{ env.MESHCORE_REF }}
+          path: MeshCore
+
+      - name: Wstaw nasz kod do MeshCore
+        run: |
+          cp -r m9/m9_sf6 MeshCore/examples/
+          cat m9/platformio-m9.ini >> MeshCore/variants/thinknode_m9/platformio.ini
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-esp32-${{ runner.os }}-${{ env.MESHCORE_REF }}
+
+      - name: Zainstaluj PlatformIO
+        run: pip install -U platformio
+
+      - name: Buduj
+        working-directory: MeshCore
+        run: |
+          pio run -e $PIO_ENV
+          pio run -e $PIO_ENV -t mergebin
+          ls -la .pio/build/$PIO_ENV/*.bin
+
+      - name: Zbierz pliki
+        run: |
+          VER=$(grep -oP 'M9_FW_VERSION\s+"\K[^"]+' m9/m9_sf6/Version.h)
+          mkdir -p out
+          cp MeshCore/.pio/build/$PIO_ENV/firmware-merged.bin out/MC-SF6-ThinkNode-M9-test-$VER-pelny.bin
+          cp MeshCore/.pio/build/$PIO_ENV/firmware.bin out/MC-SF6-ThinkNode-M9-test-$VER-aktualizacja.bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MC-SF6-ThinkNode-M9
+          path: out/
+
+      # wydanie „Najnowszy build” (tag „latest-build”) jest nadpisywane przy każdym buildzie z gałęzi main
+      - name: Opublikuj w wydaniu „Najnowszy build”
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd m9
+          VER=$(grep -oP 'M9_FW_VERSION\s+"\K[^"]+' m9_sf6/Version.h)
+          NOTES="Automatyczny build z gałęzi main (wersja $VER, commit ${GITHUB_SHA::7}). Plik „pelny” wgraj od adresu 0x0 przy pierwszym wgraniu; plik „aktualizacja” służy do późniejszych aktualizacji."
+          if ! gh release view latest-build >/dev/null 2>&1; then
+            gh release create latest-build --prerelease --title "Najnowszy build ($VER)" --notes "$NOTES" --target "$GITHUB_SHA"
+          else
+            git tag -f latest-build "$GITHUB_SHA" && git push -f origin latest-build
+            gh release edit latest-build --title "Najnowszy build ($VER)" --notes "$NOTES" --prerelease
+            for a in $(gh release view latest-build --json assets -q '.assets[].name'); do gh release delete-asset latest-build "$a" -y; done
+          fi
+          gh release upload latest-build ../out/* --clobber
+
+      - name: Dołącz pliki do wydania
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd m9
+          gh release upload "${{ github.event.release.tag_name }}" ../out/* --clobber
