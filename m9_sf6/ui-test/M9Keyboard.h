@@ -18,18 +18,20 @@
 
 // kody klawiszy specjalnych (litery i cyfry to zwykłe ASCII)
 #define M9K_ENTER      0x0D
-#define M9K_BKSP       0x08
+#define M9K_BKSP       0x08   // Del
+#define M9K_BKSP_LONG  0x89   // Del przytrzymany
 #define M9K_LEFT       0xB4
 #define M9K_UP         0xB5
 #define M9K_DOWN       0xB6
 #define M9K_RIGHT      0xB7
-#define M9K_MSG        0x81
-#define M9K_HOME       0x82
-#define M9K_F3         0x83
-#define M9K_F4         0x84
-#define M9K_MAP        0x85
-#define M9K_BACK       0x86
-#define M9K_GPS_LONG   0x87
+#define M9K_MSG        0x81   // klawisz funkcyjny 1 (Czat)
+#define M9K_HOME       0x82   // Home
+#define M9K_F3         0x83   // klawisz funkcyjny 3
+#define M9K_F4         0x84   // klawisz funkcyjny 4 (GPS)
+#define M9K_MAP        0x85   // klawisz funkcyjny 5 (Mapa)
+#define M9K_BACK       0x86   // Mapa / FM przytrzymany
+#define M9K_GPS_LONG   0x87   // Preset
+#define M9K_NONE       0x88   // brak klawisza (wartość rejestru po odczycie)
 #define M9K_CTRL       0x90
 #define M9K_ENTER_LONG 0xA3
 

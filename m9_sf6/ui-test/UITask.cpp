@@ -189,13 +189,13 @@ void UITask::handleKey(int16_t key) {
   }
 
   // zmiana strony: klawisz Menu (0x82 wg Meshtastic) albo ten sam klawisz 5 razy pod rząd
-  if (IS(KEY_HOME) || IS(M9K_MSG)) { nextPage(); return; }
+  if (IS(KEY_HOME)) { nextPage(); return; }
   if (used) { _same_count = 0; return; }
   unsigned long now = millis();
   if (key >= 0 && key == _last_key && now - _last_key_ms < 3000) _same_count++; else _same_count = 1;
   _last_key = key;
   _last_key_ms = now;
-  if (_same_count >= 5) nextPage();
+  // (przełączanie stron tylko klawiszem Home)
   #undef IS
 }
 
@@ -271,10 +271,10 @@ void UITask::loop() {
 
 static const char* keyName(uint8_t k) {
   switch (k) {
-    case M9K_ENTER: return "Enter"; case M9K_BKSP: return "Del"; case ' ': return "Spacja";
+    case M9K_ENTER: return "Enter"; case M9K_BKSP: return "Del"; case M9K_BKSP_LONG: return "Del dl."; case ' ': return "Spacja";
     case M9K_LEFT: return "Lewo"; case M9K_UP: return "Gora"; case M9K_DOWN: return "Dol"; case M9K_RIGHT: return "Prawo";
-    case M9K_MSG: return "Czat"; case M9K_HOME: return "Home"; case M9K_F3: return "F3"; case M9K_F4: return "F4";
-    case M9K_MAP: return "Mapa"; case M9K_BACK: return "Wstecz"; case M9K_GPS_LONG: return "GPS dl."; case M9K_CTRL: return "Ctrl";
+    case M9K_MSG: return "F1"; case M9K_HOME: return "Home"; case M9K_F3: return "F3"; case M9K_F4: return "F4";
+    case M9K_MAP: return "F5"; case M9K_BACK: return "F5 dl."; case M9K_GPS_LONG: return "Preset"; case M9K_CTRL: return "Ctrl";
     case M9K_ENTER_LONG: return "OK dl.";
   }
   return NULL;
@@ -290,46 +290,30 @@ void UITask::renderKeyboard() {
   snprintf(line, sizeof(line), "M9 TEST %s [1/4] KLAWIATURA", M9_FW_VERSION);
   d.setCursor(0, ROW(0)); d.print(line);
 
-  if (_kb.isFound()) snprintf(line, sizeof(line), "0x%02X%c hw%02X fw%02X INT%d prz%lu bl%lu", _kb.addr(), _kb.bus() == 1 ? 'B' : 'A',
-                              _kb.hwVersion() & 0xFF, _kb.fwVersion() & 0xFF, _kb.intLevel() ? 1 : 0, (unsigned long)_kb.irqCount(), (unsigned long)_kb.errors());
+  if (_kb.isFound()) snprintf(line, sizeof(line), "Klaw. 0x%02X  klawiszy: %lu  bledy: %lu", _kb.addr(), (unsigned long)_reads, (unsigned long)_kb.errors());
   else strcpy(line, "Klawiatura: NIE ZNALEZIONA (szukam...)");
   d.setCursor(0, ROW(1)); d.print(line);
 
-  // ostatnie 3 naciśnięcia: rejestry 0-7 od razu / po 20 ms / po 100 ms
-  for (int n = 0; n < 4 && n < _kb.pressCount(); n++) {
-    M9Keyboard::Press p;
-    _kb.getPress(n, &p);
-    for (int s = 0; s < 1; s++) {
-      line[0] = 0;
-      if (s == 0) snprintf(line, sizeof(line), "%d>", n + 1); else strcpy(line, "  ");
-      for (int r = 0; r < M9KB_SNAP_REGS; r++) {
-        if (p.r[s][r] < 0) strcpy(tmp, " ER"); else snprintf(tmp, sizeof(tmp), " %02X", p.r[s][r]);
-        strlcat(line, tmp, sizeof(line));
-      }
-      if (s == 0) { snprintf(tmp, sizeof(tmp), "  =%02X", p.key); strlcat(line, tmp, sizeof(line)); }
-      d.setCursor(0, ROW(2 + n + s)); d.print(line);
-    }
-  }
-  if (_kb.pressCount() == 0) { d.setCursor(0, ROW(3)); d.print("(nacisnij klawisz)"); }
+  if (_hist_len > 0) {
+    uint8_t k = _hist[_hist_len - 1];
+    const char* nm = keyName(k);
+    if (nm) snprintf(line, sizeof(line), "Ostatni: %02X  %s", k, nm);
+    else if (k > 32 && k < 127) snprintf(line, sizeof(line), "Ostatni: %02X  '%c'", k, (char)k);
+    else snprintf(line, sizeof(line), "Ostatni: %02X  (bez nazwy)", k);
+  } else strcpy(line, "Ostatni: (nacisnij klawisz)");
+  d.setCursor(0, ROW(3)); d.print(line);
 
-  d.setCursor(0, ROW(7)); d.print("Klawisze (kod i znak):");
-  for (int row = 0; row < 3; row++) {
+  d.setCursor(0, ROW(5)); d.print("Historia (kod i znak):");
+  for (int row = 0; row < 5; row++) {
     line[0] = 0;
-    int start = _hist_len > 24 ? _hist_len - 24 : 0;
-    for (int i = start + row * 8; i < start + row * 8 + 8 && i < _hist_len; i++) {
+    for (int i = row * 7; i < row * 7 + 7 && i < _hist_len; i++) {
       uint8_t k = _hist[i];
-      if (k > 32 && k < 127) snprintf(tmp, sizeof(tmp), "%02X%c ", k, (char)k); else snprintf(tmp, sizeof(tmp), "%02X  ", k);
+      if (k > 32 && k < 127) snprintf(tmp, sizeof(tmp), "%02X%c  ", k, (char)k); else snprintf(tmp, sizeof(tmp), "%02X   ", k);
       strlcat(line, tmp, sizeof(line));
     }
-    d.setCursor(0, ROW(8 + row)); d.print(line);
+    d.setCursor(0, ROW(6 + row)); d.print(line);
   }
-  line[0] = 0;
-  for (int i = 0; i < 0; i++) {
-    uint8_t k = _hist[i];
-    if (k > 32 && k < 127) snprintf(tmp, sizeof(tmp), "%02X%c ", k, (char)k); else snprintf(tmp, sizeof(tmp), "%02X ", k);
-    strlcat(line, tmp, sizeof(line));
-  }
-  d.setCursor(0, 59); d.print("Nast. strona: Home / Czat");
+  d.setCursor(0, 59); d.print("Nast. strona: Home");
   d.endFrame();
 }
 

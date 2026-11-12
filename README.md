@@ -7,7 +7,7 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 
 ## Stan prac
 
-**Wersja testowa 0.4.4** — companion Bluetooth działa z aplikacją MeshCore (PIN **123456**), a na ekranie
+**Wersja testowa 0.5.0** — companion Bluetooth działa z aplikacją MeshCore (PIN **123456**), a na ekranie
 zamiast interfejsu są **cztery strony testowe**:
 
 1. **Klawiatura** — wykryta klawiatura, wersja kontrolera, ostatni klawisz z nazwą i historia 35 naciśnięć.
@@ -17,10 +17,12 @@ zamiast interfejsu są **cztery strony testowe**:
 4. **Wgrywanie mapy** — karta w M9 jest wbudowana, więc pliki mapy wgrywa się przez WiFi:
    urządzenie tworzy sieć **M9-MAPA** (hasło `mapa12345`), a strona `http://192.168.4.1` przyjmuje pliki `.mcm`.
 
-Następna strona: klawisz **Home** albo **Czat** (albo ten sam klawisz 5 razy pod rząd).
+Następna strona: klawisz **Home**.
 
-Ustalone: klawiatura pod adresem 0x6C/0x6D na magistrali SDA 20 / SCL 21 (piny wspólne z wbudowanym USB procesora —
-firmware odłącza od nich USB), kod klawisza w rejestrze 0x05, przerwanie na pinie 12; karta SD i kolorowy ekran działają na wspólnej magistrali SPI; GPS włącza się stanem LOW.
+Klawiatura (protokół opisany i potwierdzony na sprzęcie w projekcie Launcher, `boards/elecrow-thinknode-m9/connections.md`):
+kontroler pod adresem 0x6C (płytka v1.0) albo 0x6D (v1.1) na magistrali SDA 20 / SCL 21; rejestr 0x01 trzyma oczekujący klawisz
+do odczytu, po odczycie zwraca 0x88; numer rejestru trzeba wysłać osobną transmisją (STOP) przed odczytem; linia KB_INT (pin 12)
+pojawia się tylko dla niektórych klawiszy, więc rejestr jest odpytywany. Karta SD i kolorowy ekran działają na wspólnej magistrali SPI.
 
 Mapa: narzędzia i instrukcja są w folderze [`mapa`](mapa/README.md).
 

@@ -32,6 +32,7 @@ void M9Keyboard::find() {
         _wire = buses[b]; _bus = b == 0 ? 1 : 0; _addr = addrs[i];
         _hw = readReg(0x00);
         _fw = readReg(0xFE);
+        for (int n = 0; n < 4; n++) { int k = readReg(0x01); if (k <= 0 || k == M9K_NONE || k == 0xFF) break; }   // zdejmij stary klawisz
         return;
       }
 }
@@ -51,11 +52,13 @@ void M9Keyboard::begin() {
   xTaskCreatePinnedToCore(kbTask, "m9kb", 4096, NULL, 3, &kb_task, 1);
 }
 
+// Numer rejestru wysyłamy jako osobną, zakończoną transmisję (STOP), dopiero potem czytamy bajt.
+// Kontroler nie odpowiada poprawnie na „powtórzony start” — przez to wcześniejsze wersje czytały przesunięte wartości.
 int M9Keyboard::readReg(uint8_t reg) {
   if (_wire == NULL) return -1;
   _wire->beginTransmission(_addr);
   _wire->write(reg);
-  if (_wire->endTransmission(false) != 0) { _errors++; return -1; }
+  if (_wire->endTransmission(true) != 0) { _errors++; return -1; }
   if (_wire->requestFrom((int)_addr, 1) != 1) { _errors++; return -1; }
   return _wire->read();
 }
@@ -71,40 +74,25 @@ void M9Keyboard::push(uint8_t k) {
 
 static bool isKey(int k) { return k > 0 && k != 0xFF; }
 
-// Ustalone na urządzeniu (V2, 0x6D): kontroler odpowiada z opóźnieniem o jeden odczyt, więc rejestr 0x01
-// czytamy dwa razy pod rząd — drugi odczyt daje kod klawisza. W spoczynku rejestr ma wartość 0x03.
-// Kontroler najpewniej usypia bez ruchu na magistrali (wtedy przerwanie dają tylko niektóre klawisze),
-// dlatego odpytujemy go co 40 ms. Nowy klawisz = przerwanie albo zmiana wartości rejestru.
-static bool idleValue(int v) { return v < 0 || v == 0x00 || v == 0x03 || v == 0xFF; }
-
+// Protokół (potwierdzony na sprzęcie w otwartym projekcie Launcher, boards/elecrow-thinknode-m9/connections.md):
+//  - rejestr 0x01 trzyma jeden oczekujący klawisz aż do odczytu; po odczycie zwraca 0x88 („brak klawisza”),
+//  - linia KB_INT to tylko „budzenie” i pojawia się dla nielicznych klawiszy (np. Enter), więc rejestr trzeba odpytywać,
+//  - rejestr 0x05 nie jest rejestrem klawisza (zwraca 0xFF).
 void M9Keyboard::taskLoop() {
   if (_addr == 0) {
     vTaskDelay(pdMS_TO_TICKS(2000));
     find();
     return;
   }
-  bool irq = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(40)) != 0;
-  if (!irq && digitalRead(M9KB_PIN_INT) == HIGH) irq = true;
+  ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(25));     // przerwanie tylko skraca czekanie
 
-  int a = readReg(0x01);
-  int b = readReg(0x01);
-  bool changed = b != _last_val;
-  int k = 0;
-  if (!idleValue(b) && (irq || changed)) k = b;
-  _last_val = b;
-  if (!irq && !k) return;
-
-  Press p;
-  for (int s2 = 0; s2 < M9KB_SNAPS; s2++) for (int r = 0; r < M9KB_SNAP_REGS; r++) p.r[s2][r] = -1;
-  p.r[0][0] = a; p.r[0][1] = b; p.r[0][2] = irq; p.r[0][3] = changed; p.r[0][4] = digitalRead(M9KB_PIN_INT);
-  p.key = (uint8_t)k;
-
-  portENTER_CRITICAL(&_mux);
-  if (_press_len == 4) { memmove(&_press[0], &_press[1], sizeof(Press) * 3); _press_len = 3; }
-  _press[_press_len] = p;
-  _press_len = _press_len + 1;
-  if (k) push((uint8_t)k);
-  portEXIT_CRITICAL(&_mux);
+  for (int n = 0; n < 4; n++) {                    // kilka pod rząd, gdyby czekało więcej klawiszy
+    int k = readReg(0x01);
+    if (k <= 0 || k == M9K_NONE || k == 0xFF) break;
+    portENTER_CRITICAL(&_mux);
+    push((uint8_t)k);
+    portEXIT_CRITICAL(&_mux);
+  }
 }
 
 uint8_t M9Keyboard::readKey() {
