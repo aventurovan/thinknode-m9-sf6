@@ -14,7 +14,6 @@
 #include "M9Map.h"
 
 #define KBT_HISTORY 35
-#define M9KB_REG_KEY 2     // kod klawisza jest w rejestrze 0x02 (potwierdzone na V2), 0 = nic
 
 class UITask : public AbstractUITask {
   enum { PAGE_KB = 0, PAGE_SD = 1, PAGE_MAP = 2, PAGE_WIFI = 3, PAGE_COUNT = 4 };
@@ -31,10 +30,7 @@ class UITask : public AbstractUITask {
 
   // klawiatura
   uint32_t _reads;
-  int16_t _regs_irq[M9KB_NUM_REGS];
-  int16_t _regs_now[M9KB_NUM_REGS];
-  bool _have_irq_regs;
-  uint16_t _hist[KBT_HISTORY];          // (rejestr << 8) | wartość; 0xFFFF = przerwanie bez zmiany rejestrów
+  uint8_t _hist[KBT_HISTORY];
   int _hist_len;
   int16_t _last_key; int _same_count; unsigned long _last_key_ms;
 
@@ -56,7 +52,7 @@ class UITask : public AbstractUITask {
   int _map_zoom, _map_tiles;
   unsigned long _map_ms, _next_map;
 
-  void addHistory(uint16_t ev);
+  void addHistory(uint8_t key);
   void handleKey(int16_t key);
   void nextPage();
   void mountSD();

@@ -1,4 +1,6 @@
 #include "M9Keyboard.h"
+#include <soc/soc.h>
+#include <soc/usb_serial_jtag_reg.h>
 
 static volatile uint32_t kb_irq_count = 0;
 static volatile bool kb_irq_flag = false;
@@ -13,7 +15,8 @@ void M9Keyboard::begin() {
   pinMode(M9KB_PIN_LED, OUTPUT);
   setBacklight(true);
 
-  // Wire (magistrala peryferiów) uruchamia płytka w board.begin(); drugą uruchamiamy tutaj
+  // odłączamy wbudowane USB od pinów 20/21 (M9 ma osobny układ USB-UART), żeby I2C klawiatury działało poprawnie
+  REG_CLR_BIT(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
   Wire1.begin(M9KB_BUS1_SDA, M9KB_BUS1_SCL, 100000);
 
   scan();
@@ -35,6 +38,12 @@ void M9Keyboard::scan() {
       }
     }
   }
+  if (_wire) {
+    _hw = readReg(M9KB_REG_HW);
+    _fw = readReg(M9KB_REG_FW);
+    _key_reg = (_hw == 0x03 && _fw == 0x10) ? M9KB_REG_KEY_EARLY : M9KB_REG_KEY;
+    for (int i = 0; i < 4 && readKey() != 0; i++) { }    // zdejmij klawisz zapamiętany przed startem
+  }
 }
 
 int M9Keyboard::readReg(uint8_t reg) {
@@ -46,14 +55,16 @@ int M9Keyboard::readReg(uint8_t reg) {
   return _wire->read();
 }
 
-void M9Keyboard::readRegs(int16_t* dest, uint8_t count) {
-  for (uint8_t i = 0; i < count; i++) dest[i] = (int16_t)readReg(i);
+uint8_t M9Keyboard::readKey() {
+  if (_wire == NULL) return 0;
+  unsigned long now = millis();
+  if (!kb_irq_flag && (long)(now - _next_poll) < 0) return 0;
+  kb_irq_flag = false;
+  _next_poll = now + 100;
+  int k = readReg(_key_reg);
+  if (k <= 0 || k == 0xFF) return 0;
+  _next_poll = now;          // był klawisz: od razu sprawdź, czy nie czeka następny
+  return (uint8_t)k;
 }
 
 uint32_t M9Keyboard::irqCount() const { return kb_irq_count; }
-
-bool M9Keyboard::takeIrq() {
-  if (!kb_irq_flag) return false;
-  kb_irq_flag = false;
-  return true;
-}

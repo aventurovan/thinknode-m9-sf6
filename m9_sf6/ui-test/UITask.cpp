@@ -12,13 +12,13 @@
 #define M9_SD_FREQ       40000000
 #define M9_SD_FREQ_SLOW  20000000
 
-// kody klawiszy wg Meshtastic — do potwierdzenia tym testem
-#define KEY_UP     0xB5
-#define KEY_DOWN   0xB6
-#define KEY_LEFT   0xB4
-#define KEY_RIGHT  0xB7
-#define KEY_ENTER  0x0D
-#define KEY_HOME   0x82
+// kody klawiszy: M9Keyboard.h
+#define KEY_UP     M9K_UP
+#define KEY_DOWN   M9K_DOWN
+#define KEY_LEFT   M9K_LEFT
+#define KEY_RIGHT  M9K_RIGHT
+#define KEY_ENTER  M9K_ENTER
+#define KEY_HOME   M9K_HOME
 
 // gdy nie ma pozycji z GPS: środek mapy w Bielsku-Białej
 #define DEF_LAT  49.8225
@@ -27,20 +27,12 @@
 // wiersze tekstu: czcionka 16 px, współrzędne logiczne ekranu 128x64 (1 jednostka w pionie = 3,75 px)
 #define ROW(n)  ((n) * 5)
 
-static void hexList(char* dest, size_t size, const int16_t* v, int n) {
-  dest[0] = 0;
-  for (int i = 0; i < n; i++) {
-    char t[6];
-    if (v[i] < 0) strcpy(t, "-- "); else snprintf(t, sizeof(t), "%02X ", (unsigned)v[i]);
-    strlcat(dest, t, size);
-  }
-}
 
 UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractUITask(board, serial), _display(NULL), _sensors(NULL) {
   _node_prefs = NULL;
   _page = PAGE_KB;
   _next_refresh = _next_poll = _next_scan = _backlight_until = 0;
-  _msgcount = 0; _reads = 0; _hist_len = 0; _have_irq_regs = false;
+  _msgcount = 0; _reads = 0; _hist_len = 0;
   _last_key = -1; _same_count = 0; _last_key_ms = 0;
   _sd_ok = _sd_tested = false; _sd_type = 0;
   _sd_pending = true; _sd_free_done = false; _wifi_failed = false;
@@ -57,7 +49,6 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   _node_prefs = node_prefs;
 
   pinMode(M9_PIN_EXT_PWR, INPUT);
-  for (int i = 0; i < M9KB_NUM_REGS; i++) { _regs_irq[i] = -1; _regs_now[i] = -1; }
 
   _kb.begin();
   _backlight_until = millis() + 5000;
@@ -145,7 +136,7 @@ bool UITask::gpsFix(double* lat, double* lon, long* sats) {
 
 // ---------------- klawisze ----------------
 
-void UITask::addHistory(uint16_t key) {
+void UITask::addHistory(uint8_t key) {
   if (_hist_len == KBT_HISTORY) {
     memmove(&_hist[0], &_hist[1], sizeof(_hist[0]) * (KBT_HISTORY - 1));
     _hist_len--;
@@ -185,11 +176,11 @@ void UITask::handleKey(int16_t key) {
       _map_follow = false;
       used = true;
     }
-    if (IS('i') || IS('I')) {              // bliżej: następny zoom, który jest na karcie
+    if (IS('i') || IS('I') || IS('+')) {              // bliżej: następny zoom, który jest na karcie
       for (int z = _map_zoom + 1; z <= _map.maxZoom(); z++) if (_map.numPacks() == 0 || _map.hasZoom(z)) { _map_zoom = z; break; }
       used = true;
     }
-    if (IS('o') || IS('O')) {
+    if (IS('o') || IS('O') || IS('-')) {
       for (int z = _map_zoom - 1; z >= _map.minZoom(); z--) if (_map.numPacks() == 0 || _map.hasZoom(z)) { _map_zoom = z; break; }
       used = true;
     }
@@ -198,7 +189,7 @@ void UITask::handleKey(int16_t key) {
   }
 
   // zmiana strony: klawisz Menu (0x82 wg Meshtastic) albo ten sam klawisz 5 razy pod rząd
-  if (IS(KEY_HOME)) { nextPage(); return; }
+  if (IS(KEY_HOME) || IS(M9K_MSG)) { nextPage(); return; }
   if (used) { _same_count = 0; return; }
   unsigned long now = millis();
   if (key >= 0 && key == _last_key && now - _last_key_ms < 3000) _same_count++; else _same_count = 1;
@@ -214,36 +205,21 @@ void UITask::loop() {
   unsigned long now = millis();
   bool dirty = false;
 
-  // naciśnięcie: przerwanie z klawiatury -> od razu czytamy wszystkie rejestry
-  if (_kb.takeIrq()) {
-    _kb.readRegs(_regs_irq, M9KB_NUM_REGS);
-    _have_irq_regs = true;
+  // klawisze: odczyt po przerwaniu (i co 100 ms na wszelki wypadek); kontroler pamięta jeden klawisz naraz
+  for (int n = 0; n < 4; n++) {
+    uint8_t key = _kb.readKey();
+    if (key == 0) break;
     _reads++;
-    // co się zmieniło względem stanu spoczynkowego (odczyt co sekundę)? każdą zmianę zapisujemy w historii
-    int16_t key = -1;
-    int changes = 0;
-    for (int i = 0; i < M9KB_NUM_REGS; i++) {
-      if (_regs_irq[i] >= 0 && _regs_irq[i] != _regs_now[i]) {
-        addHistory((uint16_t)((i << 8) | (_regs_irq[i] & 0xFF)));
-        if (key < 0) key = _regs_irq[i];
-        changes++;
-      }
-    }
-    if (changes == 0) { addHistory(0xFFFF); key = 0x1FF; }
+    addHistory(key);
     _backlight_until = now + 5000;
     _kb.setBacklight(true);
-    Serial.printf("KB irq #%lu:", (unsigned long)_kb.irqCount());
-    for (int i = 0; i < M9KB_NUM_REGS; i++) Serial.printf(" R%d=%d", i, (int)_regs_irq[i]);
-    Serial.println();
+    Serial.printf("KB key 0x%02X\n", key);
     handleKey(key);
-    _next_poll = now + 1000;        // stan spoczynkowy czytamy najwcześniej sekundę po naciśnięciu
     dirty = true;
   }
 
-  // co sekundę odczyt rejestrów bez przerwania (widać, co w nich zostaje między naciśnięciami)
   if ((long)(now - _next_poll) >= 0) {
     _next_poll = now + 1000;
-    if (_kb.isFound()) _kb.readRegs(_regs_now, M9KB_NUM_REGS);
     dirty = true;
   }
 
@@ -300,8 +276,19 @@ void UITask::loop() {
 
 // ---------------- strony ----------------
 
+static const char* keyName(uint8_t k) {
+  switch (k) {
+    case M9K_ENTER: return "Enter"; case M9K_BKSP: return "Del"; case ' ': return "Spacja";
+    case M9K_LEFT: return "Lewo"; case M9K_UP: return "Gora"; case M9K_DOWN: return "Dol"; case M9K_RIGHT: return "Prawo";
+    case M9K_MSG: return "Czat"; case M9K_HOME: return "Home"; case M9K_F3: return "F3"; case M9K_F4: return "F4";
+    case M9K_MAP: return "Mapa"; case M9K_BACK: return "Wstecz"; case M9K_GPS_LONG: return "GPS dl."; case M9K_CTRL: return "Ctrl";
+    case M9K_ENTER_LONG: return "OK dl.";
+  }
+  return NULL;
+}
+
 void UITask::renderKeyboard() {
-  char line[96], tmp[64];
+  char line[96], tmp[32];
   DisplayDriver& d = *_display;
 
   d.startFrame();
@@ -310,34 +297,34 @@ void UITask::renderKeyboard() {
   snprintf(line, sizeof(line), "M9 TEST %s  [1/4] KLAWIATURA", M9_FW_VERSION);
   d.setCursor(0, ROW(0)); d.print(line);
 
-  if (_kb.isFound()) snprintf(line, sizeof(line), "Klaw. 0x%02X  INT=%d  przerwan: %lu", _kb.addr(), _kb.intLevel() ? 1 : 0, (unsigned long)_kb.irqCount());
+  if (_kb.isFound()) snprintf(line, sizeof(line), "Klaw. 0x%02X hw %02X fw %02X rej %02X", _kb.addr(), _kb.hwVersion() & 0xFF, _kb.fwVersion() & 0xFF, _kb.keyReg());
   else strcpy(line, "Klawiatura: NIE ZNALEZIONA (szukam...)");
   d.setCursor(0, ROW(1)); d.print(line);
+  snprintf(line, sizeof(line), "Przerwan: %lu  klawiszy: %lu", (unsigned long)_kb.irqCount(), (unsigned long)_reads);
+  d.setCursor(0, ROW(2)); d.print(line);
 
-  // rejestry 0..15: zaraz po naciśnięciu i w spoczynku
-  if (_have_irq_regs) {
-    hexList(tmp, sizeof(tmp), _regs_irq, 8); snprintf(line, sizeof(line), "Klawisz 0-7: %s", tmp);
-    d.setCursor(0, ROW(2)); d.print(line);
-    hexList(tmp, sizeof(tmp), _regs_irq + 8, 8); snprintf(line, sizeof(line), "Klawisz 8-F: %s", tmp);
-    d.setCursor(0, ROW(3)); d.print(line);
-  } else {
-    d.setCursor(0, ROW(2)); d.print("Klawisz: (nacisnij klawisz)");
-  }
-  hexList(tmp, sizeof(tmp), _regs_now, 8); snprintf(line, sizeof(line), "Spocz. 0-7: %s", tmp);
-  d.setCursor(0, ROW(4)); d.print(line);
-  hexList(tmp, sizeof(tmp), _regs_now + 8, 8); snprintf(line, sizeof(line), "Spocz. 8-F: %s", tmp);
-  d.setCursor(0, ROW(5)); d.print(line);
+  // ostatni klawisz dużo
+  if (_hist_len > 0) {
+    uint8_t k = _hist[_hist_len - 1];
+    const char* nm = keyName(k);
+    if (nm) snprintf(line, sizeof(line), "Ostatni: %02X  %s", k, nm);
+    else if (k > 32 && k < 127) snprintf(line, sizeof(line), "Ostatni: %02X  '%c'", k, (char)k);
+    else snprintf(line, sizeof(line), "Ostatni: %02X  (nieznany)", k);
+  } else strcpy(line, "Ostatni: (nacisnij klawisz)");
+  d.setCursor(0, ROW(3)); d.print(line);
 
-  // historia: który rejestr zmienił się po naciśnięciu i na jaką wartość (rejestr:wartość), "--" = nic się nie zmieniło
-  d.setCursor(0, ROW(6)); d.print(_hist_len == 0 ? "Historia: pusta" : "Historia (rejestr:wartosc):");
+  // historia: kod i znak
+  d.setCursor(0, ROW(5)); d.print("Historia, najnowsze na koncu:");
   for (int row = 0; row < 5; row++) {
     line[0] = 0;
     for (int i = row * 7; i < row * 7 + 7 && i < _hist_len; i++) {
-      if (_hist[i] == 0xFFFF) strcpy(tmp, "--   "); else snprintf(tmp, sizeof(tmp), "%X:%02X  ", _hist[i] >> 8, _hist[i] & 0xFF);
+      uint8_t k = _hist[i];
+      if (k > 32 && k < 127) snprintf(tmp, sizeof(tmp), "%02X%c  ", k, (char)k); else snprintf(tmp, sizeof(tmp), "%02X   ", k);
       strlcat(line, tmp, sizeof(line));
     }
-    d.setCursor(0, ROW(7 + row)); d.print(line);
+    d.setCursor(0, ROW(6 + row)); d.print(line);
   }
+  d.setCursor(0, 59); d.print("Nast. strona: Home / Czat albo 5x ten sam");
   d.endFrame();
 }
 

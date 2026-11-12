@@ -7,20 +7,20 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 
 ## Stan prac
 
-**Wersja testowa 0.3.1** — companion Bluetooth działa z aplikacją MeshCore (PIN **123456**), a na ekranie
+**Wersja testowa 0.4.0** — companion Bluetooth działa z aplikacją MeshCore (PIN **123456**), a na ekranie
 zamiast interfejsu są **cztery strony testowe**:
 
-1. **Klawiatura** — wykryta klawiatura, rejestry i historia 28 naciśnięć (kod i znak).
+1. **Klawiatura** — wykryta klawiatura, wersja kontrolera, ostatni klawisz z nazwą i historia 35 naciśnięć.
 2. **Karta SD + GPS** — typ i rozmiar karty, prędkość, pliki mapy, stan GPS, bateria, pamięć.
 3. **Mapa** — kolorowa mapa z karty SD (folder `/mapa`), wyśrodkowana na pozycji z GPS.
    Krzyżak przesuwa, `I` / `O` zmienia zoom, Enter wraca do pozycji GPS.
 4. **Wgrywanie mapy** — karta w M9 jest wbudowana, więc pliki mapy wgrywa się przez WiFi:
    urządzenie tworzy sieć **M9-MAPA** (hasło `mapa12345`), a strona `http://192.168.4.1` przyjmuje pliki `.mcm`.
 
-Następna strona: **ten sam klawisz 5 razy pod rząd**.
+Następna strona: klawisz **Home** albo **Czat** (albo ten sam klawisz 5 razy pod rząd).
 
-Ustalone na urządzeniu (V2): klawiatura pod adresem 0x6D na magistrali SDA 20 / SCL 21, kod klawisza w rejestrze 0x02,
-przerwanie na pinie 12; karta SD i kolorowy ekran działają na wspólnej magistrali SPI; GPS włącza się stanem LOW.
+Ustalone: klawiatura pod adresem 0x6C/0x6D na magistrali SDA 20 / SCL 21 (piny wspólne z wbudowanym USB procesora —
+firmware odłącza od nich USB), kod klawisza w rejestrze 0x05, przerwanie na pinie 12; karta SD i kolorowy ekran działają na wspólnej magistrali SPI; GPS włącza się stanem LOW.
 
 Mapa: narzędzia i instrukcja są w folderze [`mapa`](mapa/README.md).
 
