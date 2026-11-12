@@ -313,16 +313,36 @@ void UITask::renderKeyboard() {
   } else strcpy(line, "Ostatni: (nacisnij klawisz)");
   d.setCursor(0, ROW(3)); d.print(line);
 
-  // historia: kod i znak
-  d.setCursor(0, ROW(5)); d.print("Historia, najnowsze na koncu:");
-  for (int row = 0; row < 5; row++) {
+  // diagnostyka odczytu: ostatnie przerwania, co zwrócił każdy sposób (ER = błąd I2C)
+  snprintf(line, sizeof(line), "Bledy I2C: %lu   [05 01 02 | bez rej.]", (unsigned long)_kb.read_errors);
+  d.setCursor(0, ROW(4)); d.print(line);
+  {
+    char o[4][4];
     line[0] = 0;
-    for (int i = row * 7; i < row * 7 + 7 && i < _hist_len; i++) {
+    for (int i = 0; i < _kb.diag_len && i < 6; i++) {
+      const M9Keyboard::Diag& g = _kb.diag[_kb.diag_len - 1 - i];
+      int16_t v[5] = { g.r05, g.r01, g.r02, g.raw0, g.raw1 };
+      char t[40]; t[0] = 0;
+      for (int q = 0; q < 5; q++) {
+        char x[6];
+        if (v[q] < 0) strcpy(x, "ER"); else snprintf(x, sizeof(x), "%02X", v[q]);
+        strlcat(t, x, sizeof(t)); strlcat(t, q == 2 ? " | " : " ", sizeof(t));
+      }
+      d.setCursor(0, ROW(5 + i)); d.print(t);
+    }
+    (void)o;
+  }
+
+  // historia: kod i znak
+  d.setCursor(0, ROW(11)); d.print("Hist:");
+  for (int row = 0; row < 1; row++) {
+    line[0] = 0;
+    for (int i = _hist_len > 6 ? _hist_len - 6 : 0; i < _hist_len; i++) {
       uint8_t k = _hist[i];
-      if (k > 32 && k < 127) snprintf(tmp, sizeof(tmp), "%02X%c  ", k, (char)k); else snprintf(tmp, sizeof(tmp), "%02X   ", k);
+      if (k > 32 && k < 127) snprintf(tmp, sizeof(tmp), "%02X%c ", k, (char)k); else snprintf(tmp, sizeof(tmp), "%02X ", k);
       strlcat(line, tmp, sizeof(line));
     }
-    d.setCursor(0, ROW(6 + row)); d.print(line);
+    d.setCursor(30, ROW(11)); d.print(line);
   }
   d.setCursor(0, 59); d.print("Nast. strona: Home / Czat albo 5x ten sam");
   d.endFrame();

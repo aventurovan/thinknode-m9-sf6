@@ -59,6 +59,13 @@ public:
   int16_t fwVersion() const { return _fw; }
 
   int  readReg(uint8_t reg);   // -1 = błąd odczytu
+  int  readRaw(uint8_t* buf, int n);   // odczyt bez wskazania rejestru; zwraca liczbę bajtów
+
+  // diagnostyka: co dały różne sposoby odczytu przy ostatnim przerwaniu
+  struct Diag { int16_t r05, r01, r02, raw0, raw1; };
+  Diag diag[6];
+  int diag_len = 0;
+  uint32_t read_errors = 0;
   // następny klawisz (0 = brak). Czyta po przerwaniu, a dodatkowo co 100 ms na wypadek zgubionego impulsu.
   uint8_t readKey();
 
