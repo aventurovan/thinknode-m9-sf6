@@ -290,8 +290,8 @@ void UITask::renderKeyboard() {
   snprintf(line, sizeof(line), "M9 TEST %s [1/4] KLAWIATURA", M9_FW_VERSION);
   d.setCursor(0, ROW(0)); d.print(line);
 
-  if (_kb.isFound()) snprintf(line, sizeof(line), "0x%02X bus%c hw%02X fw%02X prz%lu bl%lu", _kb.addr(), _kb.bus() == 1 ? 'B' : 'A',
-                              _kb.hwVersion() & 0xFF, _kb.fwVersion() & 0xFF, (unsigned long)_kb.irqCount(), (unsigned long)_kb.errors());
+  if (_kb.isFound()) snprintf(line, sizeof(line), "0x%02X%c hw%02X fw%02X INT%d prz%lu bl%lu", _kb.addr(), _kb.bus() == 1 ? 'B' : 'A',
+                              _kb.hwVersion() & 0xFF, _kb.fwVersion() & 0xFF, _kb.intLevel() ? 1 : 0, (unsigned long)_kb.irqCount(), (unsigned long)_kb.errors());
   else strcpy(line, "Klawiatura: NIE ZNALEZIONA (szukam...)");
   d.setCursor(0, ROW(1)); d.print(line);
 

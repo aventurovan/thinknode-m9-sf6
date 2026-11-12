@@ -47,8 +47,8 @@ void M9Keyboard::begin() {
   find();
 
   kb_self = this;
-  xTaskCreatePinnedToCore(kbTask, "m9kb", 4096, NULL, 3, &kb_task, 1);
   attachInterrupt(digitalPinToInterrupt(M9KB_PIN_INT), kbIsr, RISING);
+  xTaskCreatePinnedToCore(kbTask, "m9kb", 4096, NULL, 3, &kb_task, 1);
 }
 
 int M9Keyboard::readReg(uint8_t reg) {
@@ -71,34 +71,37 @@ void M9Keyboard::push(uint8_t k) {
 
 static bool isKey(int k) { return k > 0 && k != 0xFF; }
 
+// Kontroler odpowiada z opóźnieniem o jeden odczyt (bajt do wysłania przygotowuje przed przyjęciem numeru rejestru),
+// dlatego ten sam rejestr czytamy dwa razy pod rząd, a zrzut 0x00–0x07 robimy po kolei.
 void M9Keyboard::taskLoop() {
   if (_addr == 0) {                               // klawiatury nie ma: szukamy co 2 s
     vTaskDelay(pdMS_TO_TICKS(2000));
     find();
     return;
   }
-  // czekamy na przerwanie (bez odpytywania: to ono powodowało „samoczynne” powtarzanie Entera)
-  if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000)) == 0) return;
+  // czekamy na przerwanie; dodatkowo co 20 ms sprawdzamy, czy linia INT nie wisi w stanie wysokim
+  // (zgłoszenie, którego nikt nie odebrał, blokuje kolejne zbocza)
+  bool irq = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(20)) != 0;
+  if (!irq && digitalRead(M9KB_PIN_INT) == LOW) return;
 
   Press p;
-  // od razu: najpierw rejestr 0x01 osobno (tak czyta klawisz V2 w innych projektach), potem 0x00–0x07
-  int first01 = readReg(0x01);
-  snapshot(p.r[0]);
-  vTaskDelay(pdMS_TO_TICKS(20));
-  snapshot(p.r[1]);
-  vTaskDelay(pdMS_TO_TICKS(80));
-  snapshot(p.r[2]);
+  int a = readReg(0x01);
+  int b = readReg(0x01);
+  int c = readReg(0x02);
+  int d = readReg(0x02);
+  snapshot(p.r[0]);                               // 0x00–0x07 po kolei
+  p.r[1][0] = a; p.r[1][1] = b; p.r[1][2] = c; p.r[1][3] = d;
+  p.r[1][4] = digitalRead(M9KB_PIN_INT); p.r[1][5] = irq; p.r[1][6] = -1; p.r[1][7] = -1;
 
-  // klawisz: 0x05, potem 0x01 (o ile nie jest to stała 0x03), potem dowolny rejestr, który zmienił się względem spoczynku
   int k = 0;
-  if (isKey(p.r[0][5]) && p.r[0][5] != p.r[2][5]) k = p.r[0][5];
-  else if (isKey(first01) && first01 != 0x03) k = first01;
-  else if (isKey(p.r[0][5]) && p.r[0][5] != 0xB8) k = p.r[0][5];
-  else {
-    for (int i = 0; i < M9KB_SNAP_REGS && !k; i++)
-      if (isKey(p.r[0][i]) && p.r[0][i] != p.r[2][i]) k = p.r[0][i];
-  }
+  const int cand[4] = { b, d, a, c };
+  for (int i = 0; i < 4 && !k; i++) if (isKey(cand[i]) && cand[i] != 0x03 && cand[i] != 0x7F) k = cand[i];
   p.key = (uint8_t)k;
+
+  // czekamy, aż linia INT opadnie (maks. 300 ms), żeby jedno naciśnięcie nie dało kilku klawiszy
+  for (int t = 0; t < 30 && digitalRead(M9KB_PIN_INT) == HIGH; t++) vTaskDelay(pdMS_TO_TICKS(10));
+  snapshot(p.r[2]);
+  ulTaskNotifyTake(pdTRUE, 0);
 
   portENTER_CRITICAL(&_mux);
   if (_press_len == 4) { memmove(&_press[0], &_press[1], sizeof(Press) * 3); _press_len = 3; }
