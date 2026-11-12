@@ -223,13 +223,6 @@ void UITask::loop() {
     dirty = true;
   }
 
-  // klawiatury nie widać: ponawiamy skan co 5 s
-  if (!_kb.isFound() && (long)(now - _next_scan) >= 0) {
-    _next_scan = now + 5000;
-    _kb.scan();
-    dirty = true;
-  }
-
   // podświetlenie klawiatury: włączone 5 s po naciśnięciu (test pinu KB_LED)
   if (_backlight_until && (long)(now - _backlight_until) >= 0) {
     _backlight_until = 0;
@@ -294,57 +287,38 @@ void UITask::renderKeyboard() {
   d.startFrame();
   d.setTextSize(1);
 
-  snprintf(line, sizeof(line), "M9 TEST %s  [1/4] KLAWIATURA", M9_FW_VERSION);
+  snprintf(line, sizeof(line), "M9 TEST %s [1/4] KLAWIATURA", M9_FW_VERSION);
   d.setCursor(0, ROW(0)); d.print(line);
 
-  if (_kb.isFound()) snprintf(line, sizeof(line), "Klaw. 0x%02X hw %02X fw %02X rej %02X", _kb.addr(), _kb.hwVersion() & 0xFF, _kb.fwVersion() & 0xFF, _kb.keyReg());
+  if (_kb.isFound()) snprintf(line, sizeof(line), "0x%02X bus%c hw%02X fw%02X prz%lu bl%lu", _kb.addr(), _kb.bus() == 1 ? 'B' : 'A',
+                              _kb.hwVersion() & 0xFF, _kb.fwVersion() & 0xFF, (unsigned long)_kb.irqCount(), (unsigned long)_kb.errors());
   else strcpy(line, "Klawiatura: NIE ZNALEZIONA (szukam...)");
   d.setCursor(0, ROW(1)); d.print(line);
-  snprintf(line, sizeof(line), "Przerwan: %lu  klawiszy: %lu", (unsigned long)_kb.irqCount(), (unsigned long)_reads);
-  d.setCursor(0, ROW(2)); d.print(line);
 
-  // ostatni klawisz dużo
-  if (_hist_len > 0) {
-    uint8_t k = _hist[_hist_len - 1];
-    const char* nm = keyName(k);
-    if (nm) snprintf(line, sizeof(line), "Ostatni: %02X  %s", k, nm);
-    else if (k > 32 && k < 127) snprintf(line, sizeof(line), "Ostatni: %02X  '%c'", k, (char)k);
-    else snprintf(line, sizeof(line), "Ostatni: %02X  (nieznany)", k);
-  } else strcpy(line, "Ostatni: (nacisnij klawisz)");
-  d.setCursor(0, ROW(3)); d.print(line);
-
-  // diagnostyka odczytu: ostatnie przerwania, co zwrócił każdy sposób (ER = błąd I2C)
-  snprintf(line, sizeof(line), "Bledy I2C: %lu   [05 01 02 | bez rej.]", (unsigned long)_kb.read_errors);
-  d.setCursor(0, ROW(4)); d.print(line);
-  {
-    char o[4][4];
-    line[0] = 0;
-    for (int i = 0; i < _kb.diag_len && i < 6; i++) {
-      const M9Keyboard::Diag& g = _kb.diag[_kb.diag_len - 1 - i];
-      int16_t v[5] = { g.r05, g.r01, g.r02, g.raw0, g.raw1 };
-      char t[40]; t[0] = 0;
-      for (int q = 0; q < 5; q++) {
-        char x[6];
-        if (v[q] < 0) strcpy(x, "ER"); else snprintf(x, sizeof(x), "%02X", v[q]);
-        strlcat(t, x, sizeof(t)); strlcat(t, q == 2 ? " | " : " ", sizeof(t));
+  // ostatnie 3 naciśnięcia: rejestry 0-7 od razu / po 20 ms / po 100 ms
+  for (int n = 0; n < 3 && n < _kb.pressCount(); n++) {
+    M9Keyboard::Press p;
+    _kb.getPress(n, &p);
+    for (int s = 0; s < M9KB_SNAPS; s++) {
+      line[0] = 0;
+      if (s == 0) snprintf(line, sizeof(line), "%d>", n + 1); else strcpy(line, "  ");
+      for (int r = 0; r < M9KB_SNAP_REGS; r++) {
+        if (p.r[s][r] < 0) strcpy(tmp, " ER"); else snprintf(tmp, sizeof(tmp), " %02X", p.r[s][r]);
+        strlcat(line, tmp, sizeof(line));
       }
-      d.setCursor(0, ROW(5 + i)); d.print(t);
+      if (s == 0) { snprintf(tmp, sizeof(tmp), "  =%02X", p.key); strlcat(line, tmp, sizeof(line)); }
+      d.setCursor(0, ROW(2 + n * 3 + s)); d.print(line);
     }
-    (void)o;
   }
+  if (_kb.pressCount() == 0) { d.setCursor(0, ROW(3)); d.print("(nacisnij klawisz)"); }
 
-  // historia: kod i znak
-  d.setCursor(0, ROW(11)); d.print("Hist:");
-  for (int row = 0; row < 1; row++) {
-    line[0] = 0;
-    for (int i = _hist_len > 6 ? _hist_len - 6 : 0; i < _hist_len; i++) {
-      uint8_t k = _hist[i];
-      if (k > 32 && k < 127) snprintf(tmp, sizeof(tmp), "%02X%c ", k, (char)k); else snprintf(tmp, sizeof(tmp), "%02X ", k);
-      strlcat(line, tmp, sizeof(line));
-    }
-    d.setCursor(30, ROW(11)); d.print(line);
+  line[0] = 0;
+  for (int i = _hist_len > 8 ? _hist_len - 8 : 0; i < _hist_len; i++) {
+    uint8_t k = _hist[i];
+    if (k > 32 && k < 127) snprintf(tmp, sizeof(tmp), "%02X%c ", k, (char)k); else snprintf(tmp, sizeof(tmp), "%02X ", k);
+    strlcat(line, tmp, sizeof(line));
   }
-  d.setCursor(0, 59); d.print("Nast. strona: Home / Czat albo 5x ten sam");
+  d.setCursor(0, 59); d.print(line[0] ? line : "Hist: pusta");
   d.endFrame();
 }
 
