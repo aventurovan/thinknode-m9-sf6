@@ -66,6 +66,8 @@ private:
   uint8_t _bus = 0xFF;
   int16_t _hw = -1, _fw = -1;
   volatile uint32_t _errors = 0;
+  int _last_val = -1;
+  uint32_t _polls = 0;
 
   uint8_t _queue[16];
   volatile uint8_t _q_head = 0, _q_tail = 0;

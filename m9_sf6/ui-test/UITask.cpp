@@ -296,10 +296,10 @@ void UITask::renderKeyboard() {
   d.setCursor(0, ROW(1)); d.print(line);
 
   // ostatnie 3 naciśnięcia: rejestry 0-7 od razu / po 20 ms / po 100 ms
-  for (int n = 0; n < 3 && n < _kb.pressCount(); n++) {
+  for (int n = 0; n < 4 && n < _kb.pressCount(); n++) {
     M9Keyboard::Press p;
     _kb.getPress(n, &p);
-    for (int s = 0; s < M9KB_SNAPS; s++) {
+    for (int s = 0; s < 1; s++) {
       line[0] = 0;
       if (s == 0) snprintf(line, sizeof(line), "%d>", n + 1); else strcpy(line, "  ");
       for (int r = 0; r < M9KB_SNAP_REGS; r++) {
@@ -307,18 +307,29 @@ void UITask::renderKeyboard() {
         strlcat(line, tmp, sizeof(line));
       }
       if (s == 0) { snprintf(tmp, sizeof(tmp), "  =%02X", p.key); strlcat(line, tmp, sizeof(line)); }
-      d.setCursor(0, ROW(2 + n * 3 + s)); d.print(line);
+      d.setCursor(0, ROW(2 + n + s)); d.print(line);
     }
   }
   if (_kb.pressCount() == 0) { d.setCursor(0, ROW(3)); d.print("(nacisnij klawisz)"); }
 
+  d.setCursor(0, ROW(7)); d.print("Klawisze (kod i znak):");
+  for (int row = 0; row < 3; row++) {
+    line[0] = 0;
+    int start = _hist_len > 24 ? _hist_len - 24 : 0;
+    for (int i = start + row * 8; i < start + row * 8 + 8 && i < _hist_len; i++) {
+      uint8_t k = _hist[i];
+      if (k > 32 && k < 127) snprintf(tmp, sizeof(tmp), "%02X%c ", k, (char)k); else snprintf(tmp, sizeof(tmp), "%02X  ", k);
+      strlcat(line, tmp, sizeof(line));
+    }
+    d.setCursor(0, ROW(8 + row)); d.print(line);
+  }
   line[0] = 0;
-  for (int i = _hist_len > 8 ? _hist_len - 8 : 0; i < _hist_len; i++) {
+  for (int i = 0; i < 0; i++) {
     uint8_t k = _hist[i];
     if (k > 32 && k < 127) snprintf(tmp, sizeof(tmp), "%02X%c ", k, (char)k); else snprintf(tmp, sizeof(tmp), "%02X ", k);
     strlcat(line, tmp, sizeof(line));
   }
-  d.setCursor(0, 59); d.print(line[0] ? line : "Hist: pusta");
+  d.setCursor(0, 59); d.print("Nast. strona: Home / Czat");
   d.endFrame();
 }
 
