@@ -5,7 +5,7 @@
 #include <FS.h>
 #include "McmMap.h"
 
-#define M9MAP_MAX_PACKS  24
+#define M9MAP_MAX_PACKS  64
 #define M9MAP_W          320
 #define M9MAP_H          216      // pod paskiem tekstu (24 px)
 #define M9MAP_DIR        "/mapa"

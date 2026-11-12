@@ -22,7 +22,7 @@ from PIL import Image, ImageDraw, ImageFont
 HEADER = 32
 POLSKA = (14.07, 48.95, 24.20, 54.90)      # zachód, południe, wschód, północ
 POLUDNIE = (14.80, 48.95, 24.20, 51.20)
-LIMIT_PLIKU = 3_000_000_000                # FAT32 nie przyjmie pliku powyżej 4 GB — dzielimy wcześniej
+LIMIT_PLIKU = 1_000_000_000                # pliki po ok. 1 GB: łatwiej wgrać przez WiFi i wznowić po przerwie
 
 
 # ---------- współrzędne ----------

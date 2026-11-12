@@ -7,18 +7,20 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 
 ## Stan prac
 
-**Wersja testowa 0.2.0** — companion Bluetooth działa z aplikacją MeshCore (PIN **123456**), a na ekranie
-zamiast interfejsu są **trzy strony testowe**:
+**Wersja testowa 0.3.0** — companion Bluetooth działa z aplikacją MeshCore (PIN **123456**), a na ekranie
+zamiast interfejsu są **cztery strony testowe**:
 
-1. **Klawiatura** — skan obu magistral I2C, wykryta klawiatura (adres, wersja V1/V2), linia przerwania,
-   surowe rejestry po każdym naciśnięciu i historia 18 naciśnięć.
-2. **Karta SD + GPS** — typ i rozmiar karty, prędkość zapisu i odczytu, pliki mapy, stan GPS
-   (z próbą odwrotnej polaryzacji zasilania modułu), bateria, pamięć.
+1. **Klawiatura** — wykryta klawiatura, rejestry i historia 28 naciśnięć (kod i znak).
+2. **Karta SD + GPS** — typ i rozmiar karty, prędkość, pliki mapy, stan GPS, bateria, pamięć.
 3. **Mapa** — kolorowa mapa z karty SD (folder `/mapa`), wyśrodkowana na pozycji z GPS.
    Krzyżak przesuwa, `I` / `O` zmienia zoom, Enter wraca do pozycji GPS.
+4. **Wgrywanie mapy** — karta w M9 jest wbudowana, więc pliki mapy wgrywa się przez WiFi:
+   urządzenie tworzy sieć **M9-MAPA** (hasło `mapa12345`), a strona `http://192.168.4.1` przyjmuje pliki `.mcm`.
 
-Następna strona: klawisz **Menu** albo **ten sam klawisz 5 razy pod rząd** (działa, nawet jeśli kody klawiszy
-okażą się inne niż zakładane).
+Następna strona: **ten sam klawisz 5 razy pod rząd**.
+
+Ustalone na urządzeniu (V2): klawiatura pod adresem 0x6D na magistrali SDA 20 / SCL 21, kod klawisza w rejestrze 0x02,
+przerwanie na pinie 12; karta SD i kolorowy ekran działają na wspólnej magistrali SPI; GPS włącza się stanem LOW.
 
 Mapa: narzędzia i instrukcja są w folderze [`mapa`](mapa/README.md).
 
@@ -28,7 +30,7 @@ Pliki są w wydaniu **„Najnowszy build”** (zakładka *Releases*):
 
 - `…-pelny.bin` — pełny obraz, do pierwszego wgrania (od adresu `0x0`), np. flasherem w przeglądarce,
 - `…-aktualizacja.bin` — sama aplikacja, do późniejszych aktualizacji,
-- `mapa-testowa.zip` — mapa testowa na kartę SD (siatka i miasta), do sprawdzenia strony Mapa.
+- `mapa-testowa.zip` — mapa testowa (siatka i miasta): rozpakuj na komputerze i wgraj pliki `.mcm` przez stronę 4 (WiFi).
 
 ## Budowanie
 

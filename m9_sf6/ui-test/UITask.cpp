@@ -1,5 +1,6 @@
 #include "UITask.h"
 #include "M9Lcd.h"
+#include "M9Upload.h"
 #include "../Version.h"
 #include <SPI.h>
 #include <SD.h>
@@ -8,7 +9,8 @@
 #define M9_PIN_EXT_PWR   1       // LOW = podłączone zasilanie zewnętrzne
 #define M9_PIN_SD_CS     48
 #define M9_PIN_GPS_EN    11
-#define M9_SD_FREQ       20000000
+#define M9_SD_FREQ       40000000
+#define M9_SD_FREQ_SLOW  20000000
 
 // kody klawiszy wg Meshtastic — do potwierdzenia tym testem
 #define KEY_UP     0xB5
@@ -41,6 +43,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   _msgcount = 0; _reads = 0; _hist_len = 0; _have_irq_regs = false;
   _last_key = -1; _same_count = 0; _last_key_ms = 0;
   _sd_ok = _sd_tested = false; _sd_type = 0;
+  _sd_pending = true; _sd_free_done = false; _wifi_failed = false;
   _sd_size_mb = _sd_free_mb = _sd_write_kbs = _sd_read_kbs = 0;
   _next_sd_try = 0;
   _gps_detected = false; _gps_probe = false; _gps_probe_bytes = 0;
@@ -75,7 +78,7 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   }
 
   _map_mem = _map.begin();
-  mountSD();
+  // kartę montujemy dopiero w pętli (po pierwszym obrazie), żeby nie wydłużać startu
 
   Serial.printf("M9 test %s: klawiatura %s, SD %s, GPS %s\n", M9_FW_VERSION, _kb.isFound() ? "jest" : "BRAK",
                 _sd_ok ? "jest" : "BRAK", _gps_detected ? "wykryty" : "nie wykryty");
@@ -87,11 +90,12 @@ void UITask::mountSD() {
   _next_sd_try = millis() + 15000;
   SD.end();
   _sd_ok = SD.begin(M9_PIN_SD_CS, SPI, M9_SD_FREQ);
+  if (!_sd_ok) { SD.end(); _sd_ok = SD.begin(M9_PIN_SD_CS, SPI, M9_SD_FREQ_SLOW); }
   if (!_sd_ok) return;
   _sd_type = SD.cardType();
   if (_sd_type == CARD_NONE) { _sd_ok = false; SD.end(); return; }
   _sd_size_mb = (uint32_t)(SD.cardSize() / (1024ULL * 1024ULL));
-  _sd_free_mb = (uint32_t)((SD.totalBytes() - SD.usedBytes()) / (1024ULL * 1024ULL));
+  _sd_free_done = false;      // wolne miejsce liczymy dopiero na stronie karty (na dużej karcie trwa to długo)
   if (!_sd_tested) testSD();
   _map.scan(SD);
   if (_map.numPacks() > 0 && !_map.hasZoom(_map_zoom)) _map_zoom = _map.maxZoom() < 12 ? _map.maxZoom() : _map.minZoom();
@@ -141,14 +145,12 @@ bool UITask::gpsFix(double* lat, double* lon, long* sats) {
 
 // ---------------- klawisze ----------------
 
-void UITask::addHistory(int16_t r1, int16_t r5) {
+void UITask::addHistory(int16_t key) {
   if (_hist_len == KBT_HISTORY) {
     memmove(&_hist[0], &_hist[1], sizeof(_hist[0]) * (KBT_HISTORY - 1));
     _hist_len--;
   }
-  _hist[_hist_len].r1 = r1;
-  _hist[_hist_len].r5 = r5;
-  _hist_len++;
+  _hist[_hist_len++] = key;
 }
 
 void UITask::nextPage() {
@@ -156,13 +158,18 @@ void UITask::nextPage() {
     _map.clear();
     m9lcdBlit(0, 240 - M9MAP_H, M9MAP_W, M9MAP_H, _map.fb());
   }
+  if (_page == PAGE_WIFI) {                 // wychodzimy z wgrywania: wyłącz WiFi i odśwież listę map
+    m9uploadStop();
+    if (_sd_ok) _map.scan(SD);
+  }
   _page = (_page + 1) % PAGE_COUNT;
   _same_count = 0;
   _map_dirty = true;
+  if (_page == PAGE_WIFI) _wifi_failed = !_sd_ok || !m9uploadStart();
 }
 
-void UITask::handleKey(int16_t r1, int16_t r5) {
-  #define IS(code) (r1 == (code) || r5 == (code))
+void UITask::handleKey(int16_t key) {
+  #define IS(code) (key == (code))
   bool used = false;
 
   if (_page == PAGE_MAP) {
@@ -193,7 +200,6 @@ void UITask::handleKey(int16_t r1, int16_t r5) {
   // zmiana strony: klawisz Menu (0x82 wg Meshtastic) albo ten sam klawisz 5 razy pod rząd
   if (IS(KEY_HOME)) { nextPage(); return; }
   if (used) { _same_count = 0; return; }
-  int16_t key = r5 > 0 ? r5 : r1;
   unsigned long now = millis();
   if (key >= 0 && key == _last_key && now - _last_key_ms < 3000) _same_count++; else _same_count = 1;
   _last_key = key;
@@ -213,13 +219,14 @@ void UITask::loop() {
     _kb.readRegs(_regs_irq, M9KB_NUM_REGS);
     _have_irq_regs = true;
     _reads++;
-    addHistory(_regs_irq[1], _regs_irq[5]);
+    int16_t key = _regs_irq[M9KB_REG_KEY];
+    if (key > 0) addHistory(key);
     _backlight_until = now + 5000;
     _kb.setBacklight(true);
     Serial.printf("KB irq #%lu:", (unsigned long)_kb.irqCount());
     for (int i = 0; i < M9KB_NUM_REGS; i++) Serial.printf(" R%d=%d", i, (int)_regs_irq[i]);
     Serial.println();
-    handleKey(_regs_irq[1], _regs_irq[5]);
+    if (key > 0) handleKey(key);
     dirty = true;
   }
 
@@ -243,10 +250,20 @@ void UITask::loop() {
     _kb.setBacklight(false);
   }
 
-  // karty nie ma: ponawiamy montowanie co 15 s (tylko na stronie karty, bo próba trwa chwilę)
-  if (!_sd_ok && _page == PAGE_SD && (long)(now - _next_sd_try) >= 0) {
+  // pierwsze montowanie karty: chwilę po starcie; potem ponawiamy co 15 s tylko na stronie karty
+  if (_sd_pending && now > 3000) {
+    _sd_pending = false;
     mountSD();
     dirty = true;
+  } else if (!_sd_pending && !_sd_ok && _page == PAGE_SD && (long)(now - _next_sd_try) >= 0) {
+    mountSD();
+    dirty = true;
+  }
+
+  // wgrywanie mapy przez WiFi
+  if (m9uploadActive()) {
+    m9uploadLoop();
+    if (m9uploadChanged() && _sd_ok) _map.scan(SD);
   }
 
   // GPS nie wykryty: liczymy bajty przychodzące przy odwróconym EN
@@ -264,8 +281,10 @@ void UITask::loop() {
       renderMap();
     }
   } else if (dirty || (long)(now - _next_refresh) >= 0) {
-    _next_refresh = now + 250;
-    if (_page == PAGE_KB) renderKeyboard(); else renderSD();
+    _next_refresh = now + (_page == PAGE_WIFI ? 1000 : 250);
+    if (_page == PAGE_KB) renderKeyboard();
+    else if (_page == PAGE_SD) renderSD();
+    else renderWifi();
   }
 }
 
@@ -278,7 +297,7 @@ void UITask::renderKeyboard() {
   d.startFrame();
   d.setTextSize(1);
 
-  snprintf(line, sizeof(line), "M9 TEST %s  [1/3] KLAWIATURA", M9_FW_VERSION);
+  snprintf(line, sizeof(line), "M9 TEST %s  [1/4] KLAWIATURA", M9_FW_VERSION);
   d.setCursor(0, ROW(0)); d.print(line);
 
   // 1-2: skan obu magistral I2C
@@ -313,24 +332,20 @@ void UITask::renderKeyboard() {
   snprintf(line, sizeof(line), "Teraz R0-7: %s", tmp);
   d.setCursor(0, ROW(6)); d.print(line);
 
-  // 7-10: historia naciśnięć — pary R1/R5 (kod klawisza jest w jednym z nich)
-  d.setCursor(0, ROW(7)); d.print(_hist_len == 0 ? "Historia (R1/R5): pusta" : "Historia (R1/R5), najnowsze na koncu:");
-  for (int row = 0; row < 3; row++) {
+  // 7-11: historia naciśnięć — kod z rejestru 2 i znak, jeśli to zwykła litera
+  d.setCursor(0, ROW(7)); d.print(_hist_len == 0 ? "Historia: pusta" : "Historia (kod i znak), najnowsze na koncu:");
+  for (int row = 0; row < 4; row++) {
     line[0] = 0;
-    for (int i = row * 6; i < row * 6 + 6 && i < _hist_len; i++) {
-      char a[4], b[4];
-      if (_hist[i].r1 < 0) strcpy(a, "--"); else snprintf(a, sizeof(a), "%02X", (unsigned)_hist[i].r1);
-      if (_hist[i].r5 < 0) strcpy(b, "--"); else snprintf(b, sizeof(b), "%02X", (unsigned)_hist[i].r5);
-      snprintf(tmp, sizeof(tmp), "%s/%s  ", a, b);
+    for (int i = row * 7; i < row * 7 + 7 && i < _hist_len; i++) {
+      int k = _hist[i];
+      if (k > 32 && k < 127) snprintf(tmp, sizeof(tmp), "%02X%c  ", k, (char)k); else snprintf(tmp, sizeof(tmp), "%02X   ", k);
       strlcat(line, tmp, sizeof(line));
     }
     d.setCursor(0, ROW(8 + row)); d.print(line);
   }
 
   snprintf(line, sizeof(line), "BT %s  PIN 123456  %s", _connected ? "polaczony" : "czeka", _node_prefs ? _node_prefs->node_name : "");
-  d.setCursor(0, ROW(11)); d.print(line);
-
-  d.setCursor(0, 59); d.print("Nast. strona: MENU albo 5x ten sam klawisz");
+  d.setCursor(0, 59); d.print(line);
   d.endFrame();
 }
 
@@ -341,10 +356,19 @@ void UITask::renderSD() {
   d.startFrame();
   d.setTextSize(1);
 
-  snprintf(line, sizeof(line), "M9 TEST %s  [2/3] KARTA SD + GPS", M9_FW_VERSION);
+  snprintf(line, sizeof(line), "M9 TEST %s  [2/4] KARTA SD + GPS", M9_FW_VERSION);
   d.setCursor(0, ROW(0)); d.print(line);
 
-  if (_sd_ok) {
+  if (_sd_pending) {
+    d.setCursor(0, ROW(1)); d.print("Karta: sprawdzam...");
+  } else if (_sd_ok) {
+    if (!_sd_free_done) {          // pierwszy raz na tej stronie: policz wolne miejsce (może potrwać)
+      d.setCursor(0, ROW(1)); d.print("Karta: licze wolne miejsce (do 1 min)...");
+      d.endFrame();
+      _sd_free_mb = (uint32_t)((SD.totalBytes() - SD.usedBytes()) / (1024ULL * 1024ULL));
+      _sd_free_done = true;
+      return;
+    }
     const char* type = _sd_type == CARD_MMC ? "MMC" : _sd_type == CARD_SD ? "SD" : _sd_type == CARD_SDHC ? "SDHC" : "?";
     snprintf(line, sizeof(line), "Karta: OK %s %lu MB, wolne %lu MB", type, (unsigned long)_sd_size_mb, (unsigned long)_sd_free_mb);
     d.setCursor(0, ROW(1)); d.print(line);
@@ -381,7 +405,7 @@ void UITask::renderSD() {
   snprintf(line, sizeof(line), "Bufor mapy: %s", _map_mem ? "OK" : "BRAK PAMIECI");
   d.setCursor(0, ROW(10)); d.print(line);
 
-  d.setCursor(0, 59); d.print("Nast. strona: MENU albo 5x ten sam klawisz");
+  d.setCursor(0, 59); d.print("Nast. strona: 5x ten sam klawisz");
   d.endFrame();
 }
 
@@ -404,11 +428,47 @@ void UITask::renderMap() {
   // pasek tekstu u góry (jednokolorowy sterownik), pod nim kolorowa mapa
   d.startFrame();
   d.setTextSize(1);
-  snprintf(line, sizeof(line), "[3/3] z%d %.4f %.4f %s k%d %lums", _map_zoom, _map_lat, _map_lon,
+  snprintf(line, sizeof(line), "[3/4] z%d %.4f %.4f %s k%d %lums", _map_zoom, _map_lat, _map_lon,
            fix ? (_map_follow ? "GPS" : "reka") : "bezGPS", _map_tiles, _map_ms);
   d.setCursor(0, 0); d.print(line);
   if (!_map_mem) { d.setCursor(0, ROW(3)); d.print("Brak pamieci na bufor mapy"); }
   d.endFrame();
 
   if (_map_mem) m9lcdBlit(0, 240 - M9MAP_H, M9MAP_W, M9MAP_H, _map.fb());
+}
+
+void UITask::renderWifi() {
+  char line[96];
+  DisplayDriver& d = *_display;
+
+  d.startFrame();
+  d.setTextSize(1);
+  snprintf(line, sizeof(line), "M9 TEST %s  [4/4] WGRYWANIE MAPY", M9_FW_VERSION);
+  d.setCursor(0, ROW(0)); d.print(line);
+
+  if (_wifi_failed) {
+    d.setCursor(0, ROW(2)); d.print(_sd_ok ? "Nie udalo sie uruchomic WiFi" : "Brak karty SD - nie ma dokad wgrywac");
+  } else {
+    d.setCursor(0, ROW(2)); d.print("1. Polacz komputer z siecia WiFi:");
+    snprintf(line, sizeof(line), "    %s   haslo: %s", M9UP_SSID, M9UP_PASS);
+    d.setCursor(0, ROW(3)); d.print(line);
+    d.setCursor(0, ROW(4)); d.print("2. Otworz w przegladarce:");
+    d.setCursor(0, ROW(5)); d.print("    http://192.168.4.1");
+
+    snprintf(line, sizeof(line), "Polaczonych komputerow: %d", m9uploadClients());
+    d.setCursor(0, ROW(7)); d.print(line);
+    if (m9uploadFile()[0]) {
+      snprintf(line, sizeof(line), "Plik: %s", m9uploadFile());
+      d.setCursor(0, ROW(8)); d.print(line);
+      snprintf(line, sizeof(line), "Na karcie: %.1f MB   %lu kB/s", m9uploadBytes() / 1048576.0, (unsigned long)m9uploadSpeed());
+      d.setCursor(0, ROW(9)); d.print(line);
+    } else {
+      d.setCursor(0, ROW(8)); d.print("Czekam na pliki...");
+    }
+    snprintf(line, sizeof(line), "Mapa na karcie: %d plikow", _map.numPacks());
+    d.setCursor(0, ROW(10)); d.print(line);
+  }
+
+  d.setCursor(0, 59); d.print("Wyjscie (wylacza WiFi): 5x ten sam klawisz");
+  d.endFrame();
 }

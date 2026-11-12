@@ -86,7 +86,7 @@ jobs:
         run: |
           cd m9
           VER=$(grep -oP 'M9_FW_VERSION\s+"\K[^"]+' m9_sf6/Version.h)
-          NOTES="Automatyczny build z gałęzi main (wersja $VER, commit ${GITHUB_SHA::7}). Plik „pelny” wgraj od adresu 0x0 przy pierwszym wgraniu; plik „aktualizacja” służy do późniejszych aktualizacji. mapa-testowa.zip rozpakuj na kartę SD (folder mapa w głównym katalogu)."
+          NOTES="Automatyczny build z gałęzi main (wersja $VER, commit ${GITHUB_SHA::7}). Plik „pelny” wgraj od adresu 0x0 przy pierwszym wgraniu; plik „aktualizacja” służy do późniejszych aktualizacji. mapa-testowa.zip rozpakuj na komputerze i wgraj pliki .mcm przez WiFi (strona 4 na urządzeniu)."
           if ! gh release view latest-build >/dev/null 2>&1; then
             gh release create latest-build --prerelease --title "Najnowszy build ($VER)" --notes "$NOTES" --target "$GITHUB_SHA"
           else

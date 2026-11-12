@@ -1,6 +1,17 @@
 # Mapa na kartę SD
 
-Urządzenie rysuje mapę z plików `.mcm` w folderze **`/mapa`** na karcie SD (karta w formacie FAT32).
+Urządzenie rysuje mapę z plików `.mcm` w folderze **`/mapa`** na karcie SD.
+
+## Wgrywanie na kartę (przez WiFi)
+
+Karta w M9 jest wbudowana i komputer jej nie widzi, dlatego pliki wgrywa samo urządzenie:
+
+1. Na M9 przejdź na stronę **[4/4] WGRYWANIE MAPY** (ten sam klawisz 5 razy pod rząd zmienia stronę).
+2. Połącz komputer z siecią WiFi **M9-MAPA**, hasło **mapa12345** (komputer straci na ten czas internet).
+3. Otwórz w przeglądarce **http://192.168.4.1**, kliknij „Wybierz pliki” i wskaż pliki `.mcm`.
+4. Po zakończeniu wyjdź ze strony na M9 (to wyłącza WiFi) i przejdź na stronę Mapa.
+
+Przerwane wgrywanie można wznowić, wybierając ten sam plik jeszcze raz.
 
 Plan: **cała Polska do zoomu 13, południe Polski do zoomu 15** — razem kilka GB.
 
@@ -8,7 +19,7 @@ Plan: **cała Polska do zoomu 13, południe Polski do zoomu 15** — razem kilka
 
 W wydaniu „Najnowszy build” jest `mapa-testowa.zip`: siatka z numerami kafelków i kilkanaście miast,
 Polska w zoomach 6–9 i okolice Bielska, Katowic i Krakowa w zoomach 10–13. Służy do sprawdzenia ekranu, karty i GPS.
-Rozpakuj ją tak, żeby pliki `.mcm` leżały w folderze `mapa` w głównym katalogu karty.
+Rozpakuj ją na komputerze i wgraj pliki `.mcm` przez WiFi (wyżej).
 
 ## Prawdziwa mapa — na własnym serwerze
 
@@ -56,7 +67,7 @@ python3 pakuj_mape.py mapa --zrodlo "http://localhost:8080/styles/ciemna/256/{z}
 python3 pakuj_mape.py podglad proba/mapa/z13_x4526.mcm 4529 2784 kafelek.png
 ```
 
-**5. Karta:** skopiuj zawartość `karta/mapa` do folderu `mapa` na karcie SD.
+**5. Karta:** wgraj pliki z `karta/mapa` przez WiFi (opis na górze). Pliki mają do ok. 1 GB każdy.
 
 ## Inne źródła kafelków
 
