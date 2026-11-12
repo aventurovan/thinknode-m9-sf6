@@ -145,7 +145,7 @@ bool UITask::gpsFix(double* lat, double* lon, long* sats) {
 
 // ---------------- klawisze ----------------
 
-void UITask::addHistory(int16_t key) {
+void UITask::addHistory(uint16_t key) {
   if (_hist_len == KBT_HISTORY) {
     memmove(&_hist[0], &_hist[1], sizeof(_hist[0]) * (KBT_HISTORY - 1));
     _hist_len--;
@@ -219,14 +219,24 @@ void UITask::loop() {
     _kb.readRegs(_regs_irq, M9KB_NUM_REGS);
     _have_irq_regs = true;
     _reads++;
-    int16_t key = _regs_irq[M9KB_REG_KEY];
-    if (key > 0) addHistory(key);
+    // co się zmieniło względem stanu spoczynkowego (odczyt co sekundę)? każdą zmianę zapisujemy w historii
+    int16_t key = -1;
+    int changes = 0;
+    for (int i = 0; i < M9KB_NUM_REGS; i++) {
+      if (_regs_irq[i] >= 0 && _regs_irq[i] != _regs_now[i]) {
+        addHistory((uint16_t)((i << 8) | (_regs_irq[i] & 0xFF)));
+        if (key < 0) key = _regs_irq[i];
+        changes++;
+      }
+    }
+    if (changes == 0) { addHistory(0xFFFF); key = 0x1FF; }
     _backlight_until = now + 5000;
     _kb.setBacklight(true);
     Serial.printf("KB irq #%lu:", (unsigned long)_kb.irqCount());
     for (int i = 0; i < M9KB_NUM_REGS; i++) Serial.printf(" R%d=%d", i, (int)_regs_irq[i]);
     Serial.println();
-    if (key > 0) handleKey(key);
+    handleKey(key);
+    _next_poll = now + 1000;        // stan spoczynkowy czytamy najwcześniej sekundę po naciśnięciu
     dirty = true;
   }
 
@@ -300,52 +310,34 @@ void UITask::renderKeyboard() {
   snprintf(line, sizeof(line), "M9 TEST %s  [1/4] KLAWIATURA", M9_FW_VERSION);
   d.setCursor(0, ROW(0)); d.print(line);
 
-  // 1-2: skan obu magistral I2C
-  for (int b = 0; b < 2; b++) {
-    tmp[0] = 0;
-    for (int i = 0; i < _kb.num_found[b]; i++) {
-      char t[6]; snprintf(t, sizeof(t), "%02X ", _kb.found[b][i]);
-      strlcat(tmp, t, sizeof(tmp));
-    }
-    if (_kb.num_found[b] == 0) strcpy(tmp, "nic");
-    snprintf(line, sizeof(line), "%s: %s", b == 0 ? "I2C A (SDA7 SCL6)" : "I2C B (SDA20 SCL21)", tmp);
-    d.setCursor(0, ROW(1 + b)); d.print(line);
-  }
+  if (_kb.isFound()) snprintf(line, sizeof(line), "Klaw. 0x%02X  INT=%d  przerwan: %lu", _kb.addr(), _kb.intLevel() ? 1 : 0, (unsigned long)_kb.irqCount());
+  else strcpy(line, "Klawiatura: NIE ZNALEZIONA (szukam...)");
+  d.setCursor(0, ROW(1)); d.print(line);
 
-  if (_kb.isFound()) {
-    snprintf(line, sizeof(line), "Klawiatura: 0x%02X na I2C %c (%s)", _kb.addr(), _kb.bus() == 0 ? 'A' : 'B',
-             _kb.addr() == M9KB_ADDR_V1 ? "V1" : "V2");
+  // rejestry 0..15: zaraz po naciśnięciu i w spoczynku
+  if (_have_irq_regs) {
+    hexList(tmp, sizeof(tmp), _regs_irq, 8); snprintf(line, sizeof(line), "Klawisz 0-7: %s", tmp);
+    d.setCursor(0, ROW(2)); d.print(line);
+    hexList(tmp, sizeof(tmp), _regs_irq + 8, 8); snprintf(line, sizeof(line), "Klawisz 8-F: %s", tmp);
+    d.setCursor(0, ROW(3)); d.print(line);
   } else {
-    strcpy(line, "Klawiatura: NIE ZNALEZIONA (szukam...)");
+    d.setCursor(0, ROW(2)); d.print("Klawisz: (nacisnij klawisz)");
   }
-  d.setCursor(0, ROW(3)); d.print(line);
-
-  snprintf(line, sizeof(line), "KB_INT=%d  przerwan: %lu  odczytow: %lu", _kb.intLevel() ? 1 : 0,
-           (unsigned long)_kb.irqCount(), (unsigned long)_reads);
+  hexList(tmp, sizeof(tmp), _regs_now, 8); snprintf(line, sizeof(line), "Spocz. 0-7: %s", tmp);
   d.setCursor(0, ROW(4)); d.print(line);
-
-  if (_have_irq_regs) hexList(tmp, sizeof(tmp), _regs_irq, M9KB_NUM_REGS); else strcpy(tmp, "(nacisnij klawisz)");
-  snprintf(line, sizeof(line), "Klawisz R0-7: %s", tmp);
+  hexList(tmp, sizeof(tmp), _regs_now + 8, 8); snprintf(line, sizeof(line), "Spocz. 8-F: %s", tmp);
   d.setCursor(0, ROW(5)); d.print(line);
 
-  hexList(tmp, sizeof(tmp), _regs_now, M9KB_NUM_REGS);
-  snprintf(line, sizeof(line), "Teraz R0-7: %s", tmp);
-  d.setCursor(0, ROW(6)); d.print(line);
-
-  // 7-11: historia naciśnięć — kod z rejestru 2 i znak, jeśli to zwykła litera
-  d.setCursor(0, ROW(7)); d.print(_hist_len == 0 ? "Historia: pusta" : "Historia (kod i znak), najnowsze na koncu:");
-  for (int row = 0; row < 4; row++) {
+  // historia: który rejestr zmienił się po naciśnięciu i na jaką wartość (rejestr:wartość), "--" = nic się nie zmieniło
+  d.setCursor(0, ROW(6)); d.print(_hist_len == 0 ? "Historia: pusta" : "Historia (rejestr:wartosc):");
+  for (int row = 0; row < 5; row++) {
     line[0] = 0;
     for (int i = row * 7; i < row * 7 + 7 && i < _hist_len; i++) {
-      int k = _hist[i];
-      if (k > 32 && k < 127) snprintf(tmp, sizeof(tmp), "%02X%c  ", k, (char)k); else snprintf(tmp, sizeof(tmp), "%02X   ", k);
+      if (_hist[i] == 0xFFFF) strcpy(tmp, "--   "); else snprintf(tmp, sizeof(tmp), "%X:%02X  ", _hist[i] >> 8, _hist[i] & 0xFF);
       strlcat(line, tmp, sizeof(line));
     }
-    d.setCursor(0, ROW(8 + row)); d.print(line);
+    d.setCursor(0, ROW(7 + row)); d.print(line);
   }
-
-  snprintf(line, sizeof(line), "BT %s  PIN 123456  %s", _connected ? "polaczony" : "czeka", _node_prefs ? _node_prefs->node_name : "");
-  d.setCursor(0, 59); d.print(line);
   d.endFrame();
 }
 

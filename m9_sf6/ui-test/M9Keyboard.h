@@ -11,7 +11,7 @@
 #define M9KB_PIN_LED   46     // podświetlenie klawiatury
 #define M9KB_BUS1_SDA  20     // druga magistrala (Wire1)
 #define M9KB_BUS1_SCL  21
-#define M9KB_NUM_REGS  8      // rejestry 0x00..0x07 pokazywane na ekranie testu
+#define M9KB_NUM_REGS  16     // rejestry 0x00..0x0F pokazywane na ekranie testu
 
 class M9Keyboard {
   TwoWire* _wire = NULL;

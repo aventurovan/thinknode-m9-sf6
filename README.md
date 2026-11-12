@@ -7,7 +7,7 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 
 ## Stan prac
 
-**Wersja testowa 0.3.0** — companion Bluetooth działa z aplikacją MeshCore (PIN **123456**), a na ekranie
+**Wersja testowa 0.3.1** — companion Bluetooth działa z aplikacją MeshCore (PIN **123456**), a na ekranie
 zamiast interfejsu są **cztery strony testowe**:
 
 1. **Klawiatura** — wykryta klawiatura, rejestry i historia 28 naciśnięć (kod i znak).
