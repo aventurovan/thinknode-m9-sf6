@@ -1340,15 +1340,21 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       t[0] = 0;
       switch (i) {
         case 0: setRow(r, "Wyśrodkuj na mojej pozycji", "", UII_GPS); break;
-        case 1: scopy(t, sizeof(t), m9dlStatus()[0] ? m9dlDetail() : "przez sieć WiFi poniżej"); setRow(r, m9dlActive() ? "Przerwij pobieranie" : "Pobierz mapę z internetu", t, UII_SIGNAL, m9dlActive()); break;
+        case 1: scopy(t, sizeof(t), m9dlStatus()[0] ? m9dlDetail() : "przez sieć WiFi poniżej"); setRow(r, m9dlActive() ? "Przerwij pobieranie" : "Pobierz z internetu", t, UII_SIGNAL, m9dlActive()); break;
         case 2:
           if (m9uploadActive()) { if (m9uploadFile()[0]) snprintf(t, sizeof(t), "%s · %lu MB", m9uploadFile(), (unsigned long)(m9uploadBytes() >> 20)); else strcpy(t, "hasło " M9UP_PASS " · 192.168.4.1"); }
-          else strcpy(t, "własna sieć WiFi urządzenia");
-          setRow(r, m9uploadActive() ? "Wyłącz wgrywanie z telefonu" : "Wgraj mapę z telefonu", t, UII_SD, m9uploadActive());
+          else strcpy(t, "przez WiFi urządzenia");
+          setRow(r, m9uploadActive() ? "Wyłącz wgrywanie" : "Wgraj z telefonu", t, UII_SD, m9uploadActive());
           break;
         case 3: setRow(r, "Sieć WiFi", _wifi.ssid[0] ? _wifi.ssid : "nie ustawiona"); break;
         case 4: setRow(r, "Hasło WiFi", _wifi.pass[0] ? "zapisane" : "brak"); break;
-        case 5: { const char* u = _wifi.url; if (strncmp(u, "https://", 8) == 0) u += 8; scopy(t, sizeof(t), u); setRow(r, "Adres mapy", t); break; }
+        case 5: {
+          const char* u = _wifi.url; if (strncmp(u, "https://", 8) == 0) u += 8;
+          int n = strlen(u);
+          if (n > 30) snprintf(t, sizeof(t), "%.13s…%s", u, u + n - 14); else scopy(t, sizeof(t), u);
+          setRow(r, "Adres mapy", t);
+          break;
+        }
         case 6:
           if (!_map.sdOk()) strcpy(t, _sd_pending ? "sprawdzam kartę…" : "brak karty SD");
           else if (_map.numPacks() == 0) snprintf(t, sizeof(t), "karta %lu GB · brak mapy", (unsigned long)(_map.sdSizeMB() / 1024));

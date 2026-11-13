@@ -97,6 +97,10 @@ int main(int argc, char** argv) {
   keys({ M9K_ENTER }); save("blokada-wybor");
   keys({ M9K_DOWN, M9K_ENTER }); run(6000); run(70000); keys({ 'a' }); save("ekran-zablokowany");
   keys({ M9K_BACK }); save("ekran-zablokowany-wstecz"); keys({ M9K_ENTER }); save("odblokowany");
+  keys({ M9K_HOME, M9K_MAP }); save("mapa");
+  keys({ M9K_RIGHT, 'i' }); save("mapa-przesunieta");
+  keys({ M9K_F3 }); save("mapa-menu");
+  keys({ M9K_BACK, M9K_F4, M9K_DOWN, M9K_ENTER }); save("menu-repeatera-mapa");
   printf("zrzutow: %d\n", shot);
   return 0;
 }

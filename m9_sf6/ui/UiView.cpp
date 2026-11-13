@@ -178,7 +178,12 @@ static void drawList(Gfx& g, const UiView& v) {
       g.text(right - bw + 5, y + 4, t, F_SMALL, sel ? C_ACC : C_INK);
       right -= bw + 6;
     }
-    if (r.right[0]) right -= g.textRight(right, y + 4, r.right, F_SMALL, dim) + 6;
+    if (r.right[0]) {                                // prawy opis nigdy nie wchodzi na nazwę: najwyżej 190 px, z wielokropkiem
+      int rw = Gfx::textWidth(r.right, F_SMALL);
+      if (rw > 190) rw = 190;
+      g.text(right - rw, y + 4, r.right, F_SMALL, dim, rw);
+      right -= rw + 6;
+    }
     int nameMax = right - x;
     if (r.sub[0] && nameMax > 150) nameMax = 150;
     int nw = g.text(x, y + 3, r.text, sel ? F_BOLD : F_NORMAL, fg, nameMax);
