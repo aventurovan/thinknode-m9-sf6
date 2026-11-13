@@ -15,6 +15,8 @@ Karta w M9 jest wbudowana, dlatego pliki wgrywa samo urządzenie. Na M9: klawisz
    Pliki idą od najmniejszego zoomu, więc ogólna mapa kraju jest na karcie po kilku minutach.
 
 Na czas WiFi urządzenie wyłącza Bluetooth (oba naraz nie mieszczą się w pamięci); wraca po restarcie.
+Pobieranie idzie porcjami po 3 MB: WiFi włączone → porcja do pamięci → WiFi wyłączone → zapis na kartę.
+Na M9 zapis na kartę przy włączonym WiFi nie działa, dlatego te dwie rzeczy nigdy nie dzieją się naraz.
 
 Pod adresem mapy muszą leżeć pliki `.mcm` i plik `lista.txt` (w każdym wierszu: nazwa pliku, spacja, rozmiar w bajtach).
 
