@@ -7,7 +7,7 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 
 ## Stan prac
 
-**Wersja 0.12.1.** Companion Bluetooth dla aplikacji MeshCore (stały PIN **123456**, zmiana w Ustawieniach) i własny kolorowy interfejs po polsku:
+**Wersja 0.13.0.** Companion Bluetooth dla aplikacji MeshCore (stały PIN **123456**, zmiana w Ustawieniach) i własny kolorowy interfejs po polsku:
 
 - **Start** — zegar i sześć kafelków (Wiadomości, Kontakty, Repeatery, Pozycja, Radio, Urządzenie); po kafelkach chodzi się strzałkami, Enter wchodzi.
 - **Dolny pasek** — ikony: Start, Wiadomości, Kontakty, Repeatery, Ustawienia.
@@ -36,8 +36,8 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 | Enter, środek krzyżaka | wybór; w rozmowie wysłanie (puste pole: szybkie odpowiedzi) |
 | ► w rozmowie | menu zaznaczonej wiadomości |
 | Wstecz | krok wstecz |
-| Home / Dymki / Wiadomość / Mapa | Start / Wiadomości / Kontakty / Repeatery |
-| Pinezka | Wiadomości: opcje rozmowy; Kontakty: następny filtr; Repeatery: sortowanie; rozmowa: wstaw pozycję; pole daty: zegar z GPS |
+| Home / Dymki / Pinezka / Mapa | Start / Wiadomości / Repeatery / Kontakty (docelowo mapa) |
+| Mała wiadomość pod Home („Menu”) | dodatkowe opcje na bieżącym ekranie: opcje rozmowy, menu kontaktu, sortowanie repeaterów, opcje wiadomości, zegar z GPS |
 | litery na liście Kontakty | szukanie po nazwie (Del kasuje) |
 | Del na kanale | usunięcie kanału |
 | ctrl, potem litera | ą ć ę ł ń ó ś ż (ź pod X) |
@@ -51,7 +51,8 @@ kontroler pod adresem 0x6C (płytka v1.0) albo 0x6D (v1.1) na magistrali SDA 20 
 do odczytu, po odczycie zwraca 0x88; numer rejestru trzeba wysłać osobną transmisją (STOP) przed odczytem; linia KB_INT (pin 12)
 pojawia się tylko dla niektórych klawiszy, więc rejestr jest odpytywany.
 
-Czcionka ekranowa: Inter (SIL Open Font License 1.1), generowana skryptem `tools/gen_font.py`. Podgląd ekranów na komputerze: `tools/podglad`.
+Wygląd jak w aplikacji MeshSpeed: ta sama paleta kolorów i czcionka IBM Plex Sans (SIL Open Font License 1.1, pliki w `tools/fonts`; strzałki z Inter),
+generowana skryptem `tools/gen_font.py`; logo na ekranie startowym z ikony aplikacji (`tools/gen_logo.py`). Podgląd ekranów na komputerze: `tools/podglad`.
 
 Mapa: narzędzia i instrukcja są w folderze [`mapa`](mapa/README.md).
 

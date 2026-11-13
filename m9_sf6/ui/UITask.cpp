@@ -1034,7 +1034,7 @@ void UITask::keyThread(uint8_t k) {
   if (mode == IN_MSG) {
     if (k == M9K_UP) { _scroll++; return; }
     if (k == M9K_DOWN) { if (_scroll > 0) _scroll--; return; }
-    if (k == M9K_RIGHT) {                             // menu wiadomości pokazanej na dole (po ▲ jest zaznaczona)
+    if (k == M9K_RIGHT || k == M9K_F3) {              // Menu (albo ►): opcje zaznaczonej wiadomości
       int skip = _scroll;
       for (int i = _msg_n - 1; i >= 0; i--) {
         if (_msgs[i].chan != _cur_chan || strcmp(_msgs[i].thread, _cur) != 0) continue;
@@ -1044,16 +1044,8 @@ void UITask::keyThread(uint8_t k) {
       }
       return;
     }
-    if (k == M9K_F4) {                                // pinezka: wstaw moją pozycję
-      double lat, lon; int sats;
-      if (gpsFix(&lat, &lon, &sats)) {
-        char t[48]; snprintf(t, sizeof(t), "Moja pozycja: %.5f, %.5f", lat, lon);
-        if (_input_chars + (int)strlen(t) <= UI_INPUT_MAX) { strcat(_input, t); _input_chars += strlen(t); }
-      } else popup("Brak pozycji GPS", "włącz GPS w Ustawieniach i wyjdź pod niebo");
-      return;
-    }
   }
-  if (mode == IN_TIME && k == M9K_F4) {               // pinezka: zegar z GPS
+  if (mode == IN_TIME && k == M9K_F3) {               // Menu: zegar z GPS
     if (timeFromGps()) { _input_mode = IN_MSG; pop(); popup("Zegar ustawiony z GPS"); }
     else popup("GPS nie ma jeszcze czasu", "włącz GPS i wyjdź pod niebo", true);
     return;
@@ -1127,7 +1119,7 @@ void UITask::listHead(uint8_t s) {
   switch (s) {
     case S_MSGS:
       strcpy(v.title, "Wiadomości");
-      if (v.unread > 0) snprintf(v.title_right, sizeof(v.title_right), "nieprzeczytane: %d · Pinezka: opcje", v.unread); else strcpy(v.title_right, "Pinezka: opcje rozmowy");
+      if (v.unread > 0) snprintf(v.title_right, sizeof(v.title_right), "nieprzeczytane: %d · Menu: opcje", v.unread); else strcpy(v.title_right, "Menu: opcje rozmowy");
       break;
     case S_CONTACTS: {
       strcpy(v.title, "Kontakty");
@@ -1142,7 +1134,7 @@ void UITask::listHead(uint8_t s) {
     }
     case S_RPTS:
       strcpy(v.title, "Repeatery");
-      snprintf(v.title_right, sizeof(v.title_right), "%d · %s · Pinezka: zmień", _list_n, _cfg.rpt_sort ? "wg odległości" : "ostatnio słyszane");
+      snprintf(v.title_right, sizeof(v.title_right), "%d · %s · Menu: sortuj", _list_n, _cfg.rpt_sort ? "wg odległości" : "ostatnio słyszane");
       break;
     case S_MENU: scopy(v.title, sizeof(v.title), _menu_title); hint("Enter", "wybierz"); hint("Wstecz", ""); break;
     case S_PICK: scopy(v.title, sizeof(v.title), _pick_title); strcpy(v.title_right, "wybierz wartość"); hint("Enter", "wybierz"); hint("Wstecz", "bez zmian"); break;
@@ -1609,6 +1601,7 @@ void UITask::applyPick(uint8_t id, int i) {
     case P_SLEEP: _cfg.sleep_idx = i; saveCfg(); wake(); break;
     case P_KBLIGHT: _cfg.kb_light = i == 0; saveCfg(); _kb.setBacklight(_cfg.kb_light != 0); break;
     case P_WAKE: _cfg.no_wake = i == 1; saveCfg(); break;
+    case P_RPTSORT: _cfg.rpt_sort = i; saveCfg(); break;
     case P_LOCK: _cfg.lock = i == 1; saveCfg(); if (i == 1) popup("Blokada włączona", "odblokowanie: przytrzymaj Wstecz 2 s", false, 5000); break;
   }
   _dirty = true;
@@ -1619,7 +1612,7 @@ bool UITask::listKey(uint8_t s, int i, uint8_t k) {
   int dir = k == M9K_LEFT ? -1 : k == M9K_RIGHT ? 1 : 0;
   switch (s) {
     case S_MSGS:
-      if (k == M9K_F4 && i < _thread_n) { openMenuThread(i); return true; }
+      if (k == M9K_F3 && i < _thread_n) { openMenuThread(i); return true; }
       if ((k == M9K_BKSP || k == M9K_BKSP_LONG) && i < _thread_n && _threads[i].chan) { ask(C_DEL_CHANNEL, "Usunąć kanał?", _threads[i].name); return true; }
       return false;
     case S_CONTACTS:
@@ -1628,13 +1621,13 @@ bool UITask::listKey(uint8_t s, int i, uint8_t k) {
         if (f < 0 || f > FILTER_HEARD) return false;
         _cfg.ct_filter = (uint8_t)f; saveCfg(); buildContacts(); return true;
       }
-      if (k == M9K_F4) { _cfg.ct_filter = (_cfg.ct_filter + 1) % 7; saveCfg(); buildContacts(); if (sel() > 1) sel() = 1; return true; }
+      if (k == M9K_F3) { if (i > 0) listEnter(s, i); return true; }
       if (k == M9K_BKSP) { int n = strlen(_search); if (n > 0) { _search[n - 1] = 0; buildContacts(); } return true; }
       if (k == M9K_BKSP_LONG) { _search[0] = 0; buildContacts(); return true; }
       if (k > 32 && k < 127 && _cfg.ct_filter != FILTER_HEARD) { int n = strlen(_search); if (n < (int)sizeof(_search) - 1) { _search[n] = (char)k; _search[n + 1] = 0; buildContacts(); if (sel() > 1) sel() = 1; } return true; }
       return false;
     case S_RPTS:
-      if (k == M9K_F4) { _cfg.rpt_sort = !_cfg.rpt_sort; saveCfg(); buildRpts(); return true; }
+      if (k == M9K_F3) { pickBegin(P_RPTSORT, "Sortowanie repeaterów"); pickAdd("ostatnio słyszane"); pickAdd("wg odległości (potrzebny GPS)"); pickOpen(_cfg.rpt_sort ? 1 : 0); return true; }
       return false;
   }
   if (s >= S_RADIO && s <= S_PICK && dir) return true;   // w ustawieniach ◄ ► nic nie zmieniają (wartości wybiera się z listy)
@@ -1691,8 +1684,9 @@ void UITask::key(uint8_t k) {
   // klawisze funkcyjne działają wszędzie
   if (k == M9K_HOME) { _tabsel[S_START] = 0; if (scr() == S_START) sel() = 0; tab(S_START); sel() = 0; return; }
   if (k == M9K_MSG)  { tab(S_MSGS); return; }
-  if (k == M9K_F3)   { tab(S_CONTACTS); return; }
-  if (k == M9K_MAP)  { tab(S_RPTS); return; }
+  if (k == M9K_F4)   { tab(S_RPTS); return; }           // pinezka: lista repeaterów
+  if (k == M9K_MAP)  { tab(S_CONTACTS); return; }       // mapa: na razie Kontakty (docelowo mapa)
+  // M9K_F3 (mała wiadomość pod Home) = klawisz „Menu”: dodatkowe opcje na bieżącym ekranie
   if (k == M9K_BACK) { if (_bar) _bar = false; else back(); return; }
 
   if (_bar) {                                         // chodzenie po dolnym pasku
@@ -1946,7 +1940,7 @@ void UITask::fillThread() {
     v.polish_next = _polish;
     strcpy(v.hint[0].key, "Enter"); strcpy(v.hint[0].txt, "zatwierdź");
     v.nhints = 1;
-    if (_input_mode == IN_TIME) { strcpy(v.hint[1].key, "Pinezka"); strcpy(v.hint[1].txt, "z GPS"); v.nhints = 2; }
+    if (_input_mode == IN_TIME) { strcpy(v.hint[1].key, "Menu"); strcpy(v.hint[1].txt, "z GPS"); v.nhints = 2; }
     strcpy(v.hint[v.nhints].key, "Wstecz"); strcpy(v.hint[v.nhints].txt, "anuluj"); v.nhints++;
     return;
   }
@@ -1998,7 +1992,7 @@ void UITask::fillThread() {
   strcpy(v.hint[0].key, "Enter"); strcpy(v.hint[0].txt, _input[0] ? "wyślij" : "szybkie");
   strcpy(v.hint[1].key, "ctrl"); strcpy(v.hint[1].txt, "ą ę ł…");
   strcpy(v.hint[2].key, "▲▼"); strcpy(v.hint[2].txt, "wybierz");
-  strcpy(v.hint[3].key, "►"); strcpy(v.hint[3].txt, "opcje");
+  strcpy(v.hint[3].key, "Menu"); strcpy(v.hint[3].txt, "opcje");
   v.nhints = 4;
 }
 

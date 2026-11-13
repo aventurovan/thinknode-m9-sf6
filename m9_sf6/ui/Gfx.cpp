@@ -36,6 +36,14 @@ void Gfx::fillRound(int x, int y, int w, int h, int r, uint16_t c) {
   }
 }
 
+void Gfx::image(int x, int y, int w, int h, const uint16_t* px) {
+  for (int j = 0; j < h; j++) {
+    int py = y + j;
+    if (py < 0 || py >= GFX_H) continue;
+    for (int i = 0; i < w; i++) { int qx = x + i; if (qx >= 0 && qx < GFX_W) _fb[py * GFX_W + qx] = px[j * w + i]; }
+  }
+}
+
 void Gfx::dim() {
   for (int i = 0; i < GFX_W * GFX_H; i++) {
     uint16_t p = _fb[i];

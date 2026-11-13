@@ -1,22 +1,24 @@
 #include "UiView.h"
 #include "FontData.h"
+#include "LogoData.h"
 #include <string.h>
 #include <stdio.h>
 
-#define C_BG    GFX_RGB(0x0B, 0x0F, 0x14)
-#define C_BAR   GFX_RGB(0x13, 0x1A, 0x22)
-#define C_LINE  GFX_RGB(0x24, 0x30, 0x40)
-#define C_TXT   GFX_RGB(0xF2, 0xF5, 0xF7)
-#define C_DIM   GFX_RGB(0x9A, 0xA7, 0xB4)
-#define C_ACC   GFX_RGB(0xFF, 0xB0, 0x20)
-#define C_INK   GFX_RGB(0x0B, 0x0F, 0x14)
-#define C_SELD  GFX_RGB(0x2A, 0x22, 0x10)
-#define C_GRN   GFX_RGB(0x3D, 0xDC, 0x84)
-#define C_RED   GFX_RGB(0xFF, 0x4D, 0x5E)
-#define C_PINK  GFX_RGB(0xFF, 0x8A, 0x95)
-#define C_BLUE  GFX_RGB(0x7C, 0xC4, 0xFF)
-#define C_TILE  GFX_RGB(0x15, 0x1C, 0x24)
-#define C_BUB   GFX_RGB(0x1A, 0x23, 0x2E)
+// paleta jak w aplikacji MeshSpeed (www/css/app.css)
+#define C_BG    GFX_RGB(0x11, 0x1A, 0x16)
+#define C_BAR   GFX_RGB(0x16, 0x21, 0x1C)
+#define C_LINE  GFX_RGB(0x2A, 0x3A, 0x33)
+#define C_TXT   GFX_RGB(0xF0, 0xF3, 0xF1)
+#define C_DIM   GFX_RGB(0xA9, 0xB8, 0xB0)
+#define C_ACC   GFX_RGB(0xFF, 0x9F, 0x43)
+#define C_INK   GFX_RGB(0x1A, 0x0F, 0x02)
+#define C_GRN   GFX_RGB(0x6F, 0xD3, 0xA4)
+#define C_RED   GFX_RGB(0xFF, 0x7A, 0x66)
+#define C_PINK  GFX_RGB(0xFF, 0x7A, 0x66)
+#define C_BLUE  GFX_RGB(0x6C, 0xB6, 0xFF)
+#define C_TILE  GFX_RGB(0x1C, 0x28, 0x23)
+#define C_BUB   GFX_RGB(0x22, 0x30, 0x2A)
+#define C_SELT  GFX_RGB(0x2E, 0x26, 0x18)
 
 #define STATUS_H 20
 #define BOTTOM_H 24
@@ -162,7 +164,7 @@ static void drawList(Gfx& g, const UiView& v) {
   for (int i = 0; i < v.nrows; i++, y += ROW_H) {
     const UiRow& r = v.rows[i];
     bool sel = i == v.sel && !v.chip_focus && !v.bar_focus;
-    uint16_t fg = sel ? C_INK : C_TXT, dim = sel ? GFX_RGB(0x2B, 0x24, 0x12) : C_DIM;
+    uint16_t fg = sel ? C_INK : C_TXT, dim = sel ? GFX_RGB(0x3A, 0x26, 0x08) : C_DIM;
     if (sel) g.fillRect(0, y, GFX_W, ROW_H, C_ACC);
     int x = 8;
     const char* const* ic = iconRows(r.icon);
@@ -209,7 +211,7 @@ static void drawGrid(Gfx& g, const UiView& v) {
     const UiTile& t = v.tile[i];
     int x = 6 + (i % cols) * (tw + gap), y = top + (i / cols) * (th + gap);
     bool sel = i == v.sel && !v.bar_focus;
-    if (sel) { g.fillRound(x - 1, y - 1, tw + 2, th + 2, 7, C_ACC); g.fillRound(x + 1, y + 1, tw - 2, th - 2, 5, GFX_RGB(0x22, 0x1C, 0x10)); }
+    if (sel) { g.fillRound(x - 1, y - 1, tw + 2, th + 2, 7, C_ACC); g.fillRound(x + 1, y + 1, tw - 2, th - 2, 5, C_SELT); }
     else g.fillRound(x, y, tw, th, 6, C_TILE);
     const char* const* ic = iconRows(t.icon);
     if (start) {                                      // ikona + nazwa, duża wartość, drobny opis
@@ -305,20 +307,11 @@ static void drawInfo(Gfx& g, const UiView& v) {
 }
 
 static void drawBoot(Gfx& g, const UiView& v) {
-  // fale radiowe: trzy łuki z prostokątów
-  for (int k = 0; k < 3; k++) {
-    int r = 16 + k * 14;
-    uint16_t c = k == 0 ? C_ACC : (k == 1 ? GFX_RGB(0xA8, 0x74, 0x18) : GFX_RGB(0x5C, 0x40, 0x10));
-    for (int a = -r; a <= r; a++) {
-      int hh = r * r - a * a, yy = 0;
-      while ((yy + 1) * (yy + 1) <= hh) yy++;
-      if (yy * 10 >= r * 5) g.fillRect(GFX_W / 2 + a - 1, 78 - yy - 1, 3, 3, c);
-    }
-  }
-  g.textCenter(GFX_W / 2, 84, "MeshSpeed", F_HUGE, C_TXT);
-  g.textCenter(GFX_W / 2, 134, "MeshCore Południe", F_BOLD, C_ACC);
-  g.textCenter(GFX_W / 2, 162, v.line1, F_SMALL, C_DIM);
-  g.textCenter(GFX_W / 2, 178, v.line2, F_SMALL, C_DIM);
+  g.image((GFX_W - LOGO_W) / 2, 14, LOGO_W, LOGO_H, LOGO_PX);
+  g.textCenter(GFX_W / 2, 104, "MeshSpeed", F_HUGE, C_TXT);
+  g.textCenter(GFX_W / 2, 152, "MeshCore Południe", F_BOLD, C_ACC);
+  g.textCenter(GFX_W / 2, 182, v.line1, F_SMALL, C_DIM);
+  g.textCenter(GFX_W / 2, 198, v.line2, F_SMALL, C_DIM);
 }
 
 static void drawLock(Gfx& g, const UiView& v) {

@@ -27,6 +27,7 @@ public:
   void fillRect(int x, int y, int w, int h, uint16_t c);
   void rect(int x, int y, int w, int h, uint16_t c);
   void fillRound(int x, int y, int w, int h, int r, uint16_t c);
+  void image(int x, int y, int w, int h, const uint16_t* px);   // obrazek RGB565
   void dim();                                   // przyciemnia cały ekran (tło okienka)
 
   // tekst UTF-8; y = górna krawędź wiersza. Znaki spoza czcionki (np. emotki) są pomijane.
