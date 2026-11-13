@@ -151,6 +151,7 @@ class UITask : public AbstractUITask {
   void saveCfg();
   void savePw();
   void saveMsgs();
+  bool saveStep();
 
   // klawisze
   void key(uint8_t k);

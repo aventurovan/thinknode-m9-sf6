@@ -15,6 +15,9 @@
 #define FILE_PW          "/m9ui.pw"
 #define FILE_MSGS        "/m9ui.msg"
 #define FILE_MUTED       "/m9ui.mut"
+#define FILE_MSGS_TMP    "/m9ui.tmp"
+#define SAVE_DELAY_MS    300000UL       // wiadomości zapisujemy 5 min po zmianie (albo po wygaszeniu ekranu)
+#define SAVE_CHUNK       6              // ile wiadomości na jedno przejście pętli
 
 static const int8_t TX_STEPS[] = { 10, 14, 17, 20, 22 };
 static const float BW_STEPS[] = { 31.25f, 41.7f, 62.5f, 125.0f, 250.0f, 500.0f };
@@ -232,7 +235,44 @@ void UITask::savePw() {
   f.close();
 }
 
+// Zapis wiadomości w kawałkach, po kilka na przejście pętli. Zapis całego pliku naraz zatrzymywał urządzenie
+// na kilka sekund i aplikacja w telefonie dostawała wtedy „timeout”.
+static File sv_file;
+static bool sv_active = false;
+static int sv_idx = 0, sv_n = 0;
+
+bool UITask::saveStep() {
+  if (!sv_active) {
+    if (_msgs == NULL) { _msgs_dirty = false; return false; }
+    sv_file = SPIFFS.open(FILE_MSGS_TMP, "w");
+    if (!sv_file) { _save_at = millis() + SAVE_DELAY_MS; return false; }
+    sv_n = _msg_n; sv_idx = 0;
+    uint8_t h[6] = { 'M', 'A', (uint8_t)(sizeof(UiMsg) & 0xFF), 0, (uint8_t)(sv_n & 0xFF), (uint8_t)(sv_n >> 8) };
+    if (sv_file.write(h, 6) != 6) { sv_file.close(); SPIFFS.remove(FILE_MSGS_TMP); _save_at = millis() + SAVE_DELAY_MS; return false; }
+    sv_active = true;
+    _msgs_dirty = false;                              // zmiany od tej chwili oznaczą zapis jako nieaktualny
+    return true;
+  }
+  if (_msgs_dirty || sv_n != _msg_n) {                // w trakcie coś się zmieniło: zaczniemy od nowa później
+    sv_file.close(); SPIFFS.remove(FILE_MSGS_TMP); sv_active = false;
+    _msgs_dirty = true; _save_at = millis() + 30000UL;
+    return false;
+  }
+  int n = sv_n - sv_idx; if (n > SAVE_CHUNK) n = SAVE_CHUNK;
+  bool ok = n <= 0 || sv_file.write((const uint8_t*)&_msgs[sv_idx], sizeof(UiMsg) * n) == sizeof(UiMsg) * n;
+  sv_idx += n;
+  if (!ok) { sv_file.close(); SPIFFS.remove(FILE_MSGS_TMP); sv_active = false; return false; }     // brak miejsca: zostaje poprzedni plik
+  if (sv_idx >= sv_n) {
+    sv_file.close(); sv_active = false;
+    SPIFFS.remove(FILE_MSGS);
+    SPIFFS.rename(FILE_MSGS_TMP, FILE_MSGS);
+    return false;
+  }
+  return true;
+}
+
 void UITask::saveMsgs() {
+  if (sv_active) { sv_file.close(); SPIFFS.remove(FILE_MSGS_TMP); sv_active = false; }
   _msgs_dirty = false;
   if (_msgs == NULL) return;
   File f = SPIFFS.open(FILE_MSGS, "w");
@@ -284,7 +324,7 @@ UiMsg* UITask::addMsg(const char* thread, const char* who, const char* text, boo
   // przeczytana od razu, jeśli właśnie patrzymy na tę rozmowę
   m.unread = !out && !(_awake && scr() == S_THREAD && _input_mode == IN_MSG && _cur_chan == chan && strcmp(_cur, thread) == 0);
   _dirty = true; _msgs_dirty = true;
-  _save_at = millis() + 60000UL;
+  _save_at = millis() + SAVE_DELAY_MS;
   return &m;
 }
 
@@ -333,7 +373,7 @@ void UITask::pollSent() {
       m.repeats = u->repeats; m.delivered = u->delivered;
       m.rep_n = u->rep_n; m.rep_hs = u->rep_hs;
       memcpy(m.rep_id, u->rep_id, sizeof(m.rep_id)); memcpy(m.rep_snr, u->rep_snr, sizeof(m.rep_snr));
-      _dirty = true; _msgs_dirty = true; _save_at = millis() + 60000UL;
+      _dirty = true; _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS;
     }
   }
 }
@@ -375,7 +415,7 @@ int UITask::unreadTotal() {
 }
 
 void UITask::markRead(const char* name, bool chan) {
-  for (int i = 0; i < _msg_n; i++) if (_msgs[i].unread && _msgs[i].chan == chan && strcmp(_msgs[i].thread, name) == 0) { _msgs[i].unread = 0; _msgs_dirty = true; _save_at = millis() + 60000UL; }
+  for (int i = 0; i < _msg_n; i++) if (_msgs[i].unread && _msgs[i].chan == chan && strcmp(_msgs[i].thread, name) == 0) { _msgs[i].unread = 0; _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS; }
 }
 
 void UITask::openThread(const char* name, bool chan) {
@@ -752,7 +792,7 @@ void UITask::doAct(uint8_t act) {
       case A_RESEND: { char t[164]; scopy(t, sizeof(t), m.text); pop(); sendText(t); break; }
       case A_DELMSG:
         memmove(&_msgs[_msg_idx], &_msgs[_msg_idx + 1], sizeof(UiMsg) * (_msg_n - _msg_idx - 1)); _msg_n--;
-        _msgs_dirty = true; _save_at = millis() + 60000UL; _scroll = 0; _msg_idx = -1;
+        _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS; _scroll = 0; _msg_idx = -1;
         pop();
         break;
     }
@@ -780,7 +820,7 @@ void UITask::doConfirm(uint8_t what) {
         if (_msgs[i].chan && strcmp(_msgs[i].thread, _confirm_name) == 0) { memmove(&_msgs[i], &_msgs[i + 1], sizeof(UiMsg) * (_msg_n - i - 1)); _msg_n--; }
         else i++;
       }
-      _msgs_dirty = true; _save_at = millis() + 60000UL;
+      _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS;
       if (scr() == S_MENU) pop(); else prepare(S_MSGS);
       popup(ok ? "Kanał usunięty" : "Nie udało się usunąć", _confirm_name, !ok);
       break;
@@ -790,7 +830,7 @@ void UITask::doConfirm(uint8_t what) {
         if (!_msgs[i].chan && strcmp(_msgs[i].thread, _confirm_name) == 0) { memmove(&_msgs[i], &_msgs[i + 1], sizeof(UiMsg) * (_msg_n - i - 1)); _msg_n--; }
         else i++;
       }
-      _msgs_dirty = true; _save_at = millis() + 60000UL;
+      _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS;
       if (scr() == S_MENU) pop();
       popup("Rozmowa usunięta", _confirm_name);
       break;
@@ -2065,6 +2105,7 @@ void UITask::loop() {
   if (_awake && _sleep_at && (long)(now - _sleep_at) >= 0) {    // wygaszenie: gaśnie ekran i klawiatura, radio i Bluetooth działają
     _awake = false;
     if (_cfg.lock) { _locked = true; _ul_first = 0; _ul_back = false; }
+    if (_msgs_dirty) _save_at = now;                 // ekran zgasł: dobry moment na zapis
     if (_display) _display->turnOff();
     _kb.setBacklight(false);
   }
@@ -2085,8 +2126,8 @@ void UITask::loop() {
     if (h) the_mesh.advert();
   }
 
-  // zapis wiadomości: pół minuty po ostatniej zmianie i nie w trakcie pisania
-  if (_msgs_dirty && (long)(now - _save_at) >= 0 && now - _last_key > 5000) saveMsgs();
+  // zapis wiadomości: w kawałkach, kilka minut po zmianie (albo zaraz po wygaszeniu ekranu) i nie w trakcie pisania
+  if (sv_active || (_msgs_dirty && (long)(now - _save_at) >= 0 && now - _last_key > 5000)) saveStep();
 
   if (_dirty && _awake) {
     _dirty = false;

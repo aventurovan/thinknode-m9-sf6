@@ -7,7 +7,7 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 
 ## Stan prac
 
-**Wersja 0.13.0.** Companion Bluetooth dla aplikacji MeshCore (stały PIN **123456**, zmiana w Ustawieniach) i własny kolorowy interfejs po polsku:
+**Wersja 0.13.1.** Companion Bluetooth dla aplikacji MeshCore (stały PIN **123456**, zmiana w Ustawieniach) i własny kolorowy interfejs po polsku:
 
 - **Start** — zegar i sześć kafelków (Wiadomości, Kontakty, Repeatery, Pozycja, Radio, Urządzenie); po kafelkach chodzi się strzałkami, Enter wchodzi.
 - **Dolny pasek** — ikony: Start, Wiadomości, Kontakty, Repeatery, Ustawienia.
