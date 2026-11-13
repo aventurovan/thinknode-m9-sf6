@@ -4,21 +4,20 @@
 #include <string.h>
 #include <stdio.h>
 
-// paleta jak w aplikacji MeshSpeed (www/css/app.css)
-#define C_BG    GFX_RGB(0x11, 0x1A, 0x16)
-#define C_BAR   GFX_RGB(0x16, 0x21, 0x1C)
-#define C_LINE  GFX_RGB(0x2A, 0x3A, 0x33)
-#define C_TXT   GFX_RGB(0xF0, 0xF3, 0xF1)
-#define C_DIM   GFX_RGB(0xA9, 0xB8, 0xB0)
-#define C_ACC   GFX_RGB(0xFF, 0x9F, 0x43)
-#define C_INK   GFX_RGB(0x1A, 0x0F, 0x02)
-#define C_GRN   GFX_RGB(0x6F, 0xD3, 0xA4)
-#define C_RED   GFX_RGB(0xFF, 0x7A, 0x66)
-#define C_PINK  GFX_RGB(0xFF, 0x7A, 0x66)
-#define C_BLUE  GFX_RGB(0x6C, 0xB6, 0xFF)
-#define C_TILE  GFX_RGB(0x1C, 0x28, 0x23)
-#define C_BUB   GFX_RGB(0x22, 0x30, 0x2A)
-#define C_SELT  GFX_RGB(0x2E, 0x26, 0x18)
+#define C_BG    GFX_RGB(0x0B, 0x0F, 0x14)
+#define C_BAR   GFX_RGB(0x13, 0x1A, 0x22)
+#define C_LINE  GFX_RGB(0x24, 0x30, 0x40)
+#define C_TXT   GFX_RGB(0xF2, 0xF5, 0xF7)
+#define C_DIM   GFX_RGB(0x9A, 0xA7, 0xB4)
+#define C_ACC   GFX_RGB(0xFF, 0xB0, 0x20)
+#define C_INK   GFX_RGB(0x0B, 0x0F, 0x14)
+#define C_GRN   GFX_RGB(0x3D, 0xDC, 0x84)
+#define C_RED   GFX_RGB(0xFF, 0x4D, 0x5E)
+#define C_PINK  GFX_RGB(0xFF, 0x8A, 0x95)
+#define C_BLUE  GFX_RGB(0x7C, 0xC4, 0xFF)
+#define C_TILE  GFX_RGB(0x15, 0x1C, 0x24)
+#define C_BUB   GFX_RGB(0x1A, 0x23, 0x2E)
+#define C_SELT  GFX_RGB(0x22, 0x1C, 0x10)
 
 #define STATUS_H 20
 #define BOTTOM_H 24
@@ -46,12 +45,14 @@ static const char* const IC_SHIELD[12] = { ".....##.....", "..########..", ".###
 static const char* const IC_CHECK[12] = { "", "", "..........##", ".........##.", "........##..", "##.....##...", ".##...##....", "..##.##.....", "...###......", "....#.......", "", "" };
 static const char* const IC_MUTE[12] = { "#.....#.....", ".#...##.....", "..#.###.....", "#####.#.....", "####.#......", "####..#.....", "#####..#....", "...###..#...", "....##...#..", ".....#....#.", "...........#", "" };
 
+static const char* const IC_SIGNAL[12] = { "", "..........##", "..........##", ".......##.##", ".......##.##", "....##.##.##", "....##.##.##", ".##.##.##.##", ".##.##.##.##", ".##.##.##.##", "", "" };
+
 static const char* const* iconRows(uint8_t i) {
   switch (i) {
     case UII_MAIL: return IC_MAIL; case UII_TOWER: return IC_TOWER; case UII_USER: return IC_USER; case UII_HASH: return IC_HASH;
     case UII_STAR: return IC_STAR; case UII_GPS: return IC_GPS; case UII_BT: return IC_BT; case UII_LOCK: return IC_LOCK;
     case UII_BOLT: return IC_BOLT; case UII_SD: return IC_SD; case UII_ROOM: return IC_ROOM;
-    case UII_CHECK: return IC_CHECK; case UII_MUTE: return IC_MUTE;
+    case UII_CHECK: return IC_CHECK; case UII_MUTE: return IC_MUTE; case UII_SIGNAL: return IC_SIGNAL;
     case UII_HOME: return IC_HOME; case UII_GEAR: return IC_GEAR; case UII_SCREEN: return IC_SCREEN; case UII_SHIELD: return IC_SHIELD;
   }
   return NULL;
@@ -164,7 +165,7 @@ static void drawList(Gfx& g, const UiView& v) {
   for (int i = 0; i < v.nrows; i++, y += ROW_H) {
     const UiRow& r = v.rows[i];
     bool sel = i == v.sel && !v.chip_focus && !v.bar_focus;
-    uint16_t fg = sel ? C_INK : C_TXT, dim = sel ? GFX_RGB(0x3A, 0x26, 0x08) : C_DIM;
+    uint16_t fg = sel ? C_INK : C_TXT, dim = sel ? GFX_RGB(0x2B, 0x24, 0x12) : C_DIM;
     if (sel) g.fillRect(0, y, GFX_W, ROW_H, C_ACC);
     int x = 8;
     const char* const* ic = iconRows(r.icon);
@@ -266,8 +267,8 @@ static void drawThread(Gfx& g, const UiView& v) {
       ty += headLine;
     }
     for (int k = 0; k < n; k++, ty += lh) g.textN(bx + 7, ty, b.text + ln[k].start, ln[k].len, F_NORMAL, C_TXT);
-    if (metaLine) g.textRight(bx + bw - 7, ty, b.meta, F_SMALL, C_DIM);
-    if (pathLine) g.text(bx + 7, ty, b.path, F_SMALL, C_ACC, maxW);
+    if (metaLine) { g.textRight(bx + bw - 7, ty, b.meta, F_SMALL, C_DIM); ty += metaLine; }
+    if (pathLine) { if (b.out) g.textRight(bx + bw - 7, ty, b.path, F_SMALL, C_ACC); else g.text(bx + 7, ty, b.path, F_SMALL, C_ACC, maxW); }
     y = by - 4;
   }
   g.fillRect(0, STATUS_H + HEADER_H, GFX_W, 2, C_BG);      // dymek nie wchodzi pod nagłówek
@@ -317,7 +318,7 @@ static void drawBoot(Gfx& g, const UiView& v) {
 static void drawLock(Gfx& g, const UiView& v) {
   g.textCenter(GFX_W / 2, 62, v.big, F_HUGE, C_TXT);
   g.textCenter(GFX_W / 2, 118, v.line1, F_NORMAL, C_DIM);
-  if (v.unread > 0) g.textCenter(GFX_W / 2, 146, v.line2, F_BOLD, C_ACC);
+  if (v.line2[0]) g.textCenter(GFX_W / 2, 146, v.line2, F_BOLD, C_ACC);
   g.icon(GFX_W / 2 - 6, 176, IC_LOCK, C_DIM);
   g.textCenter(GFX_W / 2, 196, v.footer, F_SMALL, C_DIM);
   if (v.batt > 0 && v.popup1[0]) g.textCenter(GFX_W / 2, 214, v.popup1, F_BOLD, C_ACC);     // postęp przytrzymania

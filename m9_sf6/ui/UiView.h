@@ -10,7 +10,7 @@
 #define UI_INPUT_MAX  140
 
 enum UiScreen { UIS_START, UIS_LIST, UIS_THREAD, UIS_INFO, UIS_BOOT, UIS_LOCK, UIS_GRID };
-enum UiIcon { UII_NONE, UII_MAIL, UII_TOWER, UII_USER, UII_HASH, UII_STAR, UII_GPS, UII_BT, UII_LOCK, UII_BOLT, UII_SD, UII_ROOM, UII_HOME, UII_GEAR, UII_SCREEN, UII_SHIELD, UII_CHECK, UII_MUTE };
+enum UiIcon { UII_NONE, UII_MAIL, UII_TOWER, UII_USER, UII_HASH, UII_STAR, UII_GPS, UII_BT, UII_LOCK, UII_BOLT, UII_SD, UII_ROOM, UII_HOME, UII_GEAR, UII_SCREEN, UII_SHIELD, UII_CHECK, UII_MUTE, UII_SIGNAL };
 
 struct UiRow { char text[44]; char sub[80]; char right[64]; uint8_t icon; uint8_t badge; bool icon_accent; };
 struct UiBubble { char who[24]; char meta[32]; char text[168]; char path[72]; bool out; bool sel; };

@@ -80,7 +80,9 @@ int main(int argc, char** argv) {
   keys({ M9K_F3 }); save("menu-rozmowy");
   keys({ M9K_DOWN, M9K_ENTER }); run(3000); keys({ M9K_BACK }); save("wiadomosci-wyciszony");
   keys({ M9K_ENTER }); type("Slysze go ze Skrzycznego"); keys({ M9K_ENTER }); save("rozmowa");
-  keys({ M9K_UP, M9K_RIGHT, M9K_ENTER }); save("szczegoly-wiadomosci");
+  keys({ M9K_UP, M9K_F3 }); save("menu-wiadomosci");
+  keys({ M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("odpowiedz-ack");
+  keys({ M9K_BKSP_LONG, M9K_UP, M9K_RIGHT, M9K_ENTER }); save("szczegoly-wiadomosci");
   keys({ M9K_MAP }); save("kontakty");
   keys({ M9K_UP }); save("kontakty-filtry");
   keys({ M9K_F4 }); save("repeatery"); keys({ M9K_F3 }); save("repeatery-sortowanie"); keys({ M9K_BACK, M9K_DOWN, M9K_ENTER, M9K_ENTER, M9K_ENTER }); run(500); keys({ M9K_DOWN, M9K_ENTER }); run(500); save("sasiedzi");

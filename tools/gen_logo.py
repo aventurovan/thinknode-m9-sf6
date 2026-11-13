@@ -3,7 +3,7 @@
 import os
 from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
-BG = (0x11, 0x1A, 0x16)
+BG = (0x0B, 0x0F, 0x14)
 SIZE = 84
 im = Image.open(os.path.join(HERE, "logo", "meshspeed-foreground.png")).convert("RGBA")
 im = im.crop(im.getbbox())

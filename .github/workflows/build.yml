@@ -40,6 +40,8 @@ jobs:
           done
           # liczniki diagnostyczne Bluetooth (połączenia, parowania, ramki)
           python3 m9/tools/patch_ble.py MeshCore/src/helpers/esp32/SerialBLEInterface.cpp
+          # ekran startowy MeshSpeed zamiast napisu „Loading...”
+          python3 m9/tools/patch_main.py MeshCore/examples/m9_sf6/companion/main.cpp
           cat m9/platformio-m9.ini >> MeshCore/variants/thinknode_m9/platformio.ini
 
       - uses: actions/setup-python@v5

@@ -325,6 +325,7 @@ bool MyMesh::isAutoAddEnabled() const {
 }
 
 bool MyMesh::shouldAutoAddContactType(uint8_t contact_type) const {
+  if (contact_type == ADV_TYPE_SENSOR) return false;       // M9: czujników nie dodajemy do kontaktów
   if ((_prefs.manual_add_contacts & 1) == 0) {
     return true;
   }
@@ -1032,9 +1033,14 @@ void MyMesh::begin(bool has_display) {
 
 #ifdef BLE_PIN_CODE // 123456 by default
   if (_prefs.ble_pin == 0) {
-    // M9: stały PIN (oryginał MeshCore losuje PIN przy każdym starcie, gdy urządzenie ma ekran);
-    // własny PIN można ustawić w aplikacji MeshCore
-    _active_ble_pin = BLE_PIN_CODE;
+    // losowy PIN przy każdym uruchomieniu (jak w MeshCore dla urządzeń z ekranem); ekran pokazuje go przy parowaniu.
+    // Stały PIN można ustawić w Ustawienia › Bluetooth albo w aplikacji.
+    if (has_display && BLE_PIN_CODE == 123456) {
+      StdRNG rng;
+      _active_ble_pin = rng.nextInt(100000, 999999);
+    } else {
+      _active_ble_pin = BLE_PIN_CODE;
+    }
   } else {
     _active_ble_pin = _prefs.ble_pin;
   }
@@ -2373,6 +2379,7 @@ bool MyMesh::uiAdminLogin(const uint8_t* key, const char* password) {
   memset(&ui_admin, 0, sizeof(ui_admin));
   memcpy(ui_admin.key, key, PUB_KEY_SIZE); ui_admin.active = true; ui_admin.login = 1;
   uint32_t est = 0;
+  resetPathTo(*c);                                    // logowanie zawsze przez całą sieć (flood), stara ścieżka jest kasowana
   if (sendLogin(*c, password, est) == MSG_SEND_FAILED) { ui_admin.login = 3; return false; }
   ui_admin.est_timeout = est;
   return true;

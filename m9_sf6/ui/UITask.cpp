@@ -68,6 +68,14 @@ static void fmtSnr(char* dest, size_t n, int snr_x4) {
   snprintf(dest, n, "%s%d,%d dB", snr_x4 < 0 ? "-" : "", a / 4, (a % 4) * 25 / 10);
 }
 
+// liczba hopów słownie, jak w aplikacji MeshSpeed
+static void hopsTxt(char* dest, size_t n, int hops, bool direct) {
+  if (direct) scopy(dest, n, "trasa stała");
+  else if (hops <= 0) scopy(dest, n, "bezpośrednio");
+  else if (hops == 1) scopy(dest, n, "1 hop");
+  else snprintf(dest, n, hops < 5 ? "%d hopy" : "%d hopów", hops);
+}
+
 static const char* typeName(uint8_t t) {
   switch (t) { case ADV_TYPE_CHAT: return "osoba"; case ADV_TYPE_REPEATER: return "repeater"; case ADV_TYPE_ROOM: return "pokój"; case ADV_TYPE_SENSOR: return "czujnik"; }
   return "inne";
@@ -125,6 +133,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   _bar = false; _bar_sel = 0;
   _locked = false; _ul_first = _ul_last = 0; _ul_back = false;
   _nb_total = _nb_got = 0; _kv_more = false;
+  _ble_conn_seen = _ble_auth_seen = 0; _ble_pin_at = 0; _pin_popup = false;
 }
 
 void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* node_prefs) {
@@ -162,7 +171,7 @@ void UITask::loadAll() {
   }
   if (_cfg.sleep_idx > 3) _cfg.sleep_idx = 1;
   if (_cfg.adv_idx >= sizeof(ADV_HOURS)) _cfg.adv_idx = 0;
-  if (_cfg.ct_filter > 6) _cfg.ct_filter = 0;
+  if (_cfg.ct_filter > 5) _cfg.ct_filter = 0;
 
   f = SPIFFS.open(FILE_PW, "r");
   if (f) {
@@ -512,13 +521,12 @@ void UITask::buildContacts() {
   int total = the_mesh.getTotalContactSlots();
   for (int i = MAX_ANON_CONTACTS; i < total && _list_n < UI_LIST_MAX; i++) {
     if (!the_mesh.getContactByIdx(i, c) || c.type == ADV_TYPE_NONE) continue;
-    bool ok = true;
+    bool ok = c.type != ADV_TYPE_SENSOR;              // czujników nie pokazujemy
     switch (_cfg.ct_filter) {
       case 1: ok = c.type == ADV_TYPE_CHAT; break;
       case 2: ok = c.type == ADV_TYPE_REPEATER; break;
       case 3: ok = c.type == ADV_TYPE_ROOM; break;
-      case 4: ok = c.type == ADV_TYPE_SENSOR; break;
-      case 5: ok = (c.flags & 1) != 0; break;
+      case 4: ok = ok && (c.flags & 1) != 0; break;
     }
     if (ok && nameHas(c.name, _search)) _list[_list_n++] = (uint16_t)i;
   }
@@ -697,10 +705,10 @@ void UITask::detailMsg(int idx) {
     fmtSnr(t, sizeof(t), m.snr_x4); kvAdd("SNR odbioru", t);
     snprintf(t, sizeof(t), "%d dBm", m.rssi); kvAdd("RSSI odbioru", t);
     snprintf(t, sizeof(t), "%d (identyfikator: %d znaki)", m.hash_size ? m.hash_size : 1, (m.hash_size ? m.hash_size : 1) * 2); kvAdd("Bajty trasy nadawcy", t);
-    if (m.direct) kvAdd("Trasa", "znaną drogą (bez listy skoków)");
-    else if (m.hops == 0) kvAdd("Trasa", "bezpośrednio, bez skoków");
+    if (m.direct) kvAdd("Trasa", "trasa stała (bez listy hopów)");
+    else if (m.hops == 0) kvAdd("Trasa", "bezpośrednio");
     else {
-      snprintf(t, sizeof(t), "skoki: %d", m.hops); kvAdd("Trasa", t);
+      hopsTxt(t, sizeof(t), m.hops, false); kvAdd("Trasa", t);
       int hs = m.hash_size ? m.hash_size : 1, shown = m.path_bytes / hs;
       for (int h = 0; h < shown; h++) { char nm[48]; rptName(&m.path[h * hs], hs, nm, sizeof(nm)); snprintf(k, sizeof(k), "  %d. %s", h + 1, nm); kvAdd(k, ""); }
       if (m.hops > shown) { snprintf(k, sizeof(k), "  … i jeszcze %d", m.hops - shown); kvAdd(k, ""); }
@@ -765,6 +773,7 @@ void UITask::openMenuMsg(int idx) {
   scopy(_menu_title, sizeof(_menu_title), m.out ? "Moja wiadomość" : (m.who[0] ? m.who : m.thread));
   _menu_act[_menu_n++] = A_DETAIL;
   if (!m.out && m.chan && m.who[0]) _menu_act[_menu_n++] = A_REPLY;
+  if (!m.out) _menu_act[_menu_n++] = A_REPLY_ACK;
   if (m.out) _menu_act[_menu_n++] = A_RESEND;
   _menu_act[_menu_n++] = A_COPY;
   _menu_act[_menu_n++] = A_DELMSG;
@@ -787,7 +796,16 @@ void UITask::doAct(uint8_t act) {
     UiMsg& m = _msgs[_msg_idx];
     switch (act) {
       case A_DETAIL: detailMsg(_msg_idx); break;
-      case A_REPLY: pop(); snprintf(_input, sizeof(_input), "@[%s] ", m.who); _input_chars = strlen(_input); break;
+      case A_REPLY: pop(); snprintf(_input, sizeof(_input), "@[%s] ", m.who); _input_chars = 0; for (const char* p = _input; *p; p++) if (((uint8_t)*p & 0xC0) != 0x80) _input_chars++; break;
+      case A_REPLY_ACK: {                            // odpowiedź z potwierdzeniem: nick, „ack” i liczba hopów, którymi wiadomość do nas przyszła
+        char h[24]; hopsTxt(h, sizeof(h), m.hops, m.direct);
+        bool chanWho = m.chan && m.who[0];
+        char who[24]; scopy(who, sizeof(who), m.who);
+        pop();
+        if (chanWho) snprintf(_input, sizeof(_input), "@[%s] ack, %s ", who, h); else snprintf(_input, sizeof(_input), "ack, %s ", h);
+        _input_chars = 0; for (const char* p = _input; *p; p++) if (((uint8_t)*p & 0xC0) != 0x80) _input_chars++;
+        break;
+      }
       case A_COPY: pop(); scopy(_input, sizeof(_input), m.text); _input_chars = 0; for (const char* p = _input; *p; p++) if (((uint8_t)*p & 0xC0) != 0x80) _input_chars++; break;
       case A_RESEND: { char t[164]; scopy(t, sizeof(t), m.text); pop(); sendText(t); break; }
       case A_DELMSG:
@@ -1123,7 +1141,7 @@ static const uint8_t AA_BITS[4] = { AA_CHAT, AA_REPEATER, AA_ROOM, AA_SENSOR };
 static const float AIRTIME_STEPS[] = { 0, 1, 2, 3, 9 };
 static const char* const AIRTIME_NAMES[] = { "bez limitu", "do 50% czasu", "do 33% czasu", "do 25% czasu", "do 10% czasu" };
 static const char* const TELEM_NAMES[] = { "nikomu", "wybranym kontaktom", "każdemu, kto zapyta" };
-#define FILTER_HEARD 6
+#define FILTER_HEARD 5
 #define N_CLI ((int)(sizeof(CLI_CMDS) / sizeof(CLI_CMDS[0])))
 
 int UITask::listCount(uint8_t s) {
@@ -1144,7 +1162,7 @@ int UITask::listCount(uint8_t s) {
     case S_PICK: return _pick_n;
     case S_SET_POS: return 9;
     case S_SET_ADV: return 3;
-    case S_SET_CT: return 7;
+    case S_SET_CT: return 6;
     case S_SET_MSG: return 4;
     case S_SET_SCR: return 4;
     case S_SET_SYS: return 6;
@@ -1166,9 +1184,9 @@ void UITask::listHead(uint8_t s) {
       if (_search[0]) snprintf(v.title_right, sizeof(v.title_right), "szukam: %s · %d", _search, _list_n);
       else if (_cfg.ct_filter == FILTER_HEARD) strcpy(v.title_right, "Enter: dodaj do kontaktów");
       else snprintf(v.title_right, sizeof(v.title_right), "%d · pisz, aby szukać", _list_n);
-      static const char* const C[7] = { "Wszyscy", "Osoby", "RPT", "Pokoje", "Czujn.", "Ulub.", "Słyszane" };
-      for (int i = 0; i < 7; i++) scopy(v.chips[i], sizeof(v.chips[0]), C[i]);
-      v.nchips = 7; v.chip_active = _cfg.ct_filter; v.chip_focus = sel() == 0;
+      static const char* const C[6] = { "Wszyscy", "Osoby", "RPT", "Pokoje", "Ulubione", "Usłyszane" };
+      for (int i = 0; i < 6; i++) scopy(v.chips[i], sizeof(v.chips[0]), C[i]);
+      v.nchips = 6; v.chip_active = _cfg.ct_filter; v.chip_focus = sel() == 0;
       strcpy(v.empty, _cfg.ct_filter == FILTER_HEARD ? "Od włączenia urządzenie nie usłyszało jeszcze żadnego advertu." : "Brak kontaktów dla tego filtra.");
       break;
     }
@@ -1230,7 +1248,7 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       if (!the_mesh.getContactByIdx(_list[i - 1], c)) return;
       fmtAgo(t, sizeof(t), c.lastmod);
       setRow(r, c.name, t, typeIcon(c.type, c.flags & 1), c.flags & 1);
-      if (_cfg.ct_filter == 0 || _cfg.ct_filter == 5) scopy(r.sub, sizeof(r.sub), typeName(c.type));
+      if (_cfg.ct_filter == 0 || _cfg.ct_filter == 4) scopy(r.sub, sizeof(r.sub), typeName(c.type));
       return;
     case S_RPTS: {
       if (i == 0) { setRow(r, "Co tu słychać?", "ping do sąsiadów ›", UII_TOWER, true); return; }
@@ -1260,6 +1278,7 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
         case A_MANAGE: setRow(r, "Zarządzaj", pwGet(_ck) ? "hasło zapamiętane" : "logowanie", UII_LOCK); break;
         case A_DELETE: setRow(r, "Usuń kontakt"); break;
         case A_REPLY: setRow(r, "Odpowiedz", "wstawia @[nadawca]", UII_MAIL); break;
+        case A_REPLY_ACK: setRow(r, "Odpowiedz: ack + hopy", "@[nadawca] ack, ile hopów", UII_CHECK); break;
         case A_RESEND: setRow(r, "Wyślij ponownie"); break;
         case A_COPY: setRow(r, "Kopiuj treść do pola pisania"); break;
         case A_DELMSG: setRow(r, "Usuń wiadomość", "tylko z tego urządzenia"); break;
@@ -1364,12 +1383,12 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       else { if (ADV_HOURS[_cfg.adv_idx]) snprintf(t, sizeof(t), "co %d godz. (do sąsiadów)", ADV_HOURS[_cfg.adv_idx]); else strcpy(t, "wyłączony"); setRow(r, "Automatyczny advert", t); }
       return;
     case S_SET_CT: {
-      static const char* const N[7] = { "Dodawanie z advertów", "Osoby", "Repeatery", "Pokoje", "Czujniki", "Gdy brak miejsca", "Z jak daleka" };
+      static const char* const N[6] = { "Dodawanie z advertów", "Osoby", "Repeatery", "Pokoje", "Gdy brak miejsca", "Z jak daleka" };
       bool sel = _prefs->manual_add_contacts & 1;
       t[0] = 0;
       if (i == 0) strcpy(t, sel ? "tylko wybrane typy" : "wszystko automatycznie");
-      else if (i <= 4) strcpy(t, sel ? ((_prefs->autoadd_config & AA_BITS[i - 1]) ? "dodawaj" : "nie dodawaj") : "dodawaj (wszystko)");
-      else if (i == 5) strcpy(t, (_prefs->autoadd_config & AA_OVERWRITE) ? "nadpisuj najstarsze" : "nie dodawaj nowych");
+      else if (i <= 3) strcpy(t, sel ? ((_prefs->autoadd_config & AA_BITS[i - 1]) ? "dodawaj" : "nie dodawaj") : "dodawaj (wszystko)");
+      else if (i == 4) strcpy(t, (_prefs->autoadd_config & AA_OVERWRITE) ? "nadpisuj najstarsze" : "nie dodawaj nowych");
       else if (_prefs->autoadd_max_hops == 0) strcpy(t, "bez limitu skoków");
       else if (_prefs->autoadd_max_hops == 1) strcpy(t, "tylko słyszane bezpośrednio");
       else snprintf(t, sizeof(t), "do %d skoków", _prefs->autoadd_max_hops - 1);
@@ -1416,6 +1435,7 @@ void UITask::listEnter(uint8_t s, int i) {
       if (the_mesh.getContactByIdx(_list[i - 1], c)) { setCur(c); openMenuContact(); }
       return;
     case S_HEARD:
+      if (the_mesh.ui_heard[i].type == ADV_TYPE_SENSOR) { popup("Czujników nie dodajemy", the_mesh.ui_heard[i].name); return; }
       if (the_mesh.uiIsContact(the_mesh.ui_heard[i].id.pub_key)) { if (ctByKey(the_mesh.ui_heard[i].id.pub_key, c)) { setCur(c); openMenuContact(); } }
       else if (the_mesh.uiAddHeard(i)) popup("Dodano do kontaktów", the_mesh.ui_heard[i].name);
       else popup("Nie udało się dodać", "brak miejsca w kontaktach?", true);
@@ -1567,8 +1587,8 @@ bool UITask::settingPick(uint8_t s, int i) {
     case S_SET_CT: {
       bool sel_mode = _prefs->manual_add_contacts & 1;
       if (i == 0) two(P_AA_MODE, "Dodawanie z advertów", "wszystko automatycznie", "tylko wybrane typy", sel_mode ? 1 : 0);
-      else if (i <= 4) { static const char* const T[4] = { "Osoby", "Repeatery", "Pokoje", "Czujniki" }; two(P_AA_T0 + (i - 1), T[i - 1], "dodawaj", "nie dodawaj", (!sel_mode || (_prefs->autoadd_config & AA_BITS[i - 1])) ? 0 : 1); }
-      else if (i == 5) two(P_AA_FULL, "Gdy brak miejsca", "nadpisuj najstarsze (nieulubione)", "nie dodawaj nowych", (_prefs->autoadd_config & AA_OVERWRITE) ? 0 : 1);
+      else if (i <= 3) { static const char* const T[3] = { "Osoby", "Repeatery", "Pokoje" }; two(P_AA_T0 + (i - 1), T[i - 1], "dodawaj", "nie dodawaj", (!sel_mode || (_prefs->autoadd_config & AA_BITS[i - 1])) ? 0 : 1); }
+      else if (i == 4) two(P_AA_FULL, "Gdy brak miejsca", "nadpisuj najstarsze (nieulubione)", "nie dodawaj nowych", (_prefs->autoadd_config & AA_OVERWRITE) ? 0 : 1);
       else {
         pickBegin(P_AA_HOPS, "Z jak daleka dodawać"); pickAdd("bez limitu skoków"); pickAdd("tylko słyszane bezpośrednio");
         for (int q = 2; q < 6; q++) { snprintf(t, sizeof(t), "do %d skoków", q - 1); pickAdd(t); }
@@ -1884,18 +1904,16 @@ void UITask::fillStart() {
   else { strcpy(p.value, "szukam…"); snprintf(p.sub, sizeof(p.sub), "satelity: %d", sats); }
 
   UiTile& d = v.tile[4];
-  strcpy(d.label, "Radio"); d.icon = UII_BOLT;
+  strcpy(d.label, "Radio"); d.icon = UII_SIGNAL;
   bool narrow = fabsf(_prefs->freq - 869.618f) < 0.005f && fabsf(_prefs->bw - 62.5f) < 0.1f && _prefs->sf == 8 && _prefs->cr == 8;
   if (the_mesh.uiRadioIsSF6()) strcpy(d.value, "SF6"); else if (narrow) strcpy(d.value, "Narrow"); else snprintf(d.value, sizeof(d.value), "SF%d", _prefs->sf);
   snprintf(d.sub, sizeof(d.sub), "%.3f MHz", _prefs->freq); comma(d.sub);
 
   UiTile& e = v.tile[5];
-  strcpy(e.label, "Urządzenie"); e.icon = UII_BT;
+  strcpy(e.label, "Urządzenie"); e.icon = UII_BOLT;
   uint16_t mv = getBattMilliVolts();
   snprintf(e.value, sizeof(e.value), "%d%%", battPercent(mv));
-  if (!isBluetoothEnabled()) strcpy(e.sub, "Bluetooth wył.");
-  else if (hasConnection()) strcpy(e.sub, "telefon połączony");
-  else snprintf(e.sub, sizeof(e.sub), "PIN %06lu", (unsigned long)the_mesh.getBLEPin());
+  snprintf(e.sub, sizeof(e.sub), "bateria %d,%02d V", mv / 1000, (mv % 1000) / 10);
 }
 
 void UITask::fillSettings() {
@@ -1904,7 +1922,7 @@ void UITask::fillSettings() {
   v.grid_cols = 2; v.ntiles = 8; v.sel = sel();
   strcpy(v.title, "Ustawienia"); snprintf(v.title_right, sizeof(v.title_right), "wersja %s", M9_FW_VERSION);
   static const char* const N[8] = { "Radio", "Bluetooth", "Pozycja", "Advert", "Kontakty", "Wiadomości", "Ekran i dźwięk", "System" };
-  static const uint8_t IC[8] = { UII_TOWER, UII_BT, UII_GPS, UII_BOLT, UII_USER, UII_MAIL, UII_SCREEN, UII_GEAR };
+  static const uint8_t IC[8] = { UII_SIGNAL, UII_BT, UII_GPS, UII_TOWER, UII_USER, UII_MAIL, UII_SCREEN, UII_GEAR };
   for (int i = 0; i < 8; i++) {
     UiTile& t = v.tile[i];
     strcpy(t.label, N[i]); t.icon = IC[i];
@@ -2006,24 +2024,27 @@ void UITask::fillThread() {
     b.out = m.out;
     b.sel = k == 0;                                  // dolna wiadomość jest zaznaczona: jej dotyczy ► (opcje)
     char t[8]; fmtClock(t, sizeof(t), m.ts, false);
-    if (m.out && m.chan && m.repeats) snprintf(b.meta, sizeof(b.meta), "%s · powtórzeń: %d", t, m.repeats);
-    else if (m.out && !m.chan && m.delivered) snprintf(b.meta, sizeof(b.meta), "%s · dostarczono", t);
-    else if (m.out) snprintf(b.meta, sizeof(b.meta), "%s · wysłano", t);
-    else if (m.direct) snprintf(b.meta, sizeof(b.meta), "%s · znaną drogą", t);
-    else if (m.hops == 0) snprintf(b.meta, sizeof(b.meta), "%s · bez skoków", t);
-    else snprintf(b.meta, sizeof(b.meta), "%s · skoki: %d", t, m.hops);
-    // trasa: identyfikatory kolejnych repeaterów (2 znaki na bajt)
+    char h[24]; hopsTxt(h, sizeof(h), m.hops, m.direct);
+    if (m.out && m.chan && m.repeats) snprintf(b.meta, sizeof(b.meta), "%s · Powtórzone ×%d", t, m.repeats);
+    else if (m.out && !m.chan && m.delivered) snprintf(b.meta, sizeof(b.meta), "%s · Doręczono", t);
+    else if (m.out) snprintf(b.meta, sizeof(b.meta), "%s · Wysłano", t);
+    else snprintf(b.meta, sizeof(b.meta), "%s · %s", t, h);
+    if (_cfg.show_path && m.out && m.rep_n > 0 && m.rep_hs > 0) {
+      // pod wysłaną: repeater, który pierwszy ją usłyszał i powtórzył
+      for (int q = 0; q < m.rep_hs && q < 3; q++) { char x[4]; snprintf(x, sizeof(x), "%02X", m.rep_id[0][q]); strcat(b.path, x); }
+    }
+    // pod odebraną: identyfikatory kolejnych repeaterów (2 znaki na bajt)
     if (_cfg.show_path && !m.out && !m.direct && m.path_bytes > 0 && m.hash_size > 0) {
       int cnt = m.path_bytes / m.hash_size, shown = 0;
-      for (int h = 0; h < cnt; h++) {
+      for (int hh = 0; hh < cnt; hh++) {
         char id[12]; id[0] = 0;
-        for (int q = 0; q < m.hash_size; q++) { char x[4]; snprintf(x, sizeof(x), "%02x", m.path[h * m.hash_size + q]); strcat(id, x); }
-        if (strlen(b.path) + strlen(id) + 4 > sizeof(b.path) - 8) break;
-        if (b.path[0]) strcat(b.path, " > ");
+        for (int q = 0; q < m.hash_size; q++) { char x[4]; snprintf(x, sizeof(x), "%02X", m.path[hh * m.hash_size + q]); strcat(id, x); }
+        if (strlen(b.path) + strlen(id) + 4 > sizeof(b.path) - 10) break;
+        if (b.path[0]) strcat(b.path, "→");
         strcat(b.path, id);
         shown++;
       }
-      if (m.hops > shown) { char more[12]; snprintf(more, sizeof(more), " > +%d", m.hops - shown); strcat(b.path, more); }
+      if (m.hops > shown) { char more[12]; snprintf(more, sizeof(more), "→+%d", m.hops - shown); strcat(b.path, more); }
     }
   }
   scopy(v.input, sizeof(v.input), _input);
@@ -2067,7 +2088,8 @@ void UITask::fillLock() {
   static const char* const DNI[7] = { "niedziela", "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota" };
   struct tm lt; localTime(the_mesh.getRTCClock()->getCurrentTime(), &lt);
   snprintf(v.line1, sizeof(v.line1), "%s · %s, %d.%02d", _prefs->node_name, DNI[lt.tm_wday % 7], lt.tm_mday, lt.tm_mon + 1);
-  if (v.unread > 0) snprintf(v.line2, sizeof(v.line2), v.unread == 1 ? "1 nowa wiadomość" : "nowe wiadomości: %d", v.unread);
+  if (_popup_until && _pin_popup) snprintf(v.line2, sizeof(v.line2), "Bluetooth: %s", _pop2);
+  else if (v.unread > 0) snprintf(v.line2, sizeof(v.line2), v.unread == 1 ? "1 nowa wiadomość" : "nowe wiadomości: %d", v.unread);
   strcpy(v.footer, "Przytrzymaj Wstecz 2 s (albo Wstecz, potem Enter)");
   if (_ul_back && millis() - _ul_last < 3000) strcpy(v.popup1, "…trzymaj dalej albo naciśnij Enter");
 }
@@ -2109,6 +2131,17 @@ void UITask::loop() {
     if (_display) _display->turnOff();
     _kb.setBacklight(false);
   }
+
+  // Bluetooth: nowe połączenie, które po 1,5 s nadal nie jest uwierzytelnione, to parowanie — pokaż PIN
+  if (m9ble_connects != _ble_conn_seen) { _ble_conn_seen = m9ble_connects; _ble_auth_seen = m9ble_auth_ok; _ble_pin_at = now + 1500; }
+  if (_ble_pin_at && (long)(now - _ble_pin_at) >= 0) {
+    _ble_pin_at = 0;
+    if (m9ble_auth_ok == _ble_auth_seen && !hasConnection()) {
+      char t[40]; snprintf(t, sizeof(t), "wpisz w telefonie PIN: %06lu", (unsigned long)the_mesh.getBLEPin());
+      wake(); popup("Parowanie Bluetooth", t, false, 45000); _pin_popup = true;
+    }
+  }
+  if (_pin_popup && (m9ble_auth_ok != _ble_auth_seen || !_popup_until)) { if (_popup_until) { _popup_until = 0; _dirty = true; } _pin_popup = false; }
 
   _buzzer.loop();
   if (the_mesh.ui_sent_changed) { the_mesh.ui_sent_changed = false; pollSent(); }

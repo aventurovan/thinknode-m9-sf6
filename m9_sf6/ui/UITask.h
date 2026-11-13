@@ -43,7 +43,7 @@ class UITask : public AbstractUITask {
              S_THREAD, S_KV, S_BOOT, S_MENU, S_HEARD, S_QUICK, S_DISC, S_LOGIN, S_ADMIN, S_ADMIN_ACT, S_ADMIN_CLI,
              S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS, S_PICK };
   enum InputMode { IN_MSG = 0, IN_CHANNEL, IN_FREQ, IN_NAME, IN_TIME, IN_PASS, IN_CLI, IN_LAT, IN_LON, IN_PIN };
-  enum Act { A_WRITE, A_FAV, A_DETAIL, A_MANAGE, A_DELETE, A_REPLY, A_RESEND, A_COPY, A_DELMSG, A_OPEN, A_MUTE, A_MARKREAD, A_DELCHAN, A_DELTHREAD };
+  enum Act { A_WRITE, A_FAV, A_DETAIL, A_MANAGE, A_DELETE, A_REPLY, A_RESEND, A_COPY, A_DELMSG, A_OPEN, A_MUTE, A_MARKREAD, A_DELCHAN, A_DELTHREAD, A_REPLY_ACK };
   enum Pick { P_PRESET, P_BW, P_SF, P_CR, P_TX, P_HASH, P_AIR, P_BT, P_GPS, P_ADVLOC, P_TEL0, P_TEL1, P_TEL2, P_AUTOADV, P_AA_MODE, P_AA_T0, P_AA_T1, P_AA_T2, P_AA_T3,
               P_AA_FULL, P_AA_HOPS, P_SHOWPATH, P_MULTIACK, P_SOUND, P_SLEEP, P_KBLIGHT, P_WAKE, P_LOCK, P_RPTSORT };
   enum Confirm { C_NONE = 0, C_DEL_CHANNEL, C_DEL_CONTACT, C_REBOOT, C_FACTORY, C_RPT_REBOOT, C_RPT_SF6, C_CLEAR_MSGS, C_CLEAR_PW, C_CLEAR_BONDS, C_DEL_THREAD };
@@ -85,6 +85,7 @@ class UITask : public AbstractUITask {
   bool _bar; int8_t _bar_sel;
   bool _locked; unsigned long _ul_first, _ul_last; bool _ul_back;
   uint16_t _nb_total, _nb_got; bool _kv_more;
+  uint32_t _ble_conn_seen, _ble_auth_seen; unsigned long _ble_pin_at; bool _pin_popup;
   char _search[16];
   // radio: wartości przed „Zastosuj”
   float _rf, _rbw; uint8_t _rsf, _rcr;

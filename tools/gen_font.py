@@ -12,7 +12,7 @@ DIR = os.path.join(HERE, "fonts") + "/"
 FALLBACK = "/usr/share/fonts/opentype/inter/"
 FONTS = [("F_SMALL", "IBMPlexSans-Medium.ttf", 11, "Inter-Medium.otf"), ("F_NORMAL", "IBMPlexSans-Medium.ttf", 13, "Inter-Medium.otf"), ("F_BOLD", "IBMPlexSans-Bold.ttf", 13, "Inter-Bold.otf"),
          ("F_BIG", "IBMPlexSans-Bold.ttf", 17, "Inter-Bold.otf"), ("F_HUGE", "IBMPlexSans-Bold.ttf", 40, "Inter-ExtraBold.otf")]
-CHARS = [chr(c) for c in range(32, 127)] + list("ĄĆĘŁŃÓŚŹŻąćęłńóśźż·…„”–—°»«×◄►▲▼›")
+CHARS = [chr(c) for c in range(32, 127)] + list("ĄĆĘŁŃÓŚŹŻąćęłńóśźż·…„”–—°»«×◄►▲▼›→")
 HUGE_CHARS = list("0123456789: MeshSpd")
 
 def gen(name, file, size, fb_file, out):
