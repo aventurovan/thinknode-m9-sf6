@@ -23,17 +23,20 @@ struct UiMsg {
   char text[164];
   uint32_t ts;            // czas (zegar urządzenia)
   uint8_t chan, out, unread, hops;
+  uint16_t sent_id;       // numer wysyłki (wiadomości własne)
+  uint8_t repeats, delivered;
 };
 
 class UITask : public AbstractUITask {
   enum Scr { S_START = 0, S_MSGS = 1, S_CONTACTS = 2, S_RPTS = 3, S_SETTINGS = 4, S_RADIO = 5, S_THREAD, S_INFO, S_RPT, S_BOOT };
-  enum InputMode { IN_MSG = 0, IN_CHANNEL = 1, IN_FREQ = 2 };
+  enum InputMode { IN_MSG = 0, IN_CHANNEL = 1, IN_FREQ = 2, IN_NAME = 3, IN_TIME = 4 };
   struct Thread { char name[32]; uint8_t chan; uint8_t unread; uint32_t last; int16_t last_msg; };
 
   DisplayDriver* _display;
   SensorManager* _sensors;
   NodePrefs* _prefs;
   M9Keyboard _kb;
+  genericBuzzer _buzzer;
 
   uint16_t* _fb;
   UiView* _v;
@@ -56,7 +59,7 @@ class UITask : public AbstractUITask {
   char _pop1[40], _pop2[64]; bool _pop_danger;
   int _msgcount;
 
-  void addMsg(const char* thread, const char* who, const char* text, bool chan, bool out, uint8_t hops);
+  UiMsg* addMsg(const char* thread, const char* who, const char* text, bool chan, bool out, uint8_t hops);
   void buildThreads();
   void buildContacts(uint8_t kind);     // 0 = osoby i pokoje, 1 = repeatery
   void openThread(const char* name, bool chan);
@@ -75,6 +78,8 @@ class UITask : public AbstractUITask {
   void radioLoad();
   bool radioChanged();
   void fillRadio();
+  void pollSent();
+  bool timeFromGps();
   void enter();
   void back();
 

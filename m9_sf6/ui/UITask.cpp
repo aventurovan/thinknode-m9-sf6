@@ -82,6 +82,8 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   _list = (uint16_t*)ps_calloc(UI_LIST_MAX, sizeof(uint16_t));
 
   _kb.begin();
+  _buzzer.begin();
+  _buzzer.quiet(_prefs->buzzer_quiet);
   if (_display) _display->turnOn();
   _boot_until = millis() + 2500;
   _sleep_at = millis() + SLEEP_MS;
@@ -90,8 +92,8 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
 
 // ---------------- wiadomości ----------------
 
-void UITask::addMsg(const char* thread, const char* who, const char* text, bool chan, bool out, uint8_t hops) {
-  if (_msgs == NULL) return;
+UiMsg* UITask::addMsg(const char* thread, const char* who, const char* text, bool chan, bool out, uint8_t hops) {
+  if (_msgs == NULL) return NULL;
   if (_msg_n == UI_MSG_MAX) {                       // najstarsza wypada
     memmove(&_msgs[0], &_msgs[1], sizeof(UiMsg) * (UI_MSG_MAX - 1));
     _msg_n--;
@@ -104,8 +106,33 @@ void UITask::addMsg(const char* thread, const char* who, const char* text, bool 
   m.ts = the_mesh.getRTCClock()->getCurrentTime();
   m.chan = chan; m.out = out; m.hops = hops;
   // przeczytana od razu, jeśli właśnie patrzymy na tę rozmowę
-  m.unread = !out && !(_awake && _scr == S_THREAD && _cur_chan == chan && strcmp(_cur, thread) == 0);
+  m.unread = !out && !(_awake && _scr == S_THREAD && _input_mode == IN_MSG && _cur_chan == chan && strcmp(_cur, thread) == 0);
   _dirty = true;
+  return &m;
+}
+
+// liczniki powtórzeń (kanał) i potwierdzenia dostarczenia (rozmowa prywatna) dla naszych wiadomości
+void UITask::pollSent() {
+  for (int i = 0; i < _msg_n; i++) {
+    UiMsg& m = _msgs[i];
+    if (!m.out || !m.sent_id) continue;
+    uint8_t rep; bool del;
+    if (!the_mesh.uiSentInfo(m.sent_id, &rep, &del)) continue;
+    if (rep != m.repeats || del != (m.delivered != 0)) {
+      if (!_prefs->buzzer_quiet && !_buzzer.isPlaying() && ((rep > 0 && m.repeats == 0) || (del && !m.delivered))) _buzzer.play("ack:d=32,o=8,b=120:c");
+      m.repeats = rep; m.delivered = del;
+      _dirty = true;
+    }
+  }
+}
+
+bool UITask::timeFromGps() {
+  LocationProvider* lp = _sensors ? _sensors->getLocationProvider() : NULL;
+  if (lp == NULL || !lp->isValid()) return false;
+  long ts = lp->getTimestamp();
+  if (ts < 1700000000L) return false;
+  the_mesh.getRTCClock()->setCurrentTime((uint32_t)ts);
+  return true;
 }
 
 void UITask::newMsg(uint8_t path_len, const char* from_name, const char* text, int msgcount) {
@@ -126,6 +153,7 @@ void UITask::newMsg(uint8_t path_len, const char* from_name, const char* text, i
     }
   }
   addMsg(from_name, who, body, chan, false, path_len);
+  if (!_prefs->buzzer_quiet && !_buzzer.isPlaying()) _buzzer.play(chan ? "ch:d=16,o=6,b=200:e,g" : "dm:d=16,o=6,b=200:e,g,c7");
   wake();
 }
 
@@ -216,11 +244,39 @@ void UITask::sendInput() {
     if (f >= 150.0f && f <= 960.0f) _rf = f; else popup("Zła częstotliwość", "podaj w MHz, np. 869.618", true);
     return;
   }
-  bool ok;
-  if (_cur_chan) { int idx = the_mesh.uiChannelIndex(_cur); ok = idx >= 0 && the_mesh.uiSendChannelText(idx, _input); }
-  else ok = the_mesh.uiSendDirectText(_cur, _input);
+  if (_input_mode == IN_NAME) {                      // nazwa urządzenia
+    scopy(_prefs->node_name, sizeof(_prefs->node_name), _input);
+    the_mesh.savePrefs();
+    go(S_SETTINGS);
+    popup("Nazwa zmieniona", "w Bluetooth będzie widoczna po restarcie");
+    return;
+  }
+  if (_input_mode == IN_TIME) {                      // data i godzina (czas polski): RRRR-MM-DD GG:MM
+    int Y, M, D, h, mi;
+    if (sscanf(_input, "%d-%d-%d %d:%d", &Y, &M, &D, &h, &mi) != 5 || Y < 2024 || Y > 2099 || M < 1 || M > 12 || D < 1 || D > 31 || h > 23 || mi > 59 || h < 0 || mi < 0) {
+      popup("Zły format", "wpisz np. 2026-11-13 14:32", true);
+      return;
+    }
+    // dni od 1970 (algorytm kalendarzowy), potem poprawka na czas polski
+    int y = Y - (M <= 2), era = y / 400, yoe = y - era * 400, mp = (M + 9) % 12;
+    int doy = (153 * mp + 2) / 5 + D - 1, doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    long days = (long)era * 146097 + doe - 719468;
+    uint32_t local = (uint32_t)(days * 86400L + h * 3600L + mi * 60L);
+    uint32_t utc = local - 3600;
+    struct tm chk; localTime(utc, &chk);
+    if (chk.tm_hour != h) utc -= 3600;               // czas letni
+    the_mesh.getRTCClock()->setCurrentTime(utc);
+    go(S_SETTINGS);
+    popup("Zegar ustawiony", _input);
+    return;
+  }
+  uint16_t id;
+  if (_cur_chan) { int idx = the_mesh.uiChannelIndex(_cur); id = idx >= 0 ? the_mesh.uiSendChannelText(idx, _input) : 0; }
+  else id = the_mesh.uiSendDirectText(_cur, _input);
+  bool ok = id != 0;
   if (ok) {
-    addMsg(_cur, "", _input, _cur_chan, true, 0);
+    UiMsg* m = addMsg(_cur, "", _input, _cur_chan, true, 0);
+    if (m) m->sent_id = id;
     _input[0] = 0; _input_chars = 0; _scroll = 0;
   } else {
     popup("Nie udało się wysłać", "spróbuj jeszcze raz", true);
@@ -286,7 +342,7 @@ void UITask::wake() {
 
 void UITask::back() {
   switch (_scr) {
-    case S_THREAD: go(_input_mode == IN_CHANNEL ? (uint8_t)S_MSGS : _input_mode == IN_FREQ ? (uint8_t)S_RADIO : _back_scr); break;
+    case S_THREAD: go(_input_mode == IN_CHANNEL ? (uint8_t)S_MSGS : _input_mode == IN_FREQ ? (uint8_t)S_RADIO : _input_mode != IN_MSG ? (uint8_t)S_SETTINGS : _back_scr); break;
     case S_INFO:   go(S_SETTINGS); break;
     case S_RADIO:  go(S_SETTINGS); break;
     case S_RPT:    go(S_RPTS); break;
@@ -342,7 +398,24 @@ void UITask::enter() {
             enableBluetooth(); popup("Bluetooth włączony", t, false, 6000);
           }
           break;
-        case 6: _scr = S_INFO; break;
+        case 6:
+          _prefs->buzzer_quiet = _prefs->buzzer_quiet ? 0 : 1;
+          the_mesh.savePrefs();
+          _buzzer.quiet(_prefs->buzzer_quiet);
+          if (!_prefs->buzzer_quiet) _buzzer.play("dm:d=16,o=6,b=200:e,g,c7");
+          break;
+        case 7: openInput(IN_NAME, _prefs->node_name); break;
+        case 8: {
+          struct tm t; localTime(the_mesh.getRTCClock()->getCurrentTime(), &t);
+          char b[24]; snprintf(b, sizeof(b), "%04d-%02d-%02d %02d:%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min);
+          openInput(IN_TIME, b);
+          break;
+        }
+        case 9:
+          _prefs->path_hash_mode = (_prefs->path_hash_mode + 1) % 3;
+          the_mesh.savePrefs();
+          break;
+        case 10: _scr = S_INFO; break;
       }
       break;
   }
@@ -400,7 +473,13 @@ void UITask::keyThread(uint8_t k) {
     } else popup("Brak pozycji GPS", "włącz GPS w Ustawieniach i wyjdź pod niebo");
     return;
   }
-  int limit = _input_mode == IN_CHANNEL ? 24 : _input_mode == IN_FREQ ? 8 : UI_INPUT_MAX;
+  if (_input_mode == IN_TIME && k == M9K_F4) {       // pinezka: zegar z GPS
+    if (timeFromGps()) { go(S_SETTINGS); popup("Zegar ustawiony z GPS"); }
+    else popup("GPS nie ma jeszcze czasu", "włącz GPS i wyjdź pod niebo", true);
+    return;
+  }
+  int limit = _input_mode == IN_CHANNEL ? 24 : _input_mode == IN_FREQ ? 8 : _input_mode == IN_NAME ? 22 : _input_mode == IN_TIME ? 16 : UI_INPUT_MAX;
+  if (_input_mode == IN_TIME && !((k >= '0' && k <= '9') || k == '-' || k == ':' || k == ' ')) return;
   if (_input_mode == IN_CHANNEL && (k == ' ' || (k == '#' && _input_chars > 0))) return;      // nazwa kanału bez spacji
   if (_input_mode == IN_FREQ && !((k >= '0' && k <= '9') || k == '.' || k == ',')) return;
   if (k >= 32 && k < 127 && _input_chars < limit) {
@@ -452,7 +531,7 @@ void UITask::key(uint8_t k) {
   if (k == M9K_LEFT)  { go((_scr + 4) % 5); return; }
   if (k == M9K_RIGHT) { go((_scr + 1) % 5); return; }
   if (k == M9K_ENTER) { enter(); return; }
-  int count = _scr == S_MSGS ? _thread_n + 1 : (_scr == S_CONTACTS || _scr == S_RPTS) ? _list_n : _scr == S_SETTINGS ? 7 : 0;
+  int count = _scr == S_MSGS ? _thread_n + 1 : (_scr == S_CONTACTS || _scr == S_RPTS) ? _list_n : _scr == S_SETTINGS ? 11 : 0;
   keyList(k, count);
 }
 
@@ -636,10 +715,11 @@ void UITask::fillSettings() {
   v.screen = UIS_LIST; v.tab = 4;
   strcpy(v.title, "Ustawienia");
   strcpy(v.title_right, "Enter: zmień / wykonaj");
-  static const char* const names[7] = { "Radio", "Advert do sąsiadów", "Advert do całej sieci", "GPS", "Moc nadawania", "Bluetooth", "Informacje" };
-  static const uint8_t icons[7] = { UII_TOWER, UII_NONE, UII_NONE, UII_GPS, UII_BOLT, UII_BT, UII_NONE };
-  int first; windowRows(7, S_SETTINGS, &first);
-  for (int i = first; i < 7 && v.nrows < ROWS_VISIBLE; i++) {
+  static const char* const names[11] = { "Radio", "Advert do sąsiadów", "Advert do całej sieci", "GPS", "Moc nadawania", "Bluetooth",
+                                          "Dźwięk wiadomości", "Nazwa urządzenia", "Data i godzina", "Bajty trasy", "Informacje" };
+  static const uint8_t icons[11] = { UII_TOWER, UII_NONE, UII_NONE, UII_GPS, UII_BOLT, UII_BT, UII_NONE, UII_USER, UII_NONE, UII_NONE, UII_NONE };
+  int first; windowRows(11, S_SETTINGS, &first);
+  for (int i = first; i < 11 && v.nrows < ROWS_VISIBLE; i++) {
     UiRow& r = v.rows[v.nrows++];
     strcpy(r.text, names[i]); r.icon = icons[i];
     switch (i) {
@@ -652,7 +732,15 @@ void UITask::fillSettings() {
       case 3: strcpy(r.right, _prefs->gps_enabled ? "włączony" : "wyłączony"); break;
       case 4: snprintf(r.right, sizeof(r.right), "%d dBm", _prefs->tx_power_dbm); break;
       case 5: if (isBluetoothEnabled()) snprintf(r.right, sizeof(r.right), "włączony · PIN %06lu", (unsigned long)the_mesh.getBLEPin()); else strcpy(r.right, "wyłączony"); break;
-      case 6: snprintf(r.right, sizeof(r.right), "wersja %s", M9_FW_VERSION); break;
+      case 6: strcpy(r.right, _prefs->buzzer_quiet ? "wyłączony" : "włączony"); break;
+      case 7: scopy(r.right, sizeof(r.right), _prefs->node_name); break;
+      case 8: {
+        struct tm t; localTime(the_mesh.getRTCClock()->getCurrentTime(), &t);
+        snprintf(r.right, sizeof(r.right), "%d.%02d.%04d %d:%02d", t.tm_mday, t.tm_mon + 1, t.tm_year + 1900, t.tm_hour, t.tm_min);
+        break;
+      }
+      case 9: snprintf(r.right, sizeof(r.right), _prefs->path_hash_mode == 0 ? "1 bajt" : "%d bajty", _prefs->path_hash_mode + 1); break;
+      case 10: snprintf(r.right, sizeof(r.right), "wersja %s", M9_FW_VERSION); break;
     }
   }
 }
@@ -661,15 +749,19 @@ void UITask::fillThread() {
   UiView& v = *_v;
   v.screen = UIS_THREAD; v.tab = -1;
   if (_input_mode != IN_MSG) {                       // pole do wpisania nazwy kanału albo częstotliwości
-    bool ch = _input_mode == IN_CHANNEL;
-    strcpy(v.title, ch ? "Nowy kanał" : "Częstotliwość");
-    strcpy(v.title_right, ch ? "kanał z hasztagiem" : "MHz");
-    strcpy(v.line1, ch ? "Wpisz nazwę, np. #beskidy. Kto wpisze tę samą nazwę, ten jest na kanale." : "Wpisz częstotliwość w MHz, np. 869.618");
+    static const char* const T[5] = { "", "Nowy kanał", "Częstotliwość", "Nazwa urządzenia", "Data i godzina" };
+    static const char* const R[5] = { "", "kanał z hasztagiem", "MHz", "do 22 znaków", "czas polski" };
+    static const char* const N[5] = { "", "Wpisz nazwę, np. #beskidy. Kto wpisze tę samą nazwę, ten jest na kanale.", "Wpisz częstotliwość w MHz, np. 869.618",
+      "Pod tą nazwą widzą Cię inni w sieci. Polskie litery: ctrl, potem litera.",
+      "Format: RRRR-MM-DD GG:MM. Zegar ustawia się też sam po połączeniu z aplikacją w telefonie i z GPS po złapaniu pozycji." };
+    strcpy(v.title, T[_input_mode]); strcpy(v.title_right, R[_input_mode]); strcpy(v.line1, N[_input_mode]);
     scopy(v.input, sizeof(v.input), _input);
     v.input_chars = _input_chars;
-    strcpy(v.hint[0].key, "Enter"); strcpy(v.hint[0].txt, ch ? "dodaj" : "zatwierdź");
-    strcpy(v.hint[1].key, "Wstecz"); strcpy(v.hint[1].txt, "anuluj");
-    v.nhints = 2;
+    v.polish_next = _polish;
+    strcpy(v.hint[0].key, "Enter"); strcpy(v.hint[0].txt, "zatwierdź");
+    v.nhints = 1;
+    if (_input_mode == IN_TIME) { strcpy(v.hint[1].key, "Pinezka"); strcpy(v.hint[1].txt, "z GPS"); v.nhints = 2; }
+    strcpy(v.hint[v.nhints].key, "Wstecz"); strcpy(v.hint[v.nhints].txt, "anuluj"); v.nhints++;
     return;
   }
   snprintf(v.title, sizeof(v.title), "%s%s", _cur_chan ? "# " : "", _cur);
@@ -693,7 +785,9 @@ void UITask::fillThread() {
     scopy(b.text, sizeof(b.text), m.text);
     b.out = m.out;
     char t[8]; fmtClock(t, sizeof(t), m.ts, false);
-    if (m.out) snprintf(b.meta, sizeof(b.meta), "%s · wysłano", t);
+    if (m.out && m.chan && m.repeats) snprintf(b.meta, sizeof(b.meta), "%s · powtórzeń: %d", t, m.repeats);
+    else if (m.out && !m.chan && m.delivered) snprintf(b.meta, sizeof(b.meta), "%s · dostarczono", t);
+    else if (m.out) snprintf(b.meta, sizeof(b.meta), "%s · wysłano", t);
     else if (m.hops == 0xFF) snprintf(b.meta, sizeof(b.meta), "%s · bezpośrednio", t);
     else if (m.hops == 0) scopy(b.meta, sizeof(b.meta), t);
     else snprintf(b.meta, sizeof(b.meta), "%s · skoki: %d", t, m.hops);
@@ -843,7 +937,12 @@ void UITask::loop() {
     _kb.setBacklight(false);
   }
 
+  _buzzer.loop();
+  if (the_mesh.ui_sent_changed) { the_mesh.ui_sent_changed = false; pollSent(); }
+
   if ((long)(now - _next_tick) >= 0) {             // zegar, bateria, „… min temu”
+    // zegar niewiarygodny (przed 2025 r.), a GPS ma czas: ustaw sam
+    if (the_mesh.getRTCClock()->getCurrentTime() < 1735689600UL) timeFromGps();
     _next_tick = now + 5000;
     _dirty = true;
   }

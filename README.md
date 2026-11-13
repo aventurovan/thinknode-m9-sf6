@@ -7,7 +7,7 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 
 ## Stan prac
 
-**Wersja 0.9.1 — pierwszy etap właściwego interfejsu.** Companion Bluetooth dla aplikacji MeshCore,
+**Wersja 0.9.2 — pierwszy etap właściwego interfejsu.** Companion Bluetooth dla aplikacji MeshCore,
 a urządzenie ma własny kolorowy interfejs po polsku:
 
 - **Start** — nowe wiadomości, ostatnio słyszane urządzenie, pozycja GPS, bateria i Bluetooth.
@@ -16,6 +16,8 @@ a urządzenie ma własny kolorowy interfejs po polsku:
 - **Repeatery** — lista z odległością (gdy jest GPS) i szczegóły repeatera.
 - **Ustawienia** — radio (presety **SF6 — MeshCore Południe**: 869,618 · BW 62,5 · SF6 · CR 4/8 oraz **EU/UK Narrow**: 869,618 · BW 62,5 · SF8 · CR 4/8,
   ręczna zmiana częstotliwości, BW, SF i CR), advert, GPS, moc nadawania, Bluetooth, informacje.
+- **Ustawienia (cd.)** — dźwięk wiadomości (wł./wył.), nazwa urządzenia, data i godzina (ręcznie, z GPS, z aplikacji), bajty trasy (1/2/3).
+- **Wysłane wiadomości** — na kanale licznik powtórzeń przez repeatery („powtórzeń: N”), w rozmowie prywatnej „dostarczono”.
 - **Kanały** — na liście Wiadomości pozycja „+ Dodaj kanał” (kanał z hasztagiem), Del na kanale usuwa go.
 
 Bluetooth: stały PIN **123456** (własny można ustawić w aplikacji MeshCore).

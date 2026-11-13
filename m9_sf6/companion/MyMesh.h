@@ -109,8 +109,16 @@ public:
   void uiSetTxPower(int8_t dbm);
   int  uiMaxTxPower() const { return MAX_LORA_TX_POWER; }
   bool uiAdvertFlood();
-  bool uiSendChannelText(int channel_idx, const char* text);
-  bool uiSendDirectText(const char* contact_name, const char* text);     // wiadomosc prywatna (kontakt po nazwie)
+  // wysyłanie z ekranu: zwracają numer wysyłki (0 = błąd); po numerze ekran pyta o powtórzenia / dostarczenie
+  uint16_t uiSendChannelText(int channel_idx, const char* text);
+  uint16_t uiSendDirectText(const char* contact_name, const char* text);     // wiadomosc prywatna (kontakt po nazwie)
+  #define UI_SENT_MAX 12
+  struct UiSent { uint16_t id; uint8_t kind; uint8_t repeats; bool delivered; uint32_t ack; uint8_t hash[8]; };   // kind: 1 kanał, 2 prywatna
+  UiSent ui_sent[UI_SENT_MAX];
+  int ui_sent_next = 0;
+  uint16_t ui_sent_seq = 0;
+  bool ui_sent_changed = false;
+  bool uiSentInfo(uint16_t id, uint8_t* repeats, bool* delivered);
   int  uiToggleFavourite(const uint8_t* pub_key);                         // 1 = ulubiony, 0 = nie, -1 = brak kontaktu
   int  uiChannelIndex(const char* name);
 

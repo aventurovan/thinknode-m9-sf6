@@ -287,6 +287,19 @@ uint8_t MyMesh::getExtraAckTransmitCount() const {
 }
 
 void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+  {                                                   // ekran: liczymy powtórzenia naszych wiadomości kanałowych przez repeatery
+    mesh::Packet p;
+    if (len > 0 && len < 256 && p.readFrom(raw, (uint8_t)len) && p.getPayloadType() == PAYLOAD_TYPE_GRP_TXT) {
+      uint8_t h[MAX_HASH_SIZE];
+      p.calculatePacketHash(h);
+      for (int i = 0; i < UI_SENT_MAX; i++) {
+        if (ui_sent[i].id && ui_sent[i].kind == 1 && memcmp(ui_sent[i].hash, h, MAX_HASH_SIZE) == 0) {
+          if (ui_sent[i].repeats < 250) ui_sent[i].repeats++;
+          ui_sent_changed = true;
+        }
+      }
+    }
+  }
   if (_serial->isConnected() && len + 3 <= MAX_FRAME_SIZE) {
     int i = 0;
     out_frame[i++] = PUSH_CODE_LOG_RX_DATA;
@@ -425,6 +438,9 @@ ContactInfo*  MyMesh::processAck(const uint8_t *data) {
   // see if matches any in a table
   for (int i = 0; i < EXPECTED_ACK_TABLE_SIZE; i++) {
     if (memcmp(data, &expected_ack_table[i].ack, 4) == 0) { // got an ACK from recipient
+      for (int k = 0; k < UI_SENT_MAX; k++) {             // ekran: wiadomość prywatna dostarczona
+        if (ui_sent[k].id && ui_sent[k].kind == 2 && memcmp(data, &ui_sent[k].ack, 4) == 0) { ui_sent[k].delivered = true; ui_sent_changed = true; }
+      }
       out_frame[0] = PUSH_CODE_SEND_CONFIRMED;
       memcpy(&out_frame[1], data, 4);
       uint32_t trip_time = _ms->getMillis() - expected_ack_table[i].msg_sent;
@@ -2362,14 +2378,27 @@ bool MyMesh::uiAdminCli(const char* cmd) {
   ui_admin.est_timeout = est;
   return true;
 }
-bool MyMesh::uiSendDirectText(const char* contact_name, const char* text) {
+uint16_t MyMesh::uiSendDirectText(const char* contact_name, const char* text) {
   ContactInfo c;
   for (int i = MAX_ANON_CONTACTS; i < getTotalContactSlots(); i++) {   // pierwsze 8 miejsc to „anon”
     if (!getContactByIdx(i, c) || c.type == ADV_TYPE_NONE || strcmp(c.name, contact_name) != 0) continue;
     ContactInfo* p = lookupContactByPubKey(c.id.pub_key, PUB_KEY_SIZE);
     if (!p) return false;
-    uint32_t ack, timeout;
-    return sendMessage(*p, getRTCClock()->getCurrentTimeUnique(), 0, text, ack, timeout) != MSG_SEND_FAILED;
+    uint32_t ack = 0, timeout;
+    if (sendMessage(*p, getRTCClock()->getCurrentTimeUnique(), 0, text, ack, timeout) == MSG_SEND_FAILED) return 0;
+    UiSent& u = ui_sent[ui_sent_next];
+    ui_sent_next = (ui_sent_next + 1) % UI_SENT_MAX;
+    memset(&u, 0, sizeof(u));
+    u.kind = 2; u.ack = ack;
+    if (++ui_sent_seq == 0) ui_sent_seq = 1;
+    u.id = ui_sent_seq;
+    return u.id;
+  }
+  return 0;
+}
+bool MyMesh::uiSentInfo(uint16_t id, uint8_t* repeats, bool* delivered) {
+  for (int i = 0; i < UI_SENT_MAX; i++) {
+    if (ui_sent[i].id == id) { *repeats = ui_sent[i].repeats; *delivered = ui_sent[i].delivered; return true; }
   }
   return false;
 }
@@ -2388,10 +2417,32 @@ int MyMesh::uiChannelIndex(const char* name) {
   }
   return -1;
 }
-bool MyMesh::uiSendChannelText(int channel_idx, const char* text) {
+// Jak BaseChatMesh::sendGroupMessage, ale zapamiętujemy skrót pakietu, żeby policzyć jego powtórzenia przez repeatery.
+uint16_t MyMesh::uiSendChannelText(int channel_idx, const char* text) {
   ChannelDetails cd;
-  if (!getChannel(channel_idx, cd)) return false;
-  return sendGroupMessage(getRTCClock()->getCurrentTimeUnique(), cd.channel, _prefs.node_name, text, strlen(text));
+  if (!getChannel(channel_idx, cd)) return 0;
+  uint8_t temp[5 + MAX_TEXT_LEN + 32];
+  uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
+  memcpy(temp, &timestamp, 4);
+  temp[4] = 0;                                        // zwykły tekst
+  sprintf((char*)&temp[5], "%s: ", _prefs.node_name);
+  char* ep = strchr((char*)&temp[5], 0);
+  int prefix_len = ep - (char*)&temp[5];
+  int text_len = strlen(text);
+  if (text_len + prefix_len > MAX_TEXT_LEN) text_len = MAX_TEXT_LEN - prefix_len;
+  memcpy(ep, text, text_len);
+  ep[text_len] = 0;
+  mesh::Packet* pkt = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, cd.channel, temp, 5 + prefix_len + text_len);
+  if (!pkt) return 0;
+  UiSent& u = ui_sent[ui_sent_next];
+  ui_sent_next = (ui_sent_next + 1) % UI_SENT_MAX;
+  memset(&u, 0, sizeof(u));
+  u.kind = 1;
+  pkt->calculatePacketHash(u.hash);
+  if (++ui_sent_seq == 0) ui_sent_seq = 1;
+  u.id = ui_sent_seq;
+  sendFloodScoped(cd.channel, pkt);
+  return u.id;
 }
 void MyMesh::uiSetGps(bool on) {
   sensors.setSettingValue("gps", on ? "1" : "0");
