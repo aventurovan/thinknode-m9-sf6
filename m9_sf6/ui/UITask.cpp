@@ -189,6 +189,7 @@ void UITask::loadAll() {
   if (_cfg.sleep_idx > 3) _cfg.sleep_idx = 1;
   if (_cfg.adv_idx >= sizeof(ADV_HOURS)) _cfg.adv_idx = 0;
   if (_cfg.ct_filter > 5) _cfg.ct_filter = 0;
+  if (_cfg.map_range > 2) _cfg.map_range = 0;
 
   f = SPIFFS.open(FILE_PW, "r");
   if (f) {
@@ -906,7 +907,7 @@ void UITask::doConfirm(uint8_t what) {
     case C_RPT_REBOOT: adminCli("reboot"); break;
     case C_WIFI_DL:
       wifiPrepare();
-      m9uploadStop(); m9dlStart(_wifi.ssid, _wifi.pass, _wifi.url);
+      m9uploadStop(); m9dlStart(_wifi.ssid, _wifi.pass, _wifi.url, _cfg.map_range == 1 ? 14 : _cfg.map_range == 2 ? 13 : 0);
       break;
     case C_WIFI_AP: {
       wifiPrepare();
@@ -1218,7 +1219,7 @@ int UITask::listCount(uint8_t s) {
     case S_RADIO: return 9;
     case S_SET_BT: return 6;
     case S_PICK: return _pick_n;
-    case S_MAP_NET: return 7;
+    case S_MAP_NET: return 8;
     case S_SET_POS: return 9;
     case S_SET_ADV: return 3;
     case S_SET_CT: return 6;
@@ -1256,7 +1257,7 @@ void UITask::listHead(uint8_t s) {
     case S_MENU: scopy(v.title, sizeof(v.title), _menu_title); hint("Enter", "wybierz"); hint("Wstecz", ""); break;
     case S_MAP_NET:
       strcpy(v.title, "Mapa");
-      if (m9dlStatus()[0]) snprintf(v.title_right, sizeof(v.title_right), "internet: %s", m9dlStatus());
+      if (m9dlStatus()[0]) scopy(v.title_right, sizeof(v.title_right), m9dlStatus());
       else if (m9uploadActive()) snprintf(v.title_right, sizeof(v.title_right), "WiFi %s · telefonów: %d", M9UP_SSID, m9uploadClients());
       else strcpy(v.title_right, "pobieranie i pliki");
       hint("Enter", "wybierz"); hint("Wstecz", m9uploadActive() || m9dlActive() ? "zatrzymaj" : "");
@@ -1362,7 +1363,7 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       t[0] = 0;
       switch (i) {
         case 0: setRow(r, "Wyśrodkuj na mojej pozycji", "", UII_GPS); break;
-        case 1: scopy(t, sizeof(t), m9dlStatus()[0] ? m9dlDetail() : "przez sieć WiFi poniżej"); setRow(r, m9dlActive() ? "Przerwij pobieranie" : "Pobierz z internetu", t, UII_SIGNAL, m9dlActive()); break;
+        case 1: scopy(t, sizeof(t), m9dlStatus()[0] ? m9dlDetail() : "przez sieć WiFi poniżej"); setRow(r, m9dlActive() ? "Przerwij" : "Pobierz z internetu", t, UII_SIGNAL, m9dlActive()); break;
         case 2:
           if (m9uploadActive()) { if (m9uploadFile()[0]) snprintf(t, sizeof(t), "%s · %lu MB", m9uploadFile(), (unsigned long)(m9uploadBytes() >> 20)); else strcpy(t, "hasło " M9UP_PASS " · 192.168.4.1"); }
           else strcpy(t, "przez WiFi urządzenia");
@@ -1382,6 +1383,8 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
           else if (_map.numPacks() == 0) snprintf(t, sizeof(t), "karta %lu GB · brak mapy", (unsigned long)(_map.sdSizeMB() / 1024));
           else snprintf(t, sizeof(t), "plików %d · zoom %d–%d", _map.numPacks(), _map.minZoom(), _map.maxZoom());
           setRow(r, "Karta i pliki mapy", t, UII_SD);
+          break;
+        case 7: setRow(r, "Zakres pobierania", _cfg.map_range == 1 ? "bez zoomu 15 · ok. 0,6 GB" : _cfg.map_range == 2 ? "do zoomu 13 · ok. 0,3 GB" : "cała mapa · ok. 1,4 GB");
           break;
       }
       return;
@@ -1557,6 +1560,11 @@ void UITask::listEnter(uint8_t s, int i) {
       else if (i == 4) openInput(IN_WIFI_PASS, _wifi.pass);
       else if (i == 5) openInput(IN_MAP_URL, _wifi.url);
       else if (i == 6) { _map.mount(); _map.scan(); _sd_pending = false; }
+      else if (i == 7) {
+        pickBegin(P_MAPRANGE, "Zakres pobierania");
+        pickAdd("cała mapa: południe do zoomu 15 (1,4 GB)"); pickAdd("bez zoomu 15: południe do 14 (0,6 GB)"); pickAdd("do zoomu 13: cała Polska (0,3 GB)");
+        pickOpen(_cfg.map_range < 3 ? _cfg.map_range : 0);
+      }
       return;
     case S_QUICK: {
       char t[100];
@@ -1780,6 +1788,7 @@ void UITask::applyPick(uint8_t id, int i) {
     case P_RPTSORT: _cfg.rpt_sort = i; saveCfg(); break;
     case P_MSGSND: _cfg.no_msg_snd = i == 1; saveCfg(); if (i == 0 && !_prefs->buzzer_quiet) _buzzer.play("dm:d=16,o=6,b=200:e,g,c7"); break;
     case P_ADVSND: _cfg.adv_snd = i; saveCfg(); if (i > 0 && !_prefs->buzzer_quiet) _buzzer.play("adv:d=32,o=7,b=160:g,p,g"); break;
+    case P_MAPRANGE: _cfg.map_range = i; saveCfg(); break;
     case P_BRIGHT: _cfg.bright = i + 1; saveCfg(); m9lcdBacklight(brightPercent()); break;
     case P_LOCK: _cfg.lock = i == 1; saveCfg(); if (i == 1) popup("Blokada włączona", "odblokowanie: Wstecz, potem Enter", false, 5000); break;
   }
@@ -2419,6 +2428,7 @@ void UITask::loop() {
   if (m9uploadActive()) { m9uploadLoop(); if (m9uploadChanged()) _map.scan(); }
   m9dlLoop();
   if (m9dlChanged()) _map.scan();
+  if (m9dlFinished()) { _map.scan(); wake(); popup("Mapa pobrana", "możesz wyjść z menu (Wstecz)", false, 20000); }
   if (m9dlFailed()) { char t[80]; snprintf(t, sizeof(t), "%s · pamięć %u kB", m9dlDetail(), m9FreeHeapKB()); wake(); popup("Pobieranie mapy: błąd", t, true, 15000); }
   if (m9uploadActive() || m9dlActive()) { uint32_t ms = SLEEP_STEPS[_cfg.sleep_idx]; if (ms) _sleep_at = now + ms; }     // przy przesyłaniu mapy ekran nie gaśnie
 
