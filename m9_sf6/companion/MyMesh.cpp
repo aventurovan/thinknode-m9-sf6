@@ -2386,10 +2386,10 @@ bool MyMesh::uiAdminStatus() {
   ui_admin.status_tag = tag ? tag : 1; ui_admin.est_timeout = est;
   return true;
 }
-bool MyMesh::uiAdminNeighbours() {
+bool MyMesh::uiAdminNeighbours(uint16_t offset) {
   ContactInfo* c = ui_admin.active ? lookupContactByPubKey(ui_admin.key, PUB_KEY_SIZE) : NULL;
   if (!c) return false;
-  uint8_t req[11] = { 0x06, 0, 12, 0, 0, 2, 6 };     // GET_NEIGHBOURS v0: 12 szt., od 0, najsilniejsze, 6 B klucza
+  uint8_t req[11] = { 0x06, 0, 12, (uint8_t)(offset & 0xFF), (uint8_t)(offset >> 8), 2, 6 };     // GET_NEIGHBOURS v0: 12 szt. od „offset”, najsilniejsze, 6 B klucza
   getRNG()->random(&req[7], 4);
   uint32_t tag = 0, est = 0;
   ui_admin.nb_ready = false;

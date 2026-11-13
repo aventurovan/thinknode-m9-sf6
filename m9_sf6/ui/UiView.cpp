@@ -41,11 +41,15 @@ static const char* const IC_GEAR[12] = { ".....##.....", "..#.####.#..", ".#####
 static const char* const IC_SCREEN[12] = { "", "############", "#..........#", "#..........#", "#..........#", "#..........#", "#..........#", "############", ".....##.....", "...######...", "", "" };
 static const char* const IC_SHIELD[12] = { ".....##.....", "..########..", ".##########.", ".##########.", ".##########.", ".##########.", "..########..", "..########..", "...######...", "....####....", ".....##.....", "" };
 
+static const char* const IC_CHECK[12] = { "", "", "..........##", ".........##.", "........##..", "##.....##...", ".##...##....", "..##.##.....", "...###......", "....#.......", "", "" };
+static const char* const IC_MUTE[12] = { "#.....#.....", ".#...##.....", "..#.###.....", "#####.#.....", "####.#......", "####..#.....", "#####..#....", "...###..#...", "....##...#..", ".....#....#.", "...........#", "" };
+
 static const char* const* iconRows(uint8_t i) {
   switch (i) {
     case UII_MAIL: return IC_MAIL; case UII_TOWER: return IC_TOWER; case UII_USER: return IC_USER; case UII_HASH: return IC_HASH;
     case UII_STAR: return IC_STAR; case UII_GPS: return IC_GPS; case UII_BT: return IC_BT; case UII_LOCK: return IC_LOCK;
     case UII_BOLT: return IC_BOLT; case UII_SD: return IC_SD; case UII_ROOM: return IC_ROOM;
+    case UII_CHECK: return IC_CHECK; case UII_MUTE: return IC_MUTE;
     case UII_HOME: return IC_HOME; case UII_GEAR: return IC_GEAR; case UII_SCREEN: return IC_SCREEN; case UII_SHIELD: return IC_SHIELD;
   }
   return NULL;
@@ -83,13 +87,14 @@ static void drawStatus(Gfx& g, const UiView& v) {
 }
 
 // dolny pasek: ikony Start, Wiadomości, Kontakty, Repeatery, Ustawienia; aktywna na bursztynowym tle
-static void drawTabs(Gfx& g, int active, int unread) {
+static void drawTabs(Gfx& g, int active, int unread, bool focus) {
   static const char* const* const IC[5] = { IC_HOME, IC_MAIL, IC_USER, IC_TOWER, IC_GEAR };
   int y = GFX_H - BOTTOM_H;
   g.fillRect(0, y, GFX_W, BOTTOM_H, C_BAR);
   for (int i = 0; i < 5; i++) {
     int cx = i * 64 + 32;
-    if (i == active) { g.fillRound(cx - 22, y + 3, 44, 18, 9, C_ACC); g.icon(cx - 6, y + 6, IC[i], C_INK); }
+    if (i == active && focus) { g.fillRound(cx - 25, y + 1, 50, 22, 11, C_TXT); g.fillRound(cx - 22, y + 3, 44, 18, 9, C_ACC); g.icon(cx - 6, y + 6, IC[i], C_INK); }   // chodzimy po pasku: biała ramka
+    else if (i == active) { g.fillRound(cx - 22, y + 3, 44, 18, 9, C_ACC); g.icon(cx - 6, y + 6, IC[i], C_INK); }
     else g.icon(cx - 6, y + 6, IC[i], C_DIM);
     if (i == 1 && unread > 0) {                       // licznik nieprzeczytanych przy kopercie
       char t[8]; snprintf(t, sizeof(t), "%d", unread > 99 ? 99 : unread);
@@ -113,7 +118,7 @@ static void drawHints(Gfx& g, const UiView& v) {
   }
 }
 
-static void drawBottom(Gfx& g, const UiView& v) { if (v.tab >= 0) drawTabs(g, v.tab, v.unread); else drawHints(g, v); }
+static void drawBottom(Gfx& g, const UiView& v) { if (v.tab >= 0) drawTabs(g, v.tab, v.unread, v.bar_focus); else drawHints(g, v); }
 
 static void drawHeader(Gfx& g, const UiView& v, int y) {
   int rw = v.title_right[0] ? Gfx::textWidth(v.title_right, F_SMALL) : 0;
@@ -136,15 +141,15 @@ static void drawList(Gfx& g, const UiView& v) {
   drawHeader(g, v, STATUS_H);
   int y = STATUS_H + HEADER_H;
   if (v.nchips > 0) {                                 // wiersz filtrów: aktywny wypełniony, zaznaczony (gdy chodzimy po wierszu) w ramce
-    int x = 4;
+    int x = 3;
     for (int i = 0; i < v.nchips; i++) {
-      int w = Gfx::textWidth(v.chips[i], F_SMALL) + 8;
+      int w = Gfx::textWidth(v.chips[i], F_SMALL) + 7;
       bool act = i == v.chip_active;
-      if (v.chip_focus && act) { g.fillRound(x - 1, y + 1, w + 2, 19, 9, C_TXT); g.fillRound(x + 1, y + 3, w - 2, 15, 7, C_ACC); }
+      if (v.chip_focus && act && !v.bar_focus) { g.fillRound(x - 1, y + 1, w + 2, 19, 9, C_TXT); g.fillRound(x + 1, y + 3, w - 2, 15, 7, C_ACC); }
       else if (act) g.fillRound(x, y + 2, w, 17, 8, v.chip_focus ? C_ACC : GFX_RGB(0x6B, 0x4A, 0x10));
       else { g.fillRound(x, y + 2, w, 17, 8, C_LINE); g.fillRound(x + 1, y + 3, w - 2, 15, 7, C_BG); }
       g.text(x + 4, y + 4, v.chips[i], F_SMALL, act ? (v.chip_focus ? C_INK : C_TXT) : C_DIM);
-      x += w + 3;
+      x += w + 2;
     }
     y += 22;
   }
@@ -156,7 +161,7 @@ static void drawList(Gfx& g, const UiView& v) {
   }
   for (int i = 0; i < v.nrows; i++, y += ROW_H) {
     const UiRow& r = v.rows[i];
-    bool sel = i == v.sel && !v.chip_focus;
+    bool sel = i == v.sel && !v.chip_focus && !v.bar_focus;
     uint16_t fg = sel ? C_INK : C_TXT, dim = sel ? GFX_RGB(0x2B, 0x24, 0x12) : C_DIM;
     if (sel) g.fillRect(0, y, GFX_W, ROW_H, C_ACC);
     int x = 8;
@@ -203,7 +208,7 @@ static void drawGrid(Gfx& g, const UiView& v) {
   for (int i = 0; i < v.ntiles; i++) {
     const UiTile& t = v.tile[i];
     int x = 6 + (i % cols) * (tw + gap), y = top + (i / cols) * (th + gap);
-    bool sel = i == v.sel;
+    bool sel = i == v.sel && !v.bar_focus;
     if (sel) { g.fillRound(x - 1, y - 1, tw + 2, th + 2, 7, C_ACC); g.fillRound(x + 1, y + 1, tw - 2, th - 2, 5, GFX_RGB(0x22, 0x1C, 0x10)); }
     else g.fillRound(x, y, tw, th, 6, C_TILE);
     const char* const* ic = iconRows(t.icon);
@@ -320,7 +325,9 @@ static void drawLock(Gfx& g, const UiView& v) {
   g.textCenter(GFX_W / 2, 62, v.big, F_HUGE, C_TXT);
   g.textCenter(GFX_W / 2, 118, v.line1, F_NORMAL, C_DIM);
   if (v.unread > 0) g.textCenter(GFX_W / 2, 146, v.line2, F_BOLD, C_ACC);
-  g.textCenter(GFX_W / 2, 204, "Naciśnij Enter, aby odblokować", F_SMALL, C_DIM);
+  g.icon(GFX_W / 2 - 6, 176, IC_LOCK, C_DIM);
+  g.textCenter(GFX_W / 2, 196, v.footer, F_SMALL, C_DIM);
+  if (v.batt > 0 && v.popup1[0]) g.textCenter(GFX_W / 2, 214, v.popup1, F_BOLD, C_ACC);     // postęp przytrzymania
 }
 
 void uiRender(Gfx& g, const UiView& v) {

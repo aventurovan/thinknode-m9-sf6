@@ -150,7 +150,7 @@ public:
   } ui_admin;
   bool uiAdminLogin(const uint8_t* key, const char* password);
   bool uiAdminStatus();
-  bool uiAdminNeighbours();
+  bool uiAdminNeighbours(uint16_t offset = 0);
   bool uiAdminCli(const char* cmd);
   void uiAdminLogout() { ui_admin.active = false; ui_admin.login = 0; }
 

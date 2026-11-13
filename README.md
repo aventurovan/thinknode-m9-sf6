@@ -7,7 +7,7 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 
 ## Stan prac
 
-**Wersja 0.11.0.** Companion Bluetooth dla aplikacji MeshCore (stały PIN **123456**, zmiana w Ustawieniach) i własny kolorowy interfejs po polsku:
+**Wersja 0.12.0.** Companion Bluetooth dla aplikacji MeshCore (stały PIN **123456**, zmiana w Ustawieniach) i własny kolorowy interfejs po polsku:
 
 - **Start** — zegar i sześć kafelków (Wiadomości, Kontakty, Repeatery, Pozycja, Radio, Urządzenie); po kafelkach chodzi się strzałkami, Enter wchodzi.
 - **Dolny pasek** — ikony: Start, Wiadomości, Kontakty, Repeatery, Ustawienia.
@@ -20,7 +20,12 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 - **Repeatery** — lista wg ostatniego kontaktu albo odległości, „Co tu słychać?” (ping do sąsiadów z SNR w obie strony; wykryty repeater można otworzyć i dodać do kontaktów),
   zarządzanie: logowanie (hasła zapamiętywane), stan, sąsiedzi, akcje (advert, zegar, preset SF6, restart), konsola.
 - **Ustawienia** — siatka ośmiu działów: Radio, Bluetooth, Pozycja i prywatność, Advert, Kontakty, Wiadomości, Ekran i dźwięk, System.
-- **Zapis** — wiadomości, ustawienia ekranu i hasła repeaterów zostają po restarcie.
+- **Zapis** — wiadomości (do 300), ustawienia ekranu, wyciszenia i hasła repeaterów zostają po restarcie. Kontaktów do 500.
+- **Ustawienia** — każdą wartość wybiera się z listy (Enter otwiera listę); presety radia są pod pozycją „Preset”.
+- **Dolny pasek** — ▼ z ostatniego wiersza lub dolnego rzędu kafelków schodzi na pasek, ◄ ► wybiera ikonę, Enter wchodzi, ▲ wraca.
+- **Blokada klawiszy** (Ustawienia › Ekran i dźwięk) — włącza się z wygaszeniem ekranu; odblokowanie: przytrzymanie Wstecz 2 s albo Wstecz i Enter.
+- **Wyciszanie rozmów** — Pinezka na liście Wiadomości otwiera opcje rozmowy (wycisz, oznacz jako przeczytane, usuń).
+- **Bluetooth** — w ustawieniach liczniki połączeń, parowań i ramek do diagnozy (łatka `tools/patch_ble.py`).
 
 ### Klawisze
 
@@ -32,7 +37,7 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 | ► w rozmowie | menu zaznaczonej wiadomości |
 | Wstecz | krok wstecz |
 | Home / Dymki / Wiadomość / Mapa | Start / Wiadomości / Kontakty / Repeatery |
-| Pinezka | Kontakty: następny filtr; Repeatery: sortowanie; rozmowa: wstaw pozycję; pole daty: zegar z GPS |
+| Pinezka | Wiadomości: opcje rozmowy; Kontakty: następny filtr; Repeatery: sortowanie; rozmowa: wstaw pozycję; pole daty: zegar z GPS |
 | litery na liście Kontakty | szukanie po nazwie (Del kasuje) |
 | Del na kanale | usunięcie kanału |
 | ctrl, potem litera | ą ć ę ł ń ó ś ż (ź pod X) |

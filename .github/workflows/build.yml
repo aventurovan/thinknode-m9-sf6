@@ -38,6 +38,8 @@ jobs:
           for f in main.cpp DataStore.cpp DataStore.h NodePrefs.h AbstractUITask.h; do
             cp MeshCore/examples/companion_radio/$f MeshCore/examples/m9_sf6/companion/$f
           done
+          # liczniki diagnostyczne Bluetooth (połączenia, parowania, ramki)
+          python3 m9/tools/patch_ble.py MeshCore/src/helpers/esp32/SerialBLEInterface.cpp
           cat m9/platformio-m9.ini >> MeshCore/variants/thinknode_m9/platformio.ini
 
       - uses: actions/setup-python@v5

@@ -10,7 +10,7 @@
 #define UI_INPUT_MAX  140
 
 enum UiScreen { UIS_START, UIS_LIST, UIS_THREAD, UIS_INFO, UIS_BOOT, UIS_LOCK, UIS_GRID };
-enum UiIcon { UII_NONE, UII_MAIL, UII_TOWER, UII_USER, UII_HASH, UII_STAR, UII_GPS, UII_BT, UII_LOCK, UII_BOLT, UII_SD, UII_ROOM, UII_HOME, UII_GEAR, UII_SCREEN, UII_SHIELD };
+enum UiIcon { UII_NONE, UII_MAIL, UII_TOWER, UII_USER, UII_HASH, UII_STAR, UII_GPS, UII_BT, UII_LOCK, UII_BOLT, UII_SD, UII_ROOM, UII_HOME, UII_GEAR, UII_SCREEN, UII_SHIELD, UII_CHECK, UII_MUTE };
 
 struct UiRow { char text[44]; char sub[80]; char right[64]; uint8_t icon; uint8_t badge; bool icon_accent; };
 struct UiBubble { char who[24]; char meta[32]; char text[168]; char path[72]; bool out; bool sel; };
@@ -24,6 +24,7 @@ struct UiView {
   // ekran
   uint8_t screen;
   int8_t tab;                       // 0..4 = zakładka na dolnym pasku, -1 = podpowiedzi klawiszy
+  bool bar_focus;                   // chodzimy po dolnym pasku (ikona w ramce)
   char title[48]; char title_right[80];
   // lista
   UiRow rows[UI_ROWS_MAX]; int nrows; int sel; bool more_up, more_dn;

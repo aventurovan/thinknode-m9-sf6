@@ -28,8 +28,9 @@ bool MyMesh::uiDiscoverStart() { ui_disc_n = 2; memset(ui_disc, 0, sizeof(ui_dis
   ui_disc[1].key[0] = 0x99; ui_disc[1].key[1] = 0x01; ui_disc[1].key[2] = 0x02; ui_disc[1].key_len = 32; ui_disc[1].snr_rx = -14; ui_disc[1].snr_tx = -20; return true; }
 bool MyMesh::uiAdminStatus() { struct __attribute__((packed)) St { uint16_t mv, queue; int16_t noise, rssi; uint32_t recv, sent, air, up, sf, sd, rf, rd; uint16_t err; int16_t snr; } st = { 4080, 1, -112, -87, 18422, 6310, 5400, 273600, 5000, 1310, 15000, 3422, 2, 38 };
   memcpy(ui_admin.status, &st, sizeof(st)); ui_admin.status_len = sizeof(st); ui_admin.status_ready = true; return true; }
-bool MyMesh::uiAdminNeighbours() { uint16_t n = 2; memcpy(ui_admin.nb, &n, 2); memcpy(ui_admin.nb + 2, &n, 2); memset(ui_admin.nb + 4, 0, 22); ui_admin.nb[4] = 0x77; ui_admin.nb[5] = 0xc1; ui_admin.nb[6] = 0x11; ui_admin.nb[14] = 34;
-  ui_admin.nb[15] = 0x55; ui_admin.nb[25] = (uint8_t)-9; ui_admin.nb_len = 26; ui_admin.nb_ready = true; return true; }
+bool MyMesh::uiAdminNeighbours(uint16_t offset) { uint16_t total = 15, n = offset == 0 ? 12 : 3; memcpy(ui_admin.nb, &total, 2); memcpy(ui_admin.nb + 2, &n, 2); memset(ui_admin.nb + 4, 0, 132);
+  for (int i = 0; i < n; i++) { ui_admin.nb[4 + i * 11] = (uint8_t)(0x40 + offset + i); ui_admin.nb[4 + i * 11 + 10] = (uint8_t)(30 - 4 * (offset + i)); }
+  ui_admin.nb[4] = 0x77; ui_admin.nb[5] = 0xc1; ui_admin.nb[6] = 0x11; ui_admin.nb_len = 4 + n * 11; ui_admin.nb_ready = true; return true; }
 MyMesh the_mesh;
 
 static mesh::MainBoard board; static MultiSerialInterface ser; static DisplayDriver disp; static SensorManager sens;
@@ -74,24 +75,26 @@ int main(int argc, char** argv) {
   run(3000);
   rx("Public", "Ania: Nowy repeater w Ustroniu działa, sprawdźcie", 3); rx("Marek SP9", "Jadę na Równicę, będę o 16", 2);
   save("start");
-  keys({ M9K_DOWN, M9K_RIGHT }); save("start-kafelek");
-  keys({ M9K_MSG }); save("wiadomosci");
+  keys({ M9K_DOWN, M9K_DOWN, M9K_RIGHT }); save("pasek-zaznaczony");
+  keys({ M9K_ENTER }); save("wiadomosci");
+  keys({ M9K_F4 }); save("menu-rozmowy");
+  keys({ M9K_DOWN, M9K_ENTER }); run(3000); keys({ M9K_BACK }); save("wiadomosci-wyciszony");
   keys({ M9K_ENTER }); type("Slysze go ze Skrzycznego"); keys({ M9K_ENTER }); save("rozmowa");
   keys({ M9K_UP, M9K_RIGHT, M9K_ENTER }); save("szczegoly-wiadomosci");
-  keys({ M9K_F3 }); save("kontakty-filtry");
-  keys({ M9K_RIGHT, M9K_RIGHT, M9K_DOWN, M9K_DOWN }); save("kontakty-rpt");
-  keys({ M9K_F4, M9K_F4, M9K_F4, M9K_F4 }); save("kontakty-uslyszane");
-  keys({ M9K_ENTER }); save("menu-kontaktu");
-  keys({ M9K_MAP }); save("repeatery");
-  keys({ M9K_ENTER }); save("co-tu-slychac");
-  keys({ M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("co-tu-slychac-dodany");
+  keys({ M9K_F3 }); save("kontakty");
+  keys({ M9K_UP }); save("kontakty-filtry");
+  keys({ M9K_MAP, M9K_DOWN, M9K_ENTER, M9K_ENTER, M9K_ENTER }); run(500); keys({ M9K_DOWN, M9K_ENTER }); run(500); save("sasiedzi");
+  for (int i = 0; i < 12; i++) keys({ M9K_DOWN });
+  save("sasiedzi-koniec"); keys({ M9K_ENTER }); run(500); for (int i = 0; i < 6; i++) keys({ M9K_DOWN }); save("sasiedzi-nastepni");
   keys({ M9K_HOME, M9K_LEFT }); save("ustawienia");
-  for (int i = 0; i < 8; i++) {
-    keys({ M9K_ENTER });
-    char n[24]; snprintf(n, sizeof(n), "ustawienia-%d", i); save(n);
-    keys({ M9K_BACK });
-    if (i % 2 == 0) keys({ M9K_RIGHT }); else keys({ M9K_LEFT, M9K_DOWN });
-  }
+  keys({ M9K_ENTER }); save("radio");
+  keys({ M9K_ENTER }); save("radio-preset");
+  keys({ M9K_BACK, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("radio-bw");
+  keys({ M9K_BACK, M9K_BACK, M9K_RIGHT, M9K_ENTER }); save("bluetooth");
+  keys({ M9K_BACK, M9K_LEFT, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_ENTER, M9K_DOWN, M9K_DOWN, M9K_DOWN }); save("ekran");
+  keys({ M9K_ENTER }); save("blokada-wybor");
+  keys({ M9K_DOWN, M9K_ENTER }); run(6000); run(70000); keys({ 'a' }); save("ekran-zablokowany");
+  keys({ M9K_BACK }); save("ekran-zablokowany-wstecz"); keys({ M9K_ENTER }); save("odblokowany");
   printf("zrzutow: %d\n", shot);
   return 0;
 }

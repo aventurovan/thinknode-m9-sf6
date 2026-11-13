@@ -1,4 +1,8 @@
 #include "M9Ble.h"
+
+volatile uint32_t m9ble_connects = 0, m9ble_auth_ok = 0, m9ble_auth_fail = 0, m9ble_rx = 0, m9ble_tx = 0;
+volatile uint8_t m9ble_fail_reason = 0;
+
 #if defined(ESP32)
 #include <esp_gap_ble_api.h>
 #include <stdlib.h>

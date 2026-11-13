@@ -45,7 +45,7 @@ public:
   struct UiAdmin { uint8_t key[32]; bool active; uint8_t login; bool is_admin; uint32_t status_tag; bool status_ready; uint8_t status[96]; uint8_t status_len; uint32_t nb_tag; bool nb_ready; uint8_t nb[160]; uint8_t nb_len; bool cli_wait, cli_ready; char cli[168]; uint32_t est_timeout; } ui_admin;
   bool uiAdminLogin(const uint8_t* k, const char*) { memset(&ui_admin, 0, sizeof(ui_admin)); memcpy(ui_admin.key, k, 32); ui_admin.active = true; ui_admin.login = 2; ui_admin.is_admin = true; return true; }
   bool uiAdminStatus();
-  bool uiAdminNeighbours();
+  bool uiAdminNeighbours(uint16_t offset = 0);
   bool uiAdminCli(const char* c) { snprintf(ui_admin.cli, sizeof(ui_admin.cli), "odpowiedz na: %s — v1.9.1 (Build: 02-Nov-2026) to jest dluzsza odpowiedz ktora trzeba zawinac na kilka wierszy ekranu", c); ui_admin.cli_ready = true; return true; }
   void uiAdminLogout() { ui_admin.active = false; }
   #define UI_DISC_MAX 12

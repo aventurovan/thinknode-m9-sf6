@@ -15,10 +15,12 @@
 
 struct ContactInfo;
 
-#define UI_MSG_MAX     120
+#define UI_MSG_MAX     300
 #define UI_THREAD_MAX  48
-#define UI_LIST_MAX    400
-#define UI_KVS_MAX     24
+#define UI_LIST_MAX    520
+#define UI_KVS_MAX     64
+#define UI_MUTED_MAX   16
+#define UI_PICK_MAX    12
 #define UI_PW_MAX      12
 #define UI_MENU_MAX    8
 
@@ -39,13 +41,15 @@ struct UiMsg {
 class UITask : public AbstractUITask {
   enum Scr { S_START = 0, S_MSGS = 1, S_CONTACTS = 2, S_RPTS = 3, S_SETTINGS = 4,
              S_THREAD, S_KV, S_BOOT, S_MENU, S_HEARD, S_QUICK, S_DISC, S_LOGIN, S_ADMIN, S_ADMIN_ACT, S_ADMIN_CLI,
-             S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS };
+             S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS, S_PICK };
   enum InputMode { IN_MSG = 0, IN_CHANNEL, IN_FREQ, IN_NAME, IN_TIME, IN_PASS, IN_CLI, IN_LAT, IN_LON, IN_PIN };
-  enum Act { A_WRITE, A_FAV, A_DETAIL, A_MANAGE, A_DELETE, A_REPLY, A_RESEND, A_COPY, A_DELMSG };
-  enum Confirm { C_NONE = 0, C_DEL_CHANNEL, C_DEL_CONTACT, C_REBOOT, C_FACTORY, C_RPT_REBOOT, C_RPT_SF6, C_CLEAR_MSGS, C_CLEAR_PW, C_CLEAR_BONDS };
+  enum Act { A_WRITE, A_FAV, A_DETAIL, A_MANAGE, A_DELETE, A_REPLY, A_RESEND, A_COPY, A_DELMSG, A_OPEN, A_MUTE, A_MARKREAD, A_DELCHAN, A_DELTHREAD };
+  enum Pick { P_PRESET, P_BW, P_SF, P_CR, P_TX, P_HASH, P_AIR, P_BT, P_GPS, P_ADVLOC, P_TEL0, P_TEL1, P_TEL2, P_AUTOADV, P_AA_MODE, P_AA_T0, P_AA_T1, P_AA_T2, P_AA_T3,
+              P_AA_FULL, P_AA_HOPS, P_SHOWPATH, P_MULTIACK, P_SOUND, P_SLEEP, P_KBLIGHT, P_WAKE, P_LOCK };
+  enum Confirm { C_NONE = 0, C_DEL_CHANNEL, C_DEL_CONTACT, C_REBOOT, C_FACTORY, C_RPT_REBOOT, C_RPT_SF6, C_CLEAR_MSGS, C_CLEAR_PW, C_CLEAR_BONDS, C_DEL_THREAD };
   struct Thread { char name[32]; uint8_t chan; uint8_t unread; uint32_t last; int16_t last_msg; };
   struct Nav { uint8_t scr; int16_t sel, top; };
-  struct Cfg { uint32_t magic; uint8_t show_path, sleep_idx, kb_light, adv_idx, ct_filter, rpt_sort, no_wake, spare[5]; };
+  struct Cfg { uint32_t magic; uint8_t show_path, sleep_idx, kb_light, adv_idx, ct_filter, rpt_sort, no_wake, lock, spare[4]; };
   struct Pw { uint8_t key[6]; char pw[16]; };
 
   DisplayDriver* _display;
@@ -71,7 +75,16 @@ class UITask : public AbstractUITask {
   // wybrany kontakt / wiadomość / menu
   uint8_t _ck[32]; char _cname[32]; uint8_t _ctype; bool _cfav;
   int _msg_idx;
-  uint8_t _menu_act[UI_MENU_MAX]; int _menu_n; char _menu_title[32]; bool _menu_msg;
+  uint8_t _menu_act[UI_MENU_MAX]; int _menu_n; char _menu_title[32]; bool _menu_msg, _menu_thread;
+  char _tname[32]; bool _tchan;          // rozmowa wybrana w menu listy Wiadomości
+  // wybór wartości ustawienia
+  uint8_t _pick_id; char _pick_opt[UI_PICK_MAX][48]; int _pick_n, _pick_cur; char _pick_title[48];
+  // wyciszone kanały i rozmowy
+  char _muted[UI_MUTED_MAX][32]; int _muted_n;
+  // dolny pasek, blokada, sąsiedzi repeatera
+  bool _bar; int8_t _bar_sel;
+  bool _locked; unsigned long _ul_first, _ul_last; bool _ul_back;
+  uint16_t _nb_total, _nb_got; bool _kv_more;
   char _search[16];
   // radio: wartości przed „Zastosuj”
   float _rf, _rbw; uint8_t _rsf, _rcr;
@@ -153,6 +166,17 @@ class UITask : public AbstractUITask {
   void fill();
   void fillStatus();
   void fillStart();
+  void fillLock();
+  void lockKey(uint8_t k);
+  void pickBegin(uint8_t id, const char* title);
+  void pickAdd(const char* text);
+  void pickOpen(int cur);
+  void applyPick(uint8_t id, int i);
+  bool settingPick(uint8_t s, int i);
+  bool isMuted(const char* name);
+  void toggleMute(const char* name);
+  void saveMuted();
+  void openMenuThread(int idx);
   void fillSettings();
   bool gridKey(uint8_t k, int count, int cols);
   void fillThread();
