@@ -6,6 +6,14 @@
 #include <HTTPClient.h>
 #include <SD.h>
 #include <esp_heap_caps.h>
+#include <mbedtls/platform.h>
+
+// Szyfrowanie połączenia (TLS) potrzebuje ok. 40 kB pamięci naraz, a w pamięci wewnętrznej zostaje ok. 30 kB.
+// Dlatego jego bufory kierujemy do dużej pamięci dodatkowej (PSRAM); gdyby jej zabrakło — do wewnętrznej.
+static void* tlsCalloc(size_t n, size_t size) {
+  return heap_caps_calloc_prefer(n, size, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+static void tlsFree(void* p) { heap_caps_free(p); }
 
 #define DIR        "/mapa"
 #define MAX_FILES  80
@@ -40,7 +48,7 @@ static volatile uint32_t req_off = 0, req_total = 0;
 static volatile bool req_list = false;
 static char list_body[4096];
 // diagnostyka ostatniej nieudanej próby (wypełnia zadanie w tle)
-static char d_tls[72] = "", diag[360] = "";
+static char d_tls[72] = "", diag[400] = "";
 static volatile int d_hop = 0, d_code = 0, d_heap = 0, d_block = 0, d_rssi = 0, d_wifi = 0;
 static char d_host[40] = "";
 
@@ -155,9 +163,9 @@ static void stopTask() { session = session + 1; net = N_IDLE; }
 
 static void fail(const char* why) {
   snprintf(diag, sizeof(diag),
-           "%s\nEtap: %s, serwer %d: %s\nKod: %d\nSzyfrowanie: %s\nPamięć: %d kB wolne, blok %d kB\nWiFi: %d dBm, stan %d\nTeraz wolne: %u kB",
+           "%s\nEtap: %s, serwer %d: %s\nKod: %d\nSzyfrowanie: %s\nPamięć: %d kB wolne, blok %d kB\nWiFi: %d dBm, stan %d\nTeraz wolne: %u kB, dodatkowa %u kB",
            why, st == ST_CONNECT ? "WiFi" : st == ST_LIST ? "lista plików" : "plik mapy", (int)d_hop + 1, d_host[0] ? d_host : "-", (int)d_code,
-           d_tls[0] ? d_tls : "-", (int)d_heap, (int)d_block, (int)d_rssi, (int)d_wifi, (unsigned)(ESP.getFreeHeap() / 1024));
+           d_tls[0] ? d_tls : "-", (int)d_heap, (int)d_block, (int)d_rssi, (int)d_wifi, (unsigned)(ESP.getFreeHeap() / 1024), (unsigned)(ESP.getFreePsram() / 1024));
   st = ST_ERROR;
   failed_flag = true;
   snprintf(status, sizeof(status), "błąd");
@@ -178,6 +186,7 @@ void m9dlStart(const char* ssid, const char* pass, const char* base_url, int max
   m9dlStop();
   if (ring == NULL) ring = (uint8_t*)ps_malloc(RING_SZ);
   if (ring == NULL) { fail("brak pamięci"); return; }
+  mbedtls_platform_set_calloc_free(tlsCalloc, tlsFree);
   for (int i = 0; i < 60 && task_alive; i++) delay(50); // poprzednie zadanie kończy połączenie
   if (task_alive) { fail("poprzednie połączenie jeszcze się zamyka"); return; }
   snprintf(base, sizeof(base), "%s%s", base_url, base_url[strlen(base_url) - 1] == '/' ? "" : "/");
