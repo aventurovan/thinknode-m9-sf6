@@ -1,0 +1,58 @@
+name: Mapa — próba stylu (mały obszar)
+
+# Szybka próba całej drogi: dane OSM -> kafelki w naszym ciemnym stylu -> pliki .mcm -> podgląd PNG.
+# Uruchamia się po zmianie w folderze mapa/ (albo ręcznie).
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths: [ 'mapa/**', '.github/workflows/mapa-test.yml' ]
+
+jobs:
+  proba:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dane wektorowe (Monako — mały obszar do próby)
+        run: |
+          mkdir -p data/styl
+          docker run -e JAVA_TOOL_OPTIONS="-Xmx3g" -v "$(pwd)/data":/data ghcr.io/onthegomap/planetiler:latest --download --area=monaco > planetiler.log 2>&1 || (tail -40 planetiler.log; exit 1)
+          tail -5 planetiler.log; ls -la data
+      - name: Serwer kafelków
+        run: |
+          cp mapa/styl/ciemna.json data/styl/
+          cp mapa/config.json data/
+          docker run --rm --entrypoint sh maptiler/tileserver-gl -c "find / -type d -name 'Noto Sans Regular' 2>/dev/null | head -5; ls / | head -30" || true
+          docker run -d --name ts -v "$(pwd)/data":/data -p 8080:8080 maptiler/tileserver-gl -p 8080 --config /data/config.json
+          for i in $(seq 1 30); do curl -sf http://localhost:8080/styles.json > /dev/null && break; sleep 2; done
+          docker logs ts 2>&1 | tail -40
+          curl -s http://localhost:8080/styles.json | head -c 600; echo
+      - name: Pakowanie i podgląd
+        run: |
+          pip install pillow numpy
+          cd mapa
+          python3 pakuj_mape.py mapa --zrodlo "http://localhost:8080/styles/ciemna/256/{z}/{x}/{y}.png" --obszar 7.38,43.71,7.46,43.76 --zoom 11-15 --wyjscie ../proba/mapa --watki 4
+          ls -la ../proba/mapa
+          python3 - <<'PY'
+          import glob, sys
+          sys.path.insert(0, '.')
+          import pakuj_mape as pm
+          from PIL import Image
+          for z in (12, 13, 14, 15):
+              x, y = pm.lonlat_to_tile(7.4246, 43.7384, z)
+              x, y = int(x), int(y)
+              f = glob.glob('../proba/mapa/z%d_*.mcm' % z)[0]
+              W = Image.new('RGB', (512, 512))
+              for dx in (0, 1):
+                  for dy in (0, 1):
+                      t = pm.read_tile(f, x + dx, y + dy)
+                      if t: W.paste(pm.decode_tile(t).convert('RGB'), (dx * 256, dy * 256))
+              W.save('../proba/podglad-z%d.png' % z)
+              t = pm.read_tile(f, x, y); print('z', z, 'kafelek', x, y, 'bajtow', len(t) if t else None)
+          PY
+          docker logs ts 2>&1 | grep -i -E "error|font|glyph" | head -20 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mapa-proba
+          path: proba/
