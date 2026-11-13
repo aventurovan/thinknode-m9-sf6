@@ -847,14 +847,14 @@ void MyMesh::onControlDataRecv(mesh::Packet *packet) {
   if (ui_disc_tag && packet->payload_len >= 6 + 4 && (packet->payload[0] & 0xF0) == 0x90) {
     uint32_t tag; memcpy(&tag, &packet->payload[2], 4);
     if (tag == ui_disc_tag) {
-      int klen = packet->payload_len - 6; if (klen > 8) klen = 8;
+      int klen = packet->payload_len - 6; if (klen > 32) klen = 32;
       const uint8_t* key = &packet->payload[6];
       bool known = false;
-      for (int i = 0; i < ui_disc_n; i++) if (memcmp(ui_disc[i].prefix, key, 4) == 0) known = true;
+      for (int i = 0; i < ui_disc_n; i++) if (memcmp(ui_disc[i].key, key, 4) == 0) known = true;
       if (!known && ui_disc_n < UI_DISC_MAX && (packet->payload[0] & 0x0F) == ADV_TYPE_REPEATER) {
         UiDisc& d = ui_disc[ui_disc_n++];
         memset(&d, 0, sizeof(d));
-        memcpy(d.prefix, key, klen);
+        memcpy(d.key, key, klen); d.key_len = klen;
         d.snr_rx = (int8_t)(_radio->getLastSNR() * 4); d.snr_tx = (int8_t)packet->payload[1]; d.rssi = (int8_t)_radio->getLastRSSI();
         for (int i = ui_disc_n - 1; i > 0 && ui_disc[i].snr_rx > ui_disc[i - 1].snr_rx; i--) { UiDisc t = ui_disc[i]; ui_disc[i] = ui_disc[i - 1]; ui_disc[i - 1] = t; }
       }
@@ -2439,7 +2439,7 @@ void MyMesh::uiNotePath(const mesh::Packet* pkt) {
 // „Co tu słychać?”: jeden ping bez przekazywania; odpowiadają repeatery, które słyszą nas bezpośrednio
 bool MyMesh::uiDiscoverStart() {
   uint8_t d[10];
-  d[0] = 0x80 | 0x01;                               // zapytanie, w odpowiedzi tylko początek klucza
+  d[0] = 0x80;                                      // zapytanie; w odpowiedzi pełny klucz (potrzebny, żeby dodać repeater do kontaktów)
   d[1] = (1 << ADV_TYPE_REPEATER);
   getRNG()->random(&d[2], 4);
   memset(&d[6], 0, 4);
@@ -2450,6 +2450,21 @@ bool MyMesh::uiDiscoverStart() {
   if (!pkt) { ui_disc_tag = 0; return false; }
   sendZeroHop(pkt);
   ui_disc_tag = tag;
+  return true;
+}
+// repeater z „Co tu słychać?” do kontaktów: nazwa tymczasowa, właściwa przyjdzie z jego advertem
+bool MyMesh::uiAddDiscovered(int i) {
+  if (i < 0 || i >= ui_disc_n || ui_disc[i].key_len < PUB_KEY_SIZE) return false;
+  if (lookupContactByPubKey(ui_disc[i].key, PUB_KEY_SIZE)) return true;
+  ContactInfo c;
+  memset(&c, 0, sizeof(c));
+  memcpy(c.id.pub_key, ui_disc[i].key, PUB_KEY_SIZE);
+  snprintf(c.name, sizeof(c.name), "RPT %02x%02x%02x", ui_disc[i].key[0], ui_disc[i].key[1], ui_disc[i].key[2]);
+  c.type = ADV_TYPE_REPEATER;
+  c.out_path_len = 0;                               // słyszymy go bezpośrednio
+  c.lastmod = getRTCClock()->getCurrentTime();
+  if (!addContact(c)) return false;
+  dirty_contacts_expiry = futureMillis(LAZY_CONTACTS_WRITE_DELAY);
   return true;
 }
 void MyMesh::uiReboot() {

@@ -127,9 +127,10 @@ public:
   int8_t ui_rx_snr_x4 = 0; int16_t ui_rx_rssi = 0;
   // „Co tu słychać?”
   #define UI_DISC_MAX 12
-  struct UiDisc { uint8_t prefix[8]; int8_t snr_rx, snr_tx, rssi; };
+  struct UiDisc { uint8_t key[32]; uint8_t key_len; int8_t snr_rx, snr_tx, rssi; };
   UiDisc ui_disc[UI_DISC_MAX]; int ui_disc_n = 0; uint32_t ui_disc_tag = 0;
   bool uiDiscoverStart();
+  bool uiAddDiscovered(int i);
   void uiReboot();
   bool uiFactoryReset();
   void uiSetLatLon(double lat, double lon);

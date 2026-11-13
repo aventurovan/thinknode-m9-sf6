@@ -1,5 +1,6 @@
 #include "UITask.h"
 #include "M9Lcd.h"
+#include "M9Ble.h"
 #include "../Version.h"
 #include <MyMesh.h>
 #include <helpers/sensors/LocationProvider.h>
@@ -55,7 +56,8 @@ static double distKm(double lat1, double lon1, double lat2, double lon2) {
   return 2 * R * asin(sqrt(h));
 }
 
-static void comma(char* s) { for (; *s; s++) if (*s == '.') *s = ','; }
+// przecinek dziesiętny: kropka tylko między cyframi („15.4 km” tak, „godz.” nie)
+static void comma(char* s) { for (char* p = s; *p; p++) if (*p == '.' && p > s && p[-1] >= '0' && p[-1] <= '9' && p[1] >= '0' && p[1] <= '9') *p = ','; }
 
 static void fmtSnr(char* dest, size_t n, int snr_x4) {
   int a = snr_x4 < 0 ? -snr_x4 : snr_x4;
@@ -150,7 +152,7 @@ void UITask::loadAll() {
   }
   if (_cfg.sleep_idx > 3) _cfg.sleep_idx = 1;
   if (_cfg.adv_idx >= sizeof(ADV_HOURS)) _cfg.adv_idx = 0;
-  if (_cfg.ct_filter > 5) _cfg.ct_filter = 0;
+  if (_cfg.ct_filter > 6) _cfg.ct_filter = 0;
 
   f = SPIFFS.open(FILE_PW, "r");
   if (f) {
@@ -268,7 +270,7 @@ void UITask::newMsg(uint8_t path_len, const char* from_name, const char* text, i
     m->snr_x4 = the_mesh.ui_rx_snr_x4; m->rssi = the_mesh.ui_rx_rssi;
   }
   if (!_prefs->buzzer_quiet && !_buzzer.isPlaying()) _buzzer.play(chan ? "ch:d=16,o=6,b=200:e,g" : "dm:d=16,o=6,b=200:e,g,c7");
-  wake();
+  if (!_cfg.no_wake || _awake) wake();
 }
 
 void UITask::msgRead(int msgcount) { _msgcount = msgcount; }
@@ -722,6 +724,14 @@ void UITask::doConfirm(uint8_t what) {
       if (!the_mesh.uiFactoryReset()) popup("Nie udało się wyczyścić pamięci", "", true);
       break;
     case C_RPT_REBOOT: adminCli("reboot"); break;
+    case C_CLEAR_MSGS: _msg_n = 0; _msg_idx = -1; saveMsgs(); popup("Wiadomości usunięte"); break;
+    case C_CLEAR_PW: _pw_n = 0; savePw(); popup("Hasła repeaterów usunięte"); break;
+    case C_CLEAR_BONDS: {
+      int n = m9bleClearBonds();
+      char t[64]; snprintf(t, sizeof(t), "usunięto: %d · w telefonie też usuń urządzenie", n);
+      popup("Zapomniano telefony", t, false, 6000);
+      break;
+    }
     case C_RPT_SF6: adminCli("set radio 869.618,62.5,6,8"); break;
   }
 }
@@ -990,28 +1000,33 @@ void UITask::keyThread(uint8_t k) {
 #define AA_ROOM      (1 << 3)
 #define AA_SENSOR    (1 << 4)
 static const uint8_t AA_BITS[4] = { AA_CHAT, AA_REPEATER, AA_ROOM, AA_SENSOR };
+static const float AIRTIME_STEPS[] = { 0, 1, 2, 3, 9 };
+static const char* const AIRTIME_NAMES[] = { "bez limitu", "do 50% czasu", "do 33% czasu", "do 25% czasu", "do 10% czasu" };
+static const char* const TELEM_NAMES[] = { "nikomu", "wybranym kontaktom", "każdemu, kto zapyta" };
+#define FILTER_HEARD 6
+#define N_CLI ((int)(sizeof(CLI_CMDS) / sizeof(CLI_CMDS[0])))
 
 int UITask::listCount(uint8_t s) {
   switch (s) {
     case S_MSGS: return _thread_n + 1;
-    case S_CONTACTS: case S_RPTS: return _list_n + 1;
+    case S_CONTACTS: return 1 + (_cfg.ct_filter == FILTER_HEARD ? the_mesh.ui_heard_n : _list_n);   // wiersz 0 = filtry
+    case S_RPTS: return _list_n + 1;
     case S_HEARD: return the_mesh.ui_heard_n;
     case S_MENU: return _menu_n;
     case S_QUICK: return 7;
-    case S_DISC: return the_mesh.ui_disc_n;
+    case S_DISC: return the_mesh.ui_disc_n + 1;
     case S_LOGIN: return pwGet(_ck) ? 3 : 2;
     case S_ADMIN: return 5;
     case S_ADMIN_ACT: return 4;
-    case S_ADMIN_CLI: return (int)(sizeof(CLI_CMDS) / sizeof(CLI_CMDS[0])) + 1;
-    case S_SETTINGS: return 8;
-    case S_RADIO: return 9;
-    case S_SET_DEV: return 5;
-    case S_SET_POS: return 6;
+    case S_ADMIN_CLI: return N_CLI + 1;
+    case S_RADIO: return 10;
+    case S_SET_BT: return 4;
+    case S_SET_POS: return 9;
     case S_SET_ADV: return 3;
     case S_SET_CT: return 7;
-    case S_SET_BT: return 2;
-    case S_SET_MSG: return 2;
-    case S_SET_SYS: return 3;
+    case S_SET_MSG: return 4;
+    case S_SET_SCR: return 3;
+    case S_SET_SYS: return 6;
   }
   return 0;
 }
@@ -1025,19 +1040,20 @@ void UITask::listHead(uint8_t s) {
       strcpy(v.title, "Wiadomości");
       if (v.unread > 0) snprintf(v.title_right, sizeof(v.title_right), "nieprzeczytane: %d", v.unread); else strcpy(v.title_right, "Del: usuń kanał");
       break;
-    case S_CONTACTS:
+    case S_CONTACTS: {
       strcpy(v.title, "Kontakty");
       if (_search[0]) snprintf(v.title_right, sizeof(v.title_right), "szukam: %s · %d", _search, _list_n);
-      else snprintf(v.title_right, sizeof(v.title_right), "%s: %d · Pinezka: filtr", FILTER_NAMES[_cfg.ct_filter], _list_n);
+      else if (_cfg.ct_filter == FILTER_HEARD) strcpy(v.title_right, "Enter: dodaj do kontaktów");
+      else snprintf(v.title_right, sizeof(v.title_right), "%d · pisz, aby szukać", _list_n);
+      static const char* const C[7] = { "Wszyscy", "Osoby", "RPT", "Pokoje", "Czujn.", "Ulub.", "Słyszane" };
+      for (int i = 0; i < 7; i++) scopy(v.chips[i], sizeof(v.chips[0]), C[i]);
+      v.nchips = 7; v.chip_active = _cfg.ct_filter; v.chip_focus = sel() == 0;
+      strcpy(v.empty, _cfg.ct_filter == FILTER_HEARD ? "Od włączenia urządzenie nie usłyszało jeszcze żadnego advertu." : "Brak kontaktów dla tego filtra.");
       break;
+    }
     case S_RPTS:
       strcpy(v.title, "Repeatery");
       snprintf(v.title_right, sizeof(v.title_right), "%d · %s · Pinezka: zmień", _list_n, _cfg.rpt_sort ? "wg odległości" : "ostatnio słyszane");
-      break;
-    case S_HEARD:
-      strcpy(v.title, "Usłyszane"); strcpy(v.title_right, "ostatnie adverty");
-      strcpy(v.empty, "Od włączenia urządzenie nie usłyszało jeszcze żadnego advertu.");
-      hint("Enter", "dodaj do kontaktów"); hint("Wstecz", "");
       break;
     case S_MENU: scopy(v.title, sizeof(v.title), _menu_title); hint("Enter", "wybierz"); hint("Wstecz", ""); break;
     case S_QUICK: strcpy(v.title, "Szybkie odpowiedzi"); snprintf(v.title_right, sizeof(v.title_right), "do: %s", _cur); hint("Enter", "wyślij"); hint("Wstecz", ""); break;
@@ -1045,15 +1061,13 @@ void UITask::listHead(uint8_t s) {
       strcpy(v.title, "Co tu słychać?");
       bool waiting = _disc_until && (long)(millis() - _disc_until) < 0;
       snprintf(v.title_right, sizeof(v.title_right), waiting ? "czekam… odpowiedzi: %d" : "odpowiedzi: %d", the_mesh.ui_disc_n);
-      strcpy(v.empty, waiting ? "Ping wysłany. Czekam na repeatery, które słyszą Cię bezpośrednio…" : "Nikt nie odpowiedział. Żaden repeater nie słyszy Cię bezpośrednio albo radio ma inny preset.");
-      hint("Enter", "ponów ping"); hint("Wstecz", "");
+      hint("Enter", "otwórz / dodaj"); hint("Wstecz", "");
       break;
     }
     case S_LOGIN: scopy(v.title, sizeof(v.title), _cname); strcpy(v.title_right, "logowanie"); hint("Enter", "zaloguj"); hint("Wstecz", ""); break;
     case S_ADMIN: scopy(v.title, sizeof(v.title), _cname); strcpy(v.title_right, the_mesh.ui_admin.is_admin ? "administrator" : "gość"); hint("Enter", "wybierz"); hint("Wstecz", "wyloguj"); break;
     case S_ADMIN_ACT: scopy(v.title, sizeof(v.title), _cname); strcpy(v.title_right, "akcje"); hint("Enter", "wykonaj"); hint("Wstecz", ""); break;
     case S_ADMIN_CLI: scopy(v.title, sizeof(v.title), _cname); strcpy(v.title_right, "konsola"); hint("Enter", "wyślij"); hint("Wstecz", ""); break;
-    case S_SETTINGS: strcpy(v.title, "Ustawienia"); snprintf(v.title_right, sizeof(v.title_right), "wersja %s", M9_FW_VERSION); break;
     case S_RADIO:
       strcpy(v.title, "Radio");
       snprintf(v.title_right, sizeof(v.title_right), "teraz: %.3f · %.4g · SF%d · CR 4/%d", _prefs->freq, _prefs->bw, _prefs->sf, _prefs->cr);
@@ -1061,8 +1075,8 @@ void UITask::listHead(uint8_t s) {
       hint("Enter", "wybierz"); hint("◄►", "zmień"); hint("Wstecz", "");
       break;
     default: {
-      static const char* const T[] = { "Urządzenie", "Pozycja", "Advert", "Kontakty", "Bluetooth", "Wiadomości", "System" };
-      if (s >= S_SET_DEV && s <= S_SET_SYS) strcpy(v.title, T[s - S_SET_DEV]);
+      static const char* const T[] = { "Bluetooth", "Pozycja i prywatność", "Advert", "Kontakty", "Wiadomości", "Ekran i dźwięk", "System" };
+      if (s >= S_SET_BT && s <= S_SET_SYS) strcpy(v.title, T[s - S_SET_BT]);
       strcpy(v.title_right, "Ustawienia");
       hint("Enter", "zmień"); hint("◄►", "zmień"); hint("Wstecz", "");
     }
@@ -1071,7 +1085,7 @@ void UITask::listHead(uint8_t s) {
 
 void UITask::listRow(uint8_t s, int i, UiRow& r) {
   ContactInfo c;
-  char t[48];
+  char t[64];
   switch (s) {
     case S_MSGS: {
       if (i == _thread_n) { setRow(r, "+ Dodaj kanał", "kanał z hasztagiem, np. #beskidy"); return; }
@@ -1088,7 +1102,8 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       return;
     }
     case S_CONTACTS:
-      if (i == 0) { snprintf(t, sizeof(t), "adverty: %d ›", the_mesh.ui_heard_n); setRow(r, "Usłyszane", t, UII_TOWER); return; }
+      if (i == 0) return;                             // wiersz filtrów rysuje się osobno
+      if (_cfg.ct_filter == FILTER_HEARD) { listRow(S_HEARD, i - 1, r); return; }
       if (!the_mesh.getContactByIdx(_list[i - 1], c)) return;
       fmtAgo(t, sizeof(t), c.lastmod);
       setRow(r, c.name, t, typeIcon(c.type, c.flags & 1), c.flags & 1);
@@ -1129,13 +1144,15 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       return;
     case S_QUICK: setRow(r, QUICK[i], "", i >= 5 ? UII_GPS : UII_NONE); return;
     case S_DISC: {
-      MyMesh::UiDisc& d = the_mesh.ui_disc[i];
-      char nm[48], a[16], b[16];
-      rptName(d.prefix, 3, nm, sizeof(nm));
+      if (i == 0) { bool waiting = _disc_until && (long)(millis() - _disc_until) < 0; setRow(r, "Ponów ping", waiting ? "czekam na odpowiedzi…" : "wyślij jeszcze raz"); return; }
+      MyMesh::UiDisc& d = the_mesh.ui_disc[i - 1];
+      char a[16], b[16];
       fmtSnr(a, sizeof(a), d.snr_rx); fmtSnr(b, sizeof(b), d.snr_tx);
       a[strlen(a) - 3] = 0;                           // bez „ dB” w pierwszej wartości
       snprintf(t, sizeof(t), "u mnie %s · u niego %s", a, b);
-      setRow(r, strchr(nm, ' ') ? strchr(nm, ' ') + 2 : nm, t, UII_TOWER);
+      bool known = ctByKey(d.key, c) ;
+      if (known) setRow(r, c.name, t, typeIcon(c.type, c.flags & 1), c.flags & 1);
+      else { char nm[24]; snprintf(nm, sizeof(nm), "%02x%02x%02x · nowy", d.key[0], d.key[1], d.key[2]); setRow(r, nm, t, UII_TOWER, true); }
       return;
     }
     case S_LOGIN: {
@@ -1159,27 +1176,11 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       return;
     }
     case S_ADMIN_CLI:
-      if (i < (int)(sizeof(CLI_CMDS) / sizeof(CLI_CMDS[0]))) setRow(r, CLI_CMDS[i]); else setRow(r, "Własna komenda…", "wpisz z klawiatury");
+      if (i < N_CLI) setRow(r, CLI_CMDS[i]); else setRow(r, "Własna komenda…", "wpisz z klawiatury");
       return;
-    case S_SETTINGS: {
-      static const char* const N[8] = { "Urządzenie", "Radio", "Pozycja", "Advert", "Kontakty", "Bluetooth", "Wiadomości", "System" };
-      static const uint8_t IC[8] = { UII_USER, UII_TOWER, UII_GPS, UII_NONE, UII_STAR, UII_BT, UII_MAIL, UII_NONE };
-      t[0] = 0;
-      switch (i) {
-        case 0: scopy(t, sizeof(t), _prefs->node_name); break;
-        case 1: if (the_mesh.uiRadioIsSF6()) strcpy(t, "SF6 — MeshCore Południe"); else { snprintf(t, sizeof(t), "%.3f · %.4g · SF%d · CR 4/%d", _prefs->freq, _prefs->bw, _prefs->sf, _prefs->cr); comma(t); } break;
-        case 2: strcpy(t, _prefs->gps_enabled ? "GPS włączony" : "GPS wyłączony"); break;
-        case 3: if (ADV_HOURS[_cfg.adv_idx]) snprintf(t, sizeof(t), "automatycznie co %d godz.", ADV_HOURS[_cfg.adv_idx]); else strcpy(t, "ręcznie"); break;
-        case 4: strcpy(t, (_prefs->manual_add_contacts & 1) ? "dodawanie: wybrane typy" : "dodawanie: wszystko"); break;
-        case 5: if (isBluetoothEnabled()) snprintf(t, sizeof(t), "włączony · PIN %06lu", (unsigned long)the_mesh.getBLEPin()); else strcpy(t, "wyłączony"); break;
-        case 6: strcpy(t, _prefs->buzzer_quiet ? "dźwięk wyłączony" : "dźwięk włączony"); break;
-        case 7: strcpy(t, "informacje, restart"); break;
-      }
-      setRow(r, N[i], t, IC[i]);
-      return;
-    }
     case S_RADIO: {
-      static const char* const N[9] = { "SF6 — MeshCore Południe", "EU/UK Narrow (SF8)", "Częstotliwość", "Pasmo (BW)", "Rozpraszanie (SF)", "Kodowanie (CR)", "Zastosuj własne ustawienia", "Moc nadawania", "Bajty trasy" };
+      static const char* const N[10] = { "SF6 — MeshCore Południe", "EU/UK Narrow (SF8)", "Częstotliwość", "Pasmo (BW)", "Rozpraszanie (SF)", "Kodowanie (CR)", "Zastosuj własne ustawienia",
+                                         "Moc nadawania", "Bajty trasy", "Limit nadawania" };
       bool sf6 = the_mesh.uiRadioIsSF6();
       bool narrow = fabsf(_prefs->freq - 869.618f) < 0.005f && fabsf(_prefs->bw - 62.5f) < 0.1f && _prefs->sf == 8 && _prefs->cr == 8;
       t[0] = 0;
@@ -1193,26 +1194,22 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
         case 6: strcpy(t, radioChanged() ? "Enter: zapisz i włącz" : "brak zmian"); break;
         case 7: snprintf(t, sizeof(t), "%d dBm", _prefs->tx_power_dbm); break;
         case 8: snprintf(t, sizeof(t), "%d (identyfikator: %d znaki)", _prefs->path_hash_mode + 1, (_prefs->path_hash_mode + 1) * 2); break;
+        case 9: { int k = 1; for (int q = 0; q < 5; q++) if (fabsf(AIRTIME_STEPS[q] - _prefs->airtime_factor) < 0.4f) k = q; strcpy(t, AIRTIME_NAMES[k]); break; }
       }
-      comma(t);
+      if (i != 9) comma(t);
       setRow(r, N[i], t, i < 2 ? UII_STAR : UII_NONE, (i == 0 && sf6) || (i == 1 && narrow));
       return;
     }
-    case S_SET_DEV: {
-      static const char* const N[5] = { "Nazwa urządzenia", "Data i godzina", "Dźwięk wiadomości", "Wygaszanie ekranu", "Podświetlenie klawiatury" };
-      t[0] = 0;
-      switch (i) {
-        case 0: scopy(t, sizeof(t), _prefs->node_name); break;
-        case 1: { struct tm lt; localTime(the_mesh.getRTCClock()->getCurrentTime(), &lt); snprintf(t, sizeof(t), "%d.%02d.%04d %d:%02d", lt.tm_mday, lt.tm_mon + 1, lt.tm_year + 1900, lt.tm_hour, lt.tm_min); break; }
-        case 2: strcpy(t, onOff(!_prefs->buzzer_quiet)); break;
-        case 3: strcpy(t, SLEEP_NAMES[_cfg.sleep_idx]); break;
-        case 4: strcpy(t, _cfg.kb_light ? "świeci, gdy ekran świeci" : "wyłączone"); break;
-      }
-      setRow(r, N[i], t);
+    case S_SET_BT: {
+      if (i == 0) setRow(r, "Bluetooth", isBluetoothEnabled() ? (hasConnection() ? "włączony · połączony z aplikacją" : "włączony · czeka na telefon") : "wyłączony", UII_BT);
+      else if (i == 1) { snprintf(t, sizeof(t), "%06lu", (unsigned long)the_mesh.getBLEPin()); setRow(r, "PIN do parowania", t, UII_LOCK); }
+      else if (i == 2) { int n = m9bleBondCount(); if (n < 0) strcpy(t, "—"); else snprintf(t, sizeof(t), "%d", n); setRow(r, "Zapamiętane telefony", t); }
+      else setRow(r, "Zapomnij wszystkie telefony", "gdy parowanie nie działa");
       return;
     }
     case S_SET_POS: {
-      static const char* const N[6] = { "GPS", "Pozycja w advercie", "Szerokość (ręcznie)", "Długość (ręcznie)", "Zapisz pozycję z GPS", "Teraz z GPS" };
+      static const char* const N[9] = { "GPS", "Pozycja w advercie", "Szerokość (ręcznie)", "Długość (ręcznie)", "Zapisz pozycję z GPS", "Teraz z GPS",
+                                        "Stan baterii udostępniaj", "Pozycję udostępniaj", "Dane czujników udostępniaj" };
       double lat, lon; int sats; bool fix = gpsFix(&lat, &lon, &sats);
       t[0] = 0;
       switch (i) {
@@ -1222,8 +1219,11 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
         case 3: snprintf(t, sizeof(t), "%.5f", _sensors->node_lon); break;
         case 4: strcpy(t, fix ? "Enter: zapisz" : "brak pozycji"); break;
         case 5: if (fix) snprintf(t, sizeof(t), "%.5f, %.5f · sat. %d", lat, lon, sats); else snprintf(t, sizeof(t), "szukam… satelity: %d", sats); break;
+        case 6: strcpy(t, TELEM_NAMES[_prefs->telemetry_mode_base % 3]); break;
+        case 7: strcpy(t, TELEM_NAMES[_prefs->telemetry_mode_loc % 3]); break;
+        case 8: strcpy(t, TELEM_NAMES[_prefs->telemetry_mode_env % 3]); break;
       }
-      setRow(r, N[i], t, i == 0 ? UII_GPS : UII_NONE);
+      setRow(r, N[i], t, i == 0 ? UII_GPS : (i >= 6 ? UII_SHIELD : UII_NONE));
       return;
     }
     case S_SET_ADV:
@@ -1244,19 +1244,26 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       setRow(r, N[i], t);
       return;
     }
-    case S_SET_BT:
-      if (i == 0) setRow(r, "Bluetooth", isBluetoothEnabled() ? (hasConnection() ? "włączony · połączony" : "włączony · czeka") : "wyłączony", UII_BT);
-      else { snprintf(t, sizeof(t), "%06lu", (unsigned long)the_mesh.getBLEPin()); setRow(r, "PIN do parowania", t, UII_LOCK); }
-      return;
     case S_SET_MSG:
       if (i == 0) setRow(r, "Trasa pod wiadomością", _cfg.show_path ? "identyfikatory repeaterów" : "tylko liczba skoków");
-      else setRow(r, "Dodatkowe potwierdzenia", _prefs->multi_acks ? "włączone (pewniej, więcej ruchu)" : "wyłączone");
+      else if (i == 1) setRow(r, "Dodatkowe potwierdzenia", _prefs->multi_acks ? "włączone (pewniej, więcej ruchu)" : "wyłączone");
+      else if (i == 2) setRow(r, "Dźwięk wiadomości", onOff(!_prefs->buzzer_quiet));
+      else { snprintf(t, sizeof(t), "zapisanych: %d", _msg_n); setRow(r, "Usuń wszystkie wiadomości", t); }
       return;
-    case S_SET_SYS:
+    case S_SET_SCR:
+      if (i == 0) setRow(r, "Wygaszanie ekranu", SLEEP_NAMES[_cfg.sleep_idx], UII_SCREEN);
+      else if (i == 1) setRow(r, "Podświetlenie klawiatury", _cfg.kb_light ? "świeci, gdy ekran świeci" : "wyłączone");
+      else setRow(r, "Nowa wiadomość budzi ekran", yesNo(!_cfg.no_wake));
+      return;
+    case S_SET_SYS: {
       if (i == 0) setRow(r, "Informacje", "wersja, pamięć, klucz");
-      else if (i == 1) setRow(r, "Restart urządzenia", "z potwierdzeniem");
+      else if (i == 1) setRow(r, "Nazwa urządzenia", _prefs->node_name, UII_USER);
+      else if (i == 2) { struct tm lt; localTime(the_mesh.getRTCClock()->getCurrentTime(), &lt); snprintf(t, sizeof(t), "%d.%02d.%04d %d:%02d", lt.tm_mday, lt.tm_mon + 1, lt.tm_year + 1900, lt.tm_hour, lt.tm_min); setRow(r, "Data i godzina", t); }
+      else if (i == 3) { snprintf(t, sizeof(t), "zapamiętanych: %d", _pw_n); setRow(r, "Usuń hasła repeaterów", t, UII_LOCK); }
+      else if (i == 4) setRow(r, "Restart urządzenia", "z potwierdzeniem");
       else setRow(r, "Ustawienia fabryczne", "kasuje wszystko");
       return;
+    }
   }
 }
 
@@ -1267,7 +1274,8 @@ void UITask::listEnter(uint8_t s, int i) {
       if (i < _thread_n) openThread(_threads[i].name, _threads[i].chan); else openInput(IN_CHANNEL, "#");
       return;
     case S_CONTACTS:
-      if (i == 0) { push(S_HEARD); return; }
+      if (i == 0) { sel() = 1; return; }              // Enter na filtrach: przejdź do listy
+      if (_cfg.ct_filter == FILTER_HEARD) { listEnter(S_HEARD, i - 1); return; }
       if (the_mesh.getContactByIdx(_list[i - 1], c)) { setCur(c); openMenuContact(); }
       return;
     case S_RPTS:
@@ -1275,7 +1283,7 @@ void UITask::listEnter(uint8_t s, int i) {
       if (the_mesh.getContactByIdx(_list[i - 1], c)) { setCur(c); openMenuContact(); }
       return;
     case S_HEARD:
-      if (the_mesh.uiIsContact(the_mesh.ui_heard[i].id.pub_key)) popup("Już jest w kontaktach", the_mesh.ui_heard[i].name);
+      if (the_mesh.uiIsContact(the_mesh.ui_heard[i].id.pub_key)) { if (ctByKey(the_mesh.ui_heard[i].id.pub_key, c)) { setCur(c); openMenuContact(); } }
       else if (the_mesh.uiAddHeard(i)) popup("Dodano do kontaktów", the_mesh.ui_heard[i].name);
       else popup("Nie udało się dodać", "brak miejsca w kontaktach?", true);
       return;
@@ -1293,7 +1301,16 @@ void UITask::listEnter(uint8_t s, int i) {
       sendText(t);
       return;
     }
-    case S_DISC: prepare(S_DISC); return;
+    case S_DISC: {
+      if (i == 0) { prepare(S_DISC); return; }
+      MyMesh::UiDisc& d = the_mesh.ui_disc[i - 1];
+      if (!ctByKey(d.key, c)) {                       // nowy: dodaj do kontaktów i od razu otwórz
+        if (!the_mesh.uiAddDiscovered(i - 1) || !ctByKey(d.key, c)) { popup("Nie udało się dodać", "brak miejsca w kontaktach?", true); return; }
+        popup("Dodano do kontaktów", c.name);
+      }
+      setCur(c); openMenuContact();
+      return;
+    }
     case S_LOGIN: {
       int k = i + (pwGet(_ck) ? 0 : 1);
       if (k == 2) { openInput(IN_PASS, ""); return; }
@@ -1317,14 +1334,8 @@ void UITask::listEnter(uint8_t s, int i) {
       if (i == 3) ask(C_RPT_REBOOT, "Zrestartować repeater?", _cname);
       return;
     case S_ADMIN_CLI:
-      if (i < (int)(sizeof(CLI_CMDS) / sizeof(CLI_CMDS[0]))) adminCli(CLI_CMDS[i]); else openInput(IN_CLI, "");
+      if (i < N_CLI) adminCli(CLI_CMDS[i]); else openInput(IN_CLI, "");
       return;
-    case S_SETTINGS: {
-      static const uint8_t TO[8] = { S_SET_DEV, S_RADIO, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_BT, S_SET_MSG, S_SET_SYS };
-      if (i == 1) radioLoad();
-      push(TO[i]);
-      return;
-    }
     case S_RADIO:
       if (i == 0) { the_mesh.uiSetRadioSF6(); radioLoad(); popup("Radio: SF6 — MeshCore Południe", "869,618 MHz · BW 62,5 · SF6 · CR 4/8"); }
       else if (i == 1) { the_mesh.uiSetRadio(869.618f, 62.5f, 8, 8); radioLoad(); popup("Radio: EU/UK Narrow", "869,618 MHz · BW 62,5 · SF8 · CR 4/8"); }
@@ -1334,13 +1345,12 @@ void UITask::listEnter(uint8_t s, int i) {
         else { the_mesh.uiSetRadio(_rf, _rbw, _rsf, _rcr); radioLoad(); popup("Radio: ustawienia własne", "zapisane i włączone"); }
       } else listKey(s, i, M9K_RIGHT);
       return;
-    case S_SET_DEV:
-      if (i == 0) openInput(IN_NAME, _prefs->node_name);
-      else if (i == 1) {
-        struct tm lt; localTime(the_mesh.getRTCClock()->getCurrentTime(), &lt);
-        char b[24]; snprintf(b, sizeof(b), "%04d-%02d-%02d %02d:%02d", lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min);
-        openInput(IN_TIME, b);
-      } else listKey(s, i, M9K_RIGHT);
+    case S_SET_BT:
+      if (i == 0) {
+        if (isBluetoothEnabled()) { disableBluetooth(); popup("Bluetooth wyłączony"); }
+        else { char t[40]; snprintf(t, sizeof(t), "PIN do parowania: %06lu", (unsigned long)the_mesh.getBLEPin()); enableBluetooth(); popup("Bluetooth włączony", t, false, 6000); }
+      } else if (i == 1) { char t[12]; snprintf(t, sizeof(t), "%06lu", (unsigned long)the_mesh.getBLEPin()); openInput(IN_PIN, t); }
+      else if (i == 3) ask(C_CLEAR_BONDS, "Zapomnieć wszystkie telefony?", "");
       return;
     case S_SET_POS:
       if (i == 2) { char t[16]; snprintf(t, sizeof(t), "%.5f", _sensors->node_lat); openInput(IN_LAT, t); }
@@ -1348,22 +1358,27 @@ void UITask::listEnter(uint8_t s, int i) {
       else if (i == 4) {
         double lat, lon; int sats;
         if (gpsFix(&lat, &lon, &sats)) { the_mesh.uiSetLatLon(lat, lon); popup("Pozycja zapisana z GPS"); } else popup("Brak pozycji GPS", "wyjdź pod niebo i poczekaj", true);
-      } else if (i < 2) listKey(s, i, M9K_RIGHT);
+      } else if (i != 5) listKey(s, i, M9K_RIGHT);
       return;
     case S_SET_ADV:
       if (i == 0) popup(the_mesh.advert() ? "Advert wysłany" : "Błąd advertu", "do sąsiadów (bez przekazywania)");
       else if (i == 1) popup(the_mesh.uiAdvertFlood() ? "Advert wysłany" : "Błąd advertu", "do całej sieci");
       else listKey(s, i, M9K_RIGHT);
       return;
-    case S_SET_BT:
-      if (i == 0) {
-        if (isBluetoothEnabled()) { disableBluetooth(); popup("Bluetooth wyłączony"); }
-        else { char t[40]; snprintf(t, sizeof(t), "PIN do parowania: %06lu", (unsigned long)the_mesh.getBLEPin()); enableBluetooth(); popup("Bluetooth włączony", t, false, 6000); }
-      } else { char t[12]; snprintf(t, sizeof(t), "%06lu", (unsigned long)the_mesh.getBLEPin()); openInput(IN_PIN, t); }
+    case S_SET_MSG:
+      if (i == 3) ask(C_CLEAR_MSGS, "Usunąć wszystkie wiadomości?", "");
+      else listKey(s, i, M9K_RIGHT);
       return;
     case S_SET_SYS:
       if (i == 0) detailInfo();
-      else if (i == 1) ask(C_REBOOT, "Zrestartować urządzenie?", "");
+      else if (i == 1) openInput(IN_NAME, _prefs->node_name);
+      else if (i == 2) {
+        struct tm lt; localTime(the_mesh.getRTCClock()->getCurrentTime(), &lt);
+        char b[24]; snprintf(b, sizeof(b), "%04d-%02d-%02d %02d:%02d", lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min);
+        openInput(IN_TIME, b);
+      }
+      else if (i == 3) ask(C_CLEAR_PW, "Usunąć zapamiętane hasła?", "");
+      else if (i == 4) ask(C_REBOOT, "Zrestartować urządzenie?", "");
       else ask(C_FACTORY, "Skasować WSZYSTKO?", "");
       return;
     default: listKey(s, i, M9K_RIGHT); return;        // pozostałe listy ustawień: Enter = następna wartość
@@ -1378,10 +1393,15 @@ bool UITask::listKey(uint8_t s, int i, uint8_t k) {
       if ((k == M9K_BKSP || k == M9K_BKSP_LONG) && i < _thread_n && _threads[i].chan) { ask(C_DEL_CHANNEL, "Usunąć kanał?", _threads[i].name); return true; }
       return false;
     case S_CONTACTS:
-      if (k == M9K_F4) { _cfg.ct_filter = (_cfg.ct_filter + 1) % 6; saveCfg(); sel() = 0; buildContacts(); return true; }
-      if (k == M9K_BKSP) { int n = strlen(_search); if (n > 0) { _search[n - 1] = 0; sel() = 0; buildContacts(); } return true; }
-      if (k == M9K_BKSP_LONG) { _search[0] = 0; sel() = 0; buildContacts(); return true; }
-      if (k > 32 && k < 127) { int n = strlen(_search); if (n < (int)sizeof(_search) - 1) { _search[n] = (char)k; _search[n + 1] = 0; sel() = 0; buildContacts(); } return true; }
+      if (i == 0 && dir) {                            // chodzenie po filtrach; z brzegu przechodzi na sąsiedni ekran
+        int f = (int)_cfg.ct_filter + dir;
+        if (f < 0 || f > FILTER_HEARD) return false;
+        _cfg.ct_filter = (uint8_t)f; saveCfg(); buildContacts(); return true;
+      }
+      if (k == M9K_F4) { _cfg.ct_filter = (_cfg.ct_filter + 1) % 7; saveCfg(); buildContacts(); if (sel() > 1) sel() = 1; return true; }
+      if (k == M9K_BKSP) { int n = strlen(_search); if (n > 0) { _search[n - 1] = 0; buildContacts(); } return true; }
+      if (k == M9K_BKSP_LONG) { _search[0] = 0; buildContacts(); return true; }
+      if (k > 32 && k < 127 && _cfg.ct_filter != FILTER_HEARD) { int n = strlen(_search); if (n < (int)sizeof(_search) - 1) { _search[n] = (char)k; _search[n + 1] = 0; buildContacts(); if (sel() > 1) sel() = 1; } return true; }
       return false;
     case S_RPTS:
       if (k == M9K_F4) { _cfg.rpt_sort = !_cfg.rpt_sort; saveCfg(); buildRpts(); return true; }
@@ -1398,23 +1418,25 @@ bool UITask::listKey(uint8_t s, int i, uint8_t k) {
         if (TX_STEPS[cur] > the_mesh.uiMaxTxPower()) cur = dir > 0 ? 0 : n - 1;
         the_mesh.uiSetTxPower(TX_STEPS[cur]);
       } else if (i == 8) { _prefs->path_hash_mode = (_prefs->path_hash_mode + dir + 3) % 3; the_mesh.savePrefs(); }
+      else if (i == 9) { int cur = 1; for (int q = 0; q < 5; q++) if (fabsf(AIRTIME_STEPS[q] - _prefs->airtime_factor) < 0.4f) cur = q; _prefs->airtime_factor = AIRTIME_STEPS[(cur + dir + 5) % 5]; the_mesh.savePrefs(); }
       return true;
-    case S_SET_DEV:
-      if (!dir) return false;
-      if (i == 2) { _prefs->buzzer_quiet = _prefs->buzzer_quiet ? 0 : 1; the_mesh.savePrefs(); _buzzer.quiet(_prefs->buzzer_quiet); if (!_prefs->buzzer_quiet) _buzzer.play("dm:d=16,o=6,b=200:e,g,c7"); }
-      else if (i == 3) { _cfg.sleep_idx = (_cfg.sleep_idx + dir + 4) % 4; saveCfg(); wake(); }
-      else if (i == 4) { _cfg.kb_light = !_cfg.kb_light; saveCfg(); _kb.setBacklight(_cfg.kb_light != 0); }
-      return true;
+    case S_SET_BT:
+      return dir != 0;
     case S_SET_POS:
       if (!dir) return false;
       if (i == 0) { bool on = !_prefs->gps_enabled; the_mesh.uiSetGps(on); }
       else if (i == 1) { _prefs->advert_loc_policy = _prefs->advert_loc_policy ? 0 : 1; the_mesh.savePrefs(); }
+      else if (i == 6) { _prefs->telemetry_mode_base = (_prefs->telemetry_mode_base + dir + 3) % 3; the_mesh.savePrefs(); }
+      else if (i == 7) { _prefs->telemetry_mode_loc = (_prefs->telemetry_mode_loc + dir + 3) % 3; the_mesh.savePrefs(); }
+      else if (i == 8) { _prefs->telemetry_mode_env = (_prefs->telemetry_mode_env + dir + 3) % 3; the_mesh.savePrefs(); }
       return true;
     case S_SET_ADV:
-      if (!dir || i != 2) return false;
-      _cfg.adv_idx = (_cfg.adv_idx + dir + sizeof(ADV_HOURS)) % sizeof(ADV_HOURS);
-      saveCfg();
-      _next_advert = ADV_HOURS[_cfg.adv_idx] ? millis() + ADV_HOURS[_cfg.adv_idx] * 3600000UL : 0;
+      if (!dir) return false;
+      if (i == 2) {
+        _cfg.adv_idx = (_cfg.adv_idx + dir + sizeof(ADV_HOURS)) % sizeof(ADV_HOURS);
+        saveCfg();
+        _next_advert = ADV_HOURS[_cfg.adv_idx] ? millis() + ADV_HOURS[_cfg.adv_idx] * 3600000UL : 0;
+      }
       return true;
     case S_SET_CT:
       if (!dir) return false;
@@ -1432,13 +1454,34 @@ bool UITask::listKey(uint8_t s, int i, uint8_t k) {
     case S_SET_MSG:
       if (!dir) return false;
       if (i == 0) { _cfg.show_path = !_cfg.show_path; saveCfg(); }
-      else { _prefs->multi_acks = _prefs->multi_acks ? 0 : 1; the_mesh.savePrefs(); }
+      else if (i == 1) { _prefs->multi_acks = _prefs->multi_acks ? 0 : 1; the_mesh.savePrefs(); }
+      else if (i == 2) { _prefs->buzzer_quiet = _prefs->buzzer_quiet ? 0 : 1; the_mesh.savePrefs(); _buzzer.quiet(_prefs->buzzer_quiet); if (!_prefs->buzzer_quiet) _buzzer.play("dm:d=16,o=6,b=200:e,g,c7"); }
       return true;
+    case S_SET_SCR:
+      if (!dir) return false;
+      if (i == 0) { _cfg.sleep_idx = (_cfg.sleep_idx + dir + 4) % 4; saveCfg(); wake(); }
+      else if (i == 1) { _cfg.kb_light = !_cfg.kb_light; saveCfg(); _kb.setBacklight(_cfg.kb_light != 0); }
+      else { _cfg.no_wake = !_cfg.no_wake; saveCfg(); }
+      return true;
+    case S_SET_SYS:
+      return dir != 0;
   }
   return false;
 }
 
 // ---------------- klawisze ----------------
+
+// siatka kafelków: strzałki chodzą po kafelkach; z lewej i prawej krawędzi przechodzi się na sąsiedni ekran
+bool UITask::gridKey(uint8_t k, int count, int cols) {
+  int16_t& i = sel();
+  if (i >= count) i = count - 1;
+  int col = i % cols;
+  if (k == M9K_LEFT) { if (col == 0) return false; i--; return true; }
+  if (k == M9K_RIGHT) { if (col == cols - 1 || i + 1 >= count) return false; i++; return true; }
+  if (k == M9K_UP) { if (i - cols >= 0) i -= cols; return true; }
+  if (k == M9K_DOWN) { if (i + cols < count) i += cols; return true; }
+  return false;
+}
 
 void UITask::key(uint8_t k) {
   if (_wait_kind) {                                   // czekamy na odpowiedź repeatera: tylko Wstecz przerywa
@@ -1456,7 +1499,7 @@ void UITask::key(uint8_t k) {
   if (s == S_BOOT) { _boot_until = 0; tab(S_START); return; }
 
   // klawisze funkcyjne działają wszędzie
-  if (k == M9K_HOME) { tab(S_START); return; }
+  if (k == M9K_HOME) { _tabsel[S_START] = 0; if (scr() == S_START) sel() = 0; tab(S_START); sel() = 0; return; }
   if (k == M9K_MSG)  { tab(S_MSGS); return; }
   if (k == M9K_F3)   { tab(S_CONTACTS); return; }
   if (k == M9K_MAP)  { tab(S_RPTS); return; }
@@ -1471,8 +1514,30 @@ void UITask::key(uint8_t k) {
     return;
   }
   if (s == S_START) {
-    if (k == M9K_LEFT) tab(S_SETTINGS);
-    else if (k == M9K_RIGHT || k == M9K_ENTER) tab(S_MSGS);
+    if (gridKey(k, 6, 3)) return;
+    if (k == M9K_LEFT) { tab(S_SETTINGS); return; }
+    if (k == M9K_RIGHT) { tab(S_MSGS); return; }
+    if (k == M9K_ENTER) {
+      switch (sel()) {
+        case 0: tab(S_MSGS); break;
+        case 1: tab(S_CONTACTS); break;
+        case 2: tab(S_RPTS); break;
+        case 3: tab(S_SETTINGS); sel() = 2; push(S_SET_POS); break;
+        case 4: tab(S_SETTINGS); sel() = 0; radioLoad(); push(S_RADIO); break;
+        case 5: tab(S_SETTINGS); sel() = 7; detailInfo(); break;
+      }
+    }
+    return;
+  }
+  if (s == S_SETTINGS) {
+    if (gridKey(k, 8, 2)) return;
+    if (k == M9K_LEFT) { tab(S_RPTS); return; }
+    if (k == M9K_RIGHT) { tab(S_START); return; }
+    if (k == M9K_ENTER) {
+      static const uint8_t TO[8] = { S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS };
+      if (sel() == 0) radioLoad();
+      push(TO[sel()]);
+    }
     return;
   }
 
@@ -1535,67 +1600,108 @@ void UITask::fillStatus() {
 void UITask::fillStart() {
   UiView& v = *_v;
   v.screen = UIS_START; v.tab = 0;
+  v.grid_cols = 3; v.ntiles = 6; v.sel = sel();
+  scopy(v.big, sizeof(v.big), v.time);
   scopy(v.name, sizeof(v.name), _prefs->node_name);
-  snprintf(v.preset, sizeof(v.preset), "%.3f · BW %.4g · SF%d · CR 4/%d", _prefs->freq, _prefs->bw, _prefs->sf, _prefs->cr);
-  for (char* p = v.preset; *p; p++) if (*p == '.') *p = ',';
+  static const char* const DNI[7] = { "niedziela", "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota" };
+  struct tm lt; localTime(the_mesh.getRTCClock()->getCurrentTime(), &lt);
+  snprintf(v.line1, sizeof(v.line1), "%s, %d.%02d.%04d", DNI[lt.tm_wday % 7], lt.tm_mday, lt.tm_mon + 1, lt.tm_year + 1900);
 
   buildThreads();
   int unread = v.unread;
   UiTile& a = v.tile[0];
   strcpy(a.label, "Wiadomości"); a.icon = UII_MAIL; a.accent = unread > 0;
   if (unread > 0) snprintf(a.value, sizeof(a.value), unread == 1 ? "1 nowa" : "%d nowe", unread); else strcpy(a.value, "brak nowych");
-  a.sub[0] = 0;
-  for (int i = 0; i < _thread_n && i < 2; i++) if (_threads[i].unread) {
-    char t[44]; snprintf(t, sizeof(t), "%s%s %d", a.sub[0] ? " · " : "", _threads[i].name, _threads[i].unread);
-    strlcat(a.sub, t, sizeof(a.sub));
-  }
-  if (!a.sub[0]) strcpy(a.sub, "Enter: lista rozmów");
+  if (_thread_n > 0 && _threads[0].unread) scopy(a.sub, sizeof(a.sub), _threads[0].name);
+  else snprintf(a.sub, sizeof(a.sub), "rozmów: %d", _thread_n);
 
+  // policz kontakty wg roli (bez repeaterów) i repeatery
+  int people = 0, rpts = 0;
+  ContactInfo c;
+  int total = the_mesh.getTotalContactSlots();
+  for (int i = MAX_ANON_CONTACTS; i < total; i++) {
+    if (!the_mesh.getContactByIdx(i, c) || c.type == ADV_TYPE_NONE) continue;
+    if (c.type == ADV_TYPE_REPEATER) rpts++; else people++;
+  }
   UiTile& b = v.tile[1];
-  strcpy(b.label, "Sieć"); b.icon = UII_TOWER; b.accent = false;
-  if (the_mesh.ui_heard_n > 0) {
-    char ago[16]; fmtAgo(ago, sizeof(ago), the_mesh.ui_heard_at[0]);
-    scopy(b.value, sizeof(b.value), the_mesh.ui_heard[0].name);
-    snprintf(b.sub, sizeof(b.sub), "słyszany: %s · kontaktów %d", ago, the_mesh.getNumContacts());
-  } else {
-    strcpy(b.value, the_mesh.uiRadioIsSF6() ? "nasłuch SF6" : "inny preset");
-    snprintf(b.sub, sizeof(b.sub), "nikogo jeszcze nie słychać · kontaktów %d", the_mesh.getNumContacts());
-  }
+  strcpy(b.label, "Kontakty"); b.icon = UII_USER;
+  snprintf(b.value, sizeof(b.value), "%d", people);
+  snprintf(b.sub, sizeof(b.sub), "usłyszane: %d", the_mesh.ui_heard_n);
 
-  UiTile& c = v.tile[2];
-  strcpy(c.label, "Pozycja"); c.icon = UII_GPS; c.accent = false;
+  UiTile& r = v.tile[2];
+  strcpy(r.label, "Repeatery"); r.icon = UII_TOWER;
+  snprintf(r.value, sizeof(r.value), "%d", rpts);
+  if (the_mesh.ui_heard_n > 0) { char ago[16]; fmtAgo(ago, sizeof(ago), the_mesh.ui_heard_at[0]); snprintf(r.sub, sizeof(r.sub), "%s · %s", the_mesh.ui_heard[0].name, ago); }
+  else strcpy(r.sub, "cisza w eterze");
+
+  UiTile& p = v.tile[3];
+  strcpy(p.label, "Pozycja"); p.icon = UII_GPS;
   double lat, lon; int sats;
-  if (!_prefs->gps_enabled) { strcpy(c.value, "GPS wyłączony"); strcpy(c.sub, "włącz w Ustawieniach › Pozycja"); }
-  else if (gpsFix(&lat, &lon, &sats)) { snprintf(c.value, sizeof(c.value), "%.4f, %.4f", lat, lon); snprintf(c.sub, sizeof(c.sub), "satelity: %d", sats); }
-  else { strcpy(c.value, "szukam…"); snprintf(c.sub, sizeof(c.sub), "satelity: %d", sats); }
+  if (!_prefs->gps_enabled) { strcpy(p.value, "GPS wył."); strcpy(p.sub, "Enter: ustawienia"); }
+  else if (gpsFix(&lat, &lon, &sats)) { snprintf(p.value, sizeof(p.value), "%.4f", lat); snprintf(p.sub, sizeof(p.sub), "%.4f · sat. %d", lon, sats); }
+  else { strcpy(p.value, "szukam…"); snprintf(p.sub, sizeof(p.sub), "satelity: %d", sats); }
 
-  UiTile& d = v.tile[3];
-  strcpy(d.label, "Urządzenie"); d.icon = UII_BOLT; d.accent = false;
+  UiTile& d = v.tile[4];
+  strcpy(d.label, "Radio"); d.icon = UII_BOLT;
+  bool narrow = fabsf(_prefs->freq - 869.618f) < 0.005f && fabsf(_prefs->bw - 62.5f) < 0.1f && _prefs->sf == 8 && _prefs->cr == 8;
+  if (the_mesh.uiRadioIsSF6()) strcpy(d.value, "SF6"); else if (narrow) strcpy(d.value, "Narrow"); else snprintf(d.value, sizeof(d.value), "SF%d", _prefs->sf);
+  snprintf(d.sub, sizeof(d.sub), "%.3f MHz", _prefs->freq); comma(d.sub);
+
+  UiTile& e = v.tile[5];
+  strcpy(e.label, "Urządzenie"); e.icon = UII_BT;
   uint16_t mv = getBattMilliVolts();
-  snprintf(d.value, sizeof(d.value), "%d%% · %d,%02d V", battPercent(mv), mv / 1000, (mv % 1000) / 10);
-  if (!isBluetoothEnabled()) strcpy(d.sub, "Bluetooth wyłączony");
-  else if (hasConnection()) strcpy(d.sub, "Bluetooth połączony");
-  else snprintf(d.sub, sizeof(d.sub), "Bluetooth czeka · PIN %06lu", (unsigned long)the_mesh.getBLEPin());
+  snprintf(e.value, sizeof(e.value), "%d%%", battPercent(mv));
+  if (!isBluetoothEnabled()) strcpy(e.sub, "Bluetooth wył.");
+  else if (hasConnection()) strcpy(e.sub, "telefon połączony");
+  else snprintf(e.sub, sizeof(e.sub), "PIN %06lu", (unsigned long)the_mesh.getBLEPin());
+}
+
+void UITask::fillSettings() {
+  UiView& v = *_v;
+  v.screen = UIS_GRID; v.tab = 4;
+  v.grid_cols = 2; v.ntiles = 8; v.sel = sel();
+  strcpy(v.title, "Ustawienia"); snprintf(v.title_right, sizeof(v.title_right), "wersja %s", M9_FW_VERSION);
+  static const char* const N[8] = { "Radio", "Bluetooth", "Pozycja", "Advert", "Kontakty", "Wiadomości", "Ekran i dźwięk", "System" };
+  static const uint8_t IC[8] = { UII_TOWER, UII_BT, UII_GPS, UII_BOLT, UII_USER, UII_MAIL, UII_SCREEN, UII_GEAR };
+  for (int i = 0; i < 8; i++) {
+    UiTile& t = v.tile[i];
+    strcpy(t.label, N[i]); t.icon = IC[i];
+    switch (i) {
+      case 0: if (the_mesh.uiRadioIsSF6()) snprintf(t.sub, sizeof(t.sub), "SF6 · %d dBm", _prefs->tx_power_dbm); else { snprintf(t.sub, sizeof(t.sub), "%.3f · SF%d", _prefs->freq, _prefs->sf); comma(t.sub); } break;
+      case 1: if (!isBluetoothEnabled()) strcpy(t.sub, "wyłączony"); else if (hasConnection()) strcpy(t.sub, "połączony"); else snprintf(t.sub, sizeof(t.sub), "PIN %06lu", (unsigned long)the_mesh.getBLEPin()); break;
+      case 2: snprintf(t.sub, sizeof(t.sub), "GPS %s · prywatność", _prefs->gps_enabled ? "wł." : "wył."); break;
+      case 3: if (ADV_HOURS[_cfg.adv_idx]) snprintf(t.sub, sizeof(t.sub), "co %d godz.", ADV_HOURS[_cfg.adv_idx]); else strcpy(t.sub, "wyślij · auto wył."); break;
+      case 4: strcpy(t.sub, (_prefs->manual_add_contacts & 1) ? "dodaje wybrane typy" : "dodaje wszystko"); break;
+      case 5: snprintf(t.sub, sizeof(t.sub), "dźwięk %s · trasa", _prefs->buzzer_quiet ? "wył." : "wł."); break;
+      case 6: snprintf(t.sub, sizeof(t.sub), "gaśnie: %s", SLEEP_NAMES[_cfg.sleep_idx]); break;
+      case 7: strcpy(t.sub, "informacje · zegar"); break;
+    }
+  }
 }
 
 void UITask::fillList() {
   UiView& v = *_v;
   uint8_t s = scr();
   v.screen = UIS_LIST;
-  if (s == S_MSGS) strcpy(v.empty, "");
   if (s == S_CONTACTS) buildContacts(); else if (s == S_RPTS) buildRpts(); else if (s == S_MSGS) buildThreads();
   listHead(s);
-  int count = listCount(s);
+  int base = s == S_CONTACTS ? 1 : 0;                 // Kontakty: wiersz 0 to filtry, lista zaczyna się od 1
+  int vis = ROWS_VISIBLE - base;
+  int count = listCount(s) - base;
   Nav& n = _nav[_depth - 1];
-  if (n.sel >= count) n.sel = count > 0 ? count - 1 : 0;
-  if (n.sel < n.top) n.top = n.sel;
-  if (n.sel >= n.top + ROWS_VISIBLE) n.top = n.sel - ROWS_VISIBLE + 1;
-  if (n.top > count - ROWS_VISIBLE) n.top = count - ROWS_VISIBLE;
+  if (n.sel >= count + base) n.sel = count + base > 0 ? count + base - 1 : 0;
+  int selr = n.sel - base;                            // -1 = zaznaczone filtry
+  if (selr < 0) n.top = 0;
+  else {
+    if (selr < n.top) n.top = selr;
+    if (selr >= n.top + vis) n.top = selr - vis + 1;
+  }
+  if (n.top > count - vis) n.top = count - vis;
   if (n.top < 0) n.top = 0;
-  v.sel = n.sel - n.top;
+  v.sel = selr < 0 ? -1 : selr - n.top;
   v.more_up = n.top > 0;
-  v.more_dn = n.top + ROWS_VISIBLE < count;
-  for (int i = n.top; i < count && v.nrows < ROWS_VISIBLE; i++) listRow(s, i, v.rows[v.nrows++]);
+  v.more_dn = n.top + vis < count;
+  for (int i = n.top; i < count && v.nrows < vis; i++) listRow(s, i + base, v.rows[v.nrows++]);
 }
 
 void UITask::fillKv() {
@@ -1700,6 +1806,7 @@ void UITask::fill() {
   }
   fillStatus();
   if (s == S_START) fillStart();
+  else if (s == S_SETTINGS) fillSettings();
   else if (s == S_THREAD) fillThread();
   else if (s == S_KV) fillKv();
   else fillList();

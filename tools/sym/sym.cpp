@@ -24,8 +24,8 @@ MyMesh::MyMesh() {
   ui_heard[0] = cts[2]; ui_heard_at[0] = 1794580320UL - 60; ContactInfo n; memset(&n, 0, sizeof(n)); strcpy(n.name, "Wojtek T-Echo"); n.type = ADV_TYPE_CHAT; n.id.pub_key[0] = 0x44;
   ui_heard[1] = n; ui_heard_at[1] = 1794580320UL - 400; ui_heard_n = 2;
 }
-bool MyMesh::uiDiscoverStart() { ui_disc_n = 2; memset(ui_disc, 0, sizeof(ui_disc)); ui_disc[0].prefix[0] = 0xa3; ui_disc[0].prefix[1] = 0xf2; ui_disc[0].prefix[2] = 0x11; ui_disc[0].snr_rx = 38; ui_disc[0].snr_tx = 32;
-  ui_disc[1].prefix[0] = 0x99; ui_disc[1].prefix[1] = 0x01; ui_disc[1].prefix[2] = 0x02; ui_disc[1].snr_rx = -14; ui_disc[1].snr_tx = -20; return true; }
+bool MyMesh::uiDiscoverStart() { ui_disc_n = 2; memset(ui_disc, 0, sizeof(ui_disc)); memcpy(ui_disc[0].key, cts[2].id.pub_key, 32); ui_disc[0].key_len = 32; ui_disc[0].snr_rx = 38; ui_disc[0].snr_tx = 32;
+  ui_disc[1].key[0] = 0x99; ui_disc[1].key[1] = 0x01; ui_disc[1].key[2] = 0x02; ui_disc[1].key_len = 32; ui_disc[1].snr_rx = -14; ui_disc[1].snr_tx = -20; return true; }
 bool MyMesh::uiAdminStatus() { struct __attribute__((packed)) St { uint16_t mv, queue; int16_t noise, rssi; uint32_t recv, sent, air, up, sf, sd, rf, rd; uint16_t err; int16_t snr; } st = { 4080, 1, -112, -87, 18422, 6310, 5400, 273600, 5000, 1310, 15000, 3422, 2, 38 };
   memcpy(ui_admin.status, &st, sizeof(st)); ui_admin.status_len = sizeof(st); ui_admin.status_ready = true; return true; }
 bool MyMesh::uiAdminNeighbours() { uint16_t n = 2; memcpy(ui_admin.nb, &n, 2); memcpy(ui_admin.nb + 2, &n, 2); memset(ui_admin.nb + 4, 0, 22); ui_admin.nb[4] = 0x77; ui_admin.nb[5] = 0xc1; ui_admin.nb[6] = 0x11; ui_admin.nb[14] = 34;
@@ -74,32 +74,24 @@ int main(int argc, char** argv) {
   run(3000);
   rx("Public", "Ania: Nowy repeater w Ustroniu działa, sprawdźcie", 3); rx("Marek SP9", "Jadę na Równicę, będę o 16", 2);
   save("start");
-  keys({ M9K_RIGHT }); save("wiadomosci");
+  keys({ M9K_DOWN, M9K_RIGHT }); save("start-kafelek");
+  keys({ M9K_MSG }); save("wiadomosci");
   keys({ M9K_ENTER }); type("Slysze go ze Skrzycznego"); keys({ M9K_ENTER }); save("rozmowa");
-  keys({ M9K_UP, M9K_RIGHT }); save("menu-wiadomosci");
-  keys({ M9K_ENTER }); save("szczegoly-odebranej");
-  keys({ M9K_BACK, M9K_BACK, M9K_DOWN, M9K_RIGHT, M9K_ENTER }); save("szczegoly-wyslanej");
-  keys({ M9K_BACK, M9K_BACK, M9K_ENTER }); save("szybkie");
-  keys({ M9K_F3 }); save("kontakty");
-  keys({ M9K_F4 }); save("kontakty-filtr-osoby");
-  keys({ M9K_F4, M9K_F4, M9K_F4, M9K_F4, M9K_F4 }); type("rpt"); save("kontakty-szukaj");
-  keys({ M9K_BKSP_LONG, M9K_ENTER }); save("uslyszane");
-  keys({ M9K_BACK, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("menu-kontaktu");
-  keys({ M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("szczegoly-kontaktu");
+  keys({ M9K_UP, M9K_RIGHT, M9K_ENTER }); save("szczegoly-wiadomosci");
+  keys({ M9K_F3 }); save("kontakty-filtry");
+  keys({ M9K_RIGHT, M9K_RIGHT, M9K_DOWN, M9K_DOWN }); save("kontakty-rpt");
+  keys({ M9K_F4, M9K_F4, M9K_F4, M9K_F4 }); save("kontakty-uslyszane");
+  keys({ M9K_ENTER }); save("menu-kontaktu");
   keys({ M9K_MAP }); save("repeatery");
   keys({ M9K_ENTER }); save("co-tu-slychac");
-  keys({ M9K_BACK, M9K_DOWN, M9K_ENTER }); save("menu-repeatera");
-  keys({ M9K_ENTER }); save("logowanie");
-  keys({ M9K_ENTER }); run(500); keys({ M9K_ENTER }); save("admin");
-  keys({ M9K_ENTER }); run(300); save("admin-stan");
-  keys({ M9K_BACK, M9K_DOWN, M9K_ENTER }); run(300); save("admin-sasiedzi");
-  keys({ M9K_BACK, M9K_DOWN, M9K_ENTER }); save("admin-akcje");
-  keys({ M9K_BACK, M9K_DOWN, M9K_ENTER }); save("admin-konsola");
-  keys({ M9K_ENTER }); run(300); save("admin-konsola-odpowiedz");
+  keys({ M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("co-tu-slychac-dodany");
   keys({ M9K_HOME, M9K_LEFT }); save("ustawienia");
-  for (int i = 0; i < 8; i++) { keys({ M9K_ENTER }); char n[24]; snprintf(n, sizeof(n), "ustawienia-%d", i); save(n); keys({ M9K_BACK, M9K_DOWN }); }
-  keys({ M9K_HOME, M9K_LEFT, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_ENTER, M9K_ENTER, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("kontakty-wybrane-typy");
-  keys({ M9K_HOME, M9K_LEFT, M9K_ENTER, M9K_DOWN, M9K_ENTER }); save("pole-data");
+  for (int i = 0; i < 8; i++) {
+    keys({ M9K_ENTER });
+    char n[24]; snprintf(n, sizeof(n), "ustawienia-%d", i); save(n);
+    keys({ M9K_BACK });
+    if (i % 2 == 0) keys({ M9K_RIGHT }); else keys({ M9K_LEFT, M9K_DOWN });
+  }
   printf("zrzutow: %d\n", shot);
   return 0;
 }

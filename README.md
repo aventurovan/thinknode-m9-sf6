@@ -7,18 +7,19 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 
 ## Stan prac
 
-**Wersja 0.10.0.** Companion Bluetooth dla aplikacji MeshCore (stały PIN **123456**, zmiana w Ustawieniach) i własny kolorowy interfejs po polsku:
+**Wersja 0.11.0.** Companion Bluetooth dla aplikacji MeshCore (stały PIN **123456**, zmiana w Ustawieniach) i własny kolorowy interfejs po polsku:
 
-- **Start** — nowe wiadomości, ostatnio słyszane urządzenie, pozycja GPS, bateria i Bluetooth.
+- **Start** — zegar i sześć kafelków (Wiadomości, Kontakty, Repeatery, Pozycja, Radio, Urządzenie); po kafelkach chodzi się strzałkami, Enter wchodzi.
+- **Dolny pasek** — ikony: Start, Wiadomości, Kontakty, Repeatery, Ustawienia.
 - **Wiadomości** — kanały i rozmowy prywatne (nieprzeczytane na górze), dodawanie i usuwanie kanałów z hasztagiem,
   rozmowa z dymkami, szybkie odpowiedzi, pozycja. Pod wysłaną wiadomością licznik powtórzeń (kanał) albo „dostarczono” (prywatna),
   pod odebraną liczba skoków i trasa z identyfikatorami repeaterów. Menu wiadomości: szczegóły (trasa z nazwami repeaterów, SNR, RSSI,
   kto powtórzył), odpowiedz, wyślij ponownie, kopiuj, usuń.
-- **Kontakty** — filtr roli (wszystkie / osoby / repeatery / pokoje / czujniki / ulubione), szukanie po nazwie, „Usłyszane” (adverty spoza kontaktów),
+- **Kontakty** — wiersz filtrów, po którym chodzi się strzałkami (wszyscy / osoby / RPT / pokoje / czujniki / ulubione / słyszane), szukanie po nazwie,
   menu kontaktu: napisz, ulubiony, szczegóły, zarządzaj, usuń.
-- **Repeatery** — lista wg ostatniego kontaktu albo odległości, „Co tu słychać?” (ping do sąsiadów z SNR w obie strony),
+- **Repeatery** — lista wg ostatniego kontaktu albo odległości, „Co tu słychać?” (ping do sąsiadów z SNR w obie strony; wykryty repeater można otworzyć i dodać do kontaktów),
   zarządzanie: logowanie (hasła zapamiętywane), stan, sąsiedzi, akcje (advert, zegar, preset SF6, restart), konsola.
-- **Ustawienia** w działach: Urządzenie, Radio, Pozycja, Advert, Kontakty (co dodawać z advertów), Bluetooth, Wiadomości, System.
+- **Ustawienia** — siatka ośmiu działów: Radio, Bluetooth, Pozycja i prywatność, Advert, Kontakty, Wiadomości, Ekran i dźwięk, System.
 - **Zapis** — wiadomości, ustawienia ekranu i hasła repeaterów zostają po restarcie.
 
 ### Klawisze
@@ -31,7 +32,7 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 | ► w rozmowie | menu zaznaczonej wiadomości |
 | Wstecz | krok wstecz |
 | Home / Dymki / Wiadomość / Mapa | Start / Wiadomości / Kontakty / Repeatery |
-| Pinezka | Kontakty: filtr roli; Repeatery: sortowanie; rozmowa: wstaw pozycję; pole daty: zegar z GPS |
+| Pinezka | Kontakty: następny filtr; Repeatery: sortowanie; rozmowa: wstaw pozycję; pole daty: zegar z GPS |
 | litery na liście Kontakty | szukanie po nazwie (Del kasuje) |
 | Del na kanale | usunięcie kanału |
 | ctrl, potem litera | ą ć ę ł ń ó ś ż (ź pod X) |

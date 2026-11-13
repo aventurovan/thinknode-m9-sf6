@@ -9,8 +9,8 @@
 #define UI_KV_MAX     9
 #define UI_INPUT_MAX  140
 
-enum UiScreen { UIS_START, UIS_LIST, UIS_THREAD, UIS_INFO, UIS_BOOT, UIS_LOCK };
-enum UiIcon { UII_NONE, UII_MAIL, UII_TOWER, UII_USER, UII_HASH, UII_STAR, UII_GPS, UII_BT, UII_LOCK, UII_BOLT, UII_SD, UII_ROOM };
+enum UiScreen { UIS_START, UIS_LIST, UIS_THREAD, UIS_INFO, UIS_BOOT, UIS_LOCK, UIS_GRID };
+enum UiIcon { UII_NONE, UII_MAIL, UII_TOWER, UII_USER, UII_HASH, UII_STAR, UII_GPS, UII_BT, UII_LOCK, UII_BOLT, UII_SD, UII_ROOM, UII_HOME, UII_GEAR, UII_SCREEN, UII_SHIELD };
 
 struct UiRow { char text[44]; char sub[80]; char right[64]; uint8_t icon; uint8_t badge; bool icon_accent; };
 struct UiBubble { char who[24]; char meta[32]; char text[168]; char path[72]; bool out; bool sel; };
@@ -29,7 +29,10 @@ struct UiView {
   UiRow rows[UI_ROWS_MAX]; int nrows; int sel; bool more_up, more_dn;
   char empty[240];                   // tekst, gdy lista jest pusta
   // Start
-  char name[36]; char preset[56]; UiTile tile[4]; char footer[56];
+  char name[36]; char preset[56]; UiTile tile[8]; char footer[56];
+  int ntiles; int grid_cols;        // siatka kafelków (Start: 3 kolumny z zegarem, Ustawienia: 2 kolumny); zaznaczony = sel
+  // wiersz filtrów nad listą (Kontakty)
+  char chips[8][20]; int nchips; int chip_active; bool chip_focus;
   // rozmowa
   UiBubble bub[UI_BUB_MAX]; int nbub; char input[UI_INPUT_MAX * 2 + 4]; int input_chars; bool polish_next;
   // informacje (pary nazwa–wartość)

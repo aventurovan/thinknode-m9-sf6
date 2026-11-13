@@ -49,9 +49,10 @@ public:
   bool uiAdminCli(const char* c) { snprintf(ui_admin.cli, sizeof(ui_admin.cli), "odpowiedz na: %s — v1.9.1 (Build: 02-Nov-2026) to jest dluzsza odpowiedz ktora trzeba zawinac na kilka wierszy ekranu", c); ui_admin.cli_ready = true; return true; }
   void uiAdminLogout() { ui_admin.active = false; }
   #define UI_DISC_MAX 12
-  struct UiDisc { uint8_t prefix[8]; int8_t snr_rx, snr_tx, rssi; };
+  struct UiDisc { uint8_t key[32]; uint8_t key_len; int8_t snr_rx, snr_tx, rssi; };
   UiDisc ui_disc[UI_DISC_MAX]; int ui_disc_n = 0;
   bool uiDiscoverStart();
+  bool uiAddDiscovered(int i) { ContactInfo c; memset(&c, 0, sizeof(c)); memcpy(c.id.pub_key, ui_disc[i].key, 32); snprintf(c.name, sizeof(c.name), "RPT %02x%02x%02x", ui_disc[i].key[0], ui_disc[i].key[1], ui_disc[i].key[2]); c.type = ADV_TYPE_REPEATER; c.lastmod = 1794580320UL; cts.push_back(c); return true; }
   void uiReboot() { } bool uiFactoryReset() { return true; } void uiSetLatLon(double, double) { }
 };
 extern MyMesh the_mesh;

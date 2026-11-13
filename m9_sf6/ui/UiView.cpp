@@ -19,13 +19,13 @@
 #define C_BUB   GFX_RGB(0x1A, 0x23, 0x2E)
 
 #define STATUS_H 20
-#define BOTTOM_H 22
+#define BOTTOM_H 24
 #define HEADER_H 24
 #define ROW_H    21
 
 // ---------- ikony 12x12 ----------
 static const char* const IC_MAIL[12] = { "", "", "############", "##........##", "#.#......#.#", "#..#....#..#", "#...#..#...#", "#....##....#", "#..........#", "############", "", "" };
-static const char* const IC_TOWER[12] = { "", "#....##....#", "#.#..##..#.#", "#.#..##..#.#", "#....##....#", ".....##.....", ".....##.....", ".....##.....", ".....##.....", ".....##.....", "...######...", "" };
+static const char* const IC_TOWER[12] = { ".....##.....", ".#...##...#.", "#..#.##.#..#", "#..#.##.#..#", ".#...##...#.", ".....##.....", "....####....", "....#..#....", "...##..##...", "...#....#...", "..########..", "" };
 static const char* const IC_USER[12] = { "", "....####....", "...######...", "...######...", "....####....", "............", "..########..", ".##########.", ".##########.", ".##########.", "", "" };
 static const char* const IC_HASH[12] = { "", "...#...#....", "...#...#....", ".#########..", "...#...#....", "..#...#.....", "..#...#.....", "#########...", "..#...#.....", "..#...#.....", "", "" };
 static const char* const IC_STAR[12] = { ".....##.....", ".....##.....", "....####....", "############", ".##########.", "..########..", "...######...", "..########..", "..###..###..", ".##......##.", "", "" };
@@ -36,11 +36,17 @@ static const char* const IC_BOLT[12] = { "......##....", ".....##.....", "....##
 static const char* const IC_SD[12] = { "..#######...", "..#.#.#.##..", "..#.#.#..##.", "..#.......#.", "..#.......#.", "..#.......#.", "..#.......#.", "..#.......#.", "..#.......#.", "..#########.", "", "" };
 static const char* const IC_ROOM[12] = { "", ".##########.", ".#........#.", ".#.######.#.", ".#........#.", ".#.####...#.", ".#........#.", ".####.#####.", "....##......", "....#.......", "", "" };
 
+static const char* const IC_HOME[12] = { ".....##.....", "....####....", "...######...", "..########..", ".##########.", "############", "..########..", "..###..###..", "..###..###..", "..###..###..", "..###..###..", "" };
+static const char* const IC_GEAR[12] = { ".....##.....", "..#.####.#..", ".##########.", "..###..###..", ".###....###.", "###......###", "###......###", ".###....###.", "..###..###..", ".##########.", "..#.####.#..", ".....##....." };
+static const char* const IC_SCREEN[12] = { "", "############", "#..........#", "#..........#", "#..........#", "#..........#", "#..........#", "############", ".....##.....", "...######...", "", "" };
+static const char* const IC_SHIELD[12] = { ".....##.....", "..########..", ".##########.", ".##########.", ".##########.", ".##########.", "..########..", "..########..", "...######...", "....####....", ".....##.....", "" };
+
 static const char* const* iconRows(uint8_t i) {
   switch (i) {
     case UII_MAIL: return IC_MAIL; case UII_TOWER: return IC_TOWER; case UII_USER: return IC_USER; case UII_HASH: return IC_HASH;
     case UII_STAR: return IC_STAR; case UII_GPS: return IC_GPS; case UII_BT: return IC_BT; case UII_LOCK: return IC_LOCK;
     case UII_BOLT: return IC_BOLT; case UII_SD: return IC_SD; case UII_ROOM: return IC_ROOM;
+    case UII_HOME: return IC_HOME; case UII_GEAR: return IC_GEAR; case UII_SCREEN: return IC_SCREEN; case UII_SHIELD: return IC_SHIELD;
   }
   return NULL;
 }
@@ -76,13 +82,21 @@ static void drawStatus(Gfx& g, const UiView& v) {
   }
 }
 
-static void drawTabs(Gfx& g, int active) {
+// dolny pasek: ikony Start, Wiadomości, Kontakty, Repeatery, Ustawienia; aktywna na bursztynowym tle
+static void drawTabs(Gfx& g, int active, int unread) {
+  static const char* const* const IC[5] = { IC_HOME, IC_MAIL, IC_USER, IC_TOWER, IC_GEAR };
   int y = GFX_H - BOTTOM_H;
   g.fillRect(0, y, GFX_W, BOTTOM_H, C_BAR);
   for (int i = 0; i < 5; i++) {
-    int x = i * 64;
-    if (i == active) { g.fillRect(x, y, 64, 2, C_ACC); g.textCenter(x + 32, y + 5, TABS[i], F_SMALL, C_ACC); }
-    else g.textCenter(x + 32, y + 5, TABS[i], F_SMALL, C_DIM);
+    int cx = i * 64 + 32;
+    if (i == active) { g.fillRound(cx - 22, y + 3, 44, 18, 9, C_ACC); g.icon(cx - 6, y + 6, IC[i], C_INK); }
+    else g.icon(cx - 6, y + 6, IC[i], C_DIM);
+    if (i == 1 && unread > 0) {                       // licznik nieprzeczytanych przy kopercie
+      char t[8]; snprintf(t, sizeof(t), "%d", unread > 99 ? 99 : unread);
+      int bw = Gfx::textWidth(t, F_SMALL) + 8;
+      g.fillRound(cx + 8, y + 2, bw, 13, 6, C_RED);
+      g.text(cx + 12, y + 2, t, F_SMALL, C_TXT);
+    }
   }
 }
 
@@ -99,7 +113,7 @@ static void drawHints(Gfx& g, const UiView& v) {
   }
 }
 
-static void drawBottom(Gfx& g, const UiView& v) { if (v.tab >= 0) drawTabs(g, v.tab); else drawHints(g, v); }
+static void drawBottom(Gfx& g, const UiView& v) { if (v.tab >= 0) drawTabs(g, v.tab, v.unread); else drawHints(g, v); }
 
 static void drawHeader(Gfx& g, const UiView& v, int y) {
   int rw = v.title_right[0] ? Gfx::textWidth(v.title_right, F_SMALL) : 0;
@@ -121,15 +135,28 @@ static void drawPopup(Gfx& g, const UiView& v) {
 static void drawList(Gfx& g, const UiView& v) {
   drawHeader(g, v, STATUS_H);
   int y = STATUS_H + HEADER_H;
+  if (v.nchips > 0) {                                 // wiersz filtrów: aktywny wypełniony, zaznaczony (gdy chodzimy po wierszu) w ramce
+    int x = 4;
+    for (int i = 0; i < v.nchips; i++) {
+      int w = Gfx::textWidth(v.chips[i], F_SMALL) + 8;
+      bool act = i == v.chip_active;
+      if (v.chip_focus && act) { g.fillRound(x - 1, y + 1, w + 2, 19, 9, C_TXT); g.fillRound(x + 1, y + 3, w - 2, 15, 7, C_ACC); }
+      else if (act) g.fillRound(x, y + 2, w, 17, 8, v.chip_focus ? C_ACC : GFX_RGB(0x6B, 0x4A, 0x10));
+      else { g.fillRound(x, y + 2, w, 17, 8, C_LINE); g.fillRound(x + 1, y + 3, w - 2, 15, 7, C_BG); }
+      g.text(x + 4, y + 4, v.chips[i], F_SMALL, act ? (v.chip_focus ? C_INK : C_TXT) : C_DIM);
+      x += w + 3;
+    }
+    y += 22;
+  }
   if (v.nrows == 0) {
-    GfxLine ln[4];
-    int n = Gfx::wrap(v.empty, F_NORMAL, GFX_W - 32, ln, 4);
+    GfxLine ln[5];
+    int n = Gfx::wrap(v.empty, F_NORMAL, GFX_W - 32, ln, 5);
     for (int i = 0; i < n; i++) g.textN(16, y + 14 + i * 17, v.empty + ln[i].start, ln[i].len, F_NORMAL, C_DIM);
     return;
   }
   for (int i = 0; i < v.nrows; i++, y += ROW_H) {
     const UiRow& r = v.rows[i];
-    bool sel = i == v.sel;
+    bool sel = i == v.sel && !v.chip_focus;
     uint16_t fg = sel ? C_INK : C_TXT, dim = sel ? GFX_RGB(0x2B, 0x24, 0x12) : C_DIM;
     if (sel) g.fillRect(0, y, GFX_W, ROW_H, C_ACC);
     int x = 8;
@@ -154,24 +181,45 @@ static void drawList(Gfx& g, const UiView& v) {
   if (v.more_dn) g.fillRect(GFX_W - 3, GFX_H - BOTTOM_H - 10, 2, 8, C_ACC);
 }
 
-static void drawStart(Gfx& g, const UiView& v) {
-  int y = STATUS_H + 5;
-  g.text(8, y, v.name, F_BIG, C_TXT, 150);
-  g.textRight(GFX_W - 8, y + 5, v.preset, F_SMALL, C_DIM);
-  y += 26;
-  int tw = 151, th = 68;
-  for (int i = 0; i < 4; i++) {
-    const UiTile& t = v.tile[i];
-    int x = 6 + (i % 2) * (tw + 6), ty = y + (i / 2) * (th + 5);
-    g.fillRound(x, ty, tw, th, 6, C_TILE);
-    const char* const* ic = iconRows(t.icon);
-    if (ic) g.icon(x + 8, ty + 7, ic, C_DIM);
-    g.text(x + 24, ty + 7, t.label, F_SMALL, C_DIM);
-    bool fits = Gfx::textWidth(t.value, F_BIG) <= tw - 16;          // długie wartości mniejszą czcionką
-    g.text(x + 8, ty + (fits ? 24 : 27), t.value, fits ? F_BIG : F_BOLD, t.accent ? C_ACC : C_TXT, tw - 16);
-    g.text(x + 8, ty + 48, t.sub, F_SMALL, C_DIM, tw - 16);
+// Siatka kafelków, po której chodzi się strzałkami. Start: duży zegar i 3 kolumny; Ustawienia: nagłówek i 2 kolumny.
+static void drawGrid(Gfx& g, const UiView& v) {
+  int top;
+  bool start = v.big[0] != 0;
+  if (start) {
+    int cw = g.text(8, STATUS_H + 1, v.big, F_HUGE, C_TXT);
+    g.text(8 + cw + 10, STATUS_H + 8, v.name, F_BOLD, C_TXT, GFX_W - cw - 26);
+    g.text(8 + cw + 10, STATUS_H + 25, v.line1, F_SMALL, C_DIM, GFX_W - cw - 26);
+    top = STATUS_H + 46;
+  } else {
+    drawHeader(g, v, STATUS_H);
+    top = STATUS_H + HEADER_H + 4;
   }
-  if (v.footer[0]) g.text(8, GFX_H - BOTTOM_H - 16, v.footer, F_SMALL, C_DIM, GFX_W - 16);
+  int cols = v.grid_cols > 0 ? v.grid_cols : 2;
+  int rows = (v.ntiles + cols - 1) / cols;
+  if (rows < 1) return;
+  const int gap = 4;
+  int tw = (GFX_W - 12 - (cols - 1) * gap) / cols;
+  int th = (GFX_H - BOTTOM_H - top - 4 - (rows - 1) * gap) / rows;
+  for (int i = 0; i < v.ntiles; i++) {
+    const UiTile& t = v.tile[i];
+    int x = 6 + (i % cols) * (tw + gap), y = top + (i / cols) * (th + gap);
+    bool sel = i == v.sel;
+    if (sel) { g.fillRound(x - 1, y - 1, tw + 2, th + 2, 7, C_ACC); g.fillRound(x + 1, y + 1, tw - 2, th - 2, 5, GFX_RGB(0x22, 0x1C, 0x10)); }
+    else g.fillRound(x, y, tw, th, 6, C_TILE);
+    const char* const* ic = iconRows(t.icon);
+    if (start) {                                      // ikona + nazwa, duża wartość, drobny opis
+      if (ic) g.icon(x + 7, y + 6, ic, sel ? C_ACC : C_DIM);
+      g.text(x + 23, y + 6, t.label, F_SMALL, sel ? C_ACC : C_DIM, tw - 28);
+      bool fits = Gfx::textWidth(t.value, F_BIG) <= tw - 14;
+      g.text(x + 7, y + (fits ? 23 : 26), t.value, fits ? F_BIG : F_BOLD, t.accent ? C_ACC : C_TXT, tw - 14);
+      g.text(x + 7, y + 46, t.sub, F_SMALL, C_DIM, tw - 14);
+    } else {                                          // ikona w kółku, nazwa i jedna linia podsumowania
+      g.fillRound(x + 6, y + (th - 22) / 2, 22, 22, 6, sel ? C_ACC : C_LINE);
+      if (ic) g.icon(x + 11, y + (th - 22) / 2 + 5, ic, sel ? C_INK : C_TXT);
+      g.text(x + 34, y + th / 2 - 15, t.label, F_BOLD, C_TXT, tw - 40);
+      g.text(x + 34, y + th / 2 + 2, t.sub, F_SMALL, C_DIM, tw - 40);
+    }
+  }
 }
 
 static void drawThread(Gfx& g, const UiView& v) {
@@ -280,7 +328,7 @@ void uiRender(Gfx& g, const UiView& v) {
   switch (v.screen) {
     case UIS_BOOT: drawBoot(g, v); return;
     case UIS_LOCK: drawStatus(g, v); drawLock(g, v); return;
-    case UIS_START: drawStart(g, v); break;
+    case UIS_START: case UIS_GRID: drawGrid(g, v); break;
     case UIS_LIST: drawList(g, v); break;
     case UIS_THREAD: drawThread(g, v); break;
     case UIS_INFO: drawInfo(g, v); break;
