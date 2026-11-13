@@ -5,6 +5,7 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <SD.h>
+#include <esp_heap_caps.h>
 
 #define DIR        "/mapa"
 #define MAX_FILES  80
@@ -38,6 +39,20 @@ static char req_url[220];
 static volatile uint32_t req_off = 0, req_total = 0;
 static volatile bool req_list = false;
 static char list_body[4096];
+// diagnostyka ostatniej nieudanej próby (wypełnia zadanie w tle)
+static char d_tls[72] = "", diag[360] = "";
+static volatile int d_hop = 0, d_code = 0, d_heap = 0, d_block = 0, d_rssi = 0, d_wifi = 0;
+static char d_host[40] = "";
+
+static void noteFailure(const String& u, int hop, int code) {
+  d_hop = hop; d_code = code;
+  d_heap = (int)(ESP.getFreeHeap() / 1024);
+  d_block = (int)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024);
+  d_rssi = (int)WiFi.RSSI(); d_wifi = (int)WiFi.status();
+  int a = u.indexOf("://"); a = a < 0 ? 0 : a + 3;
+  int b = u.indexOf('/', a); if (b < 0) b = u.length();
+  strncpy(d_host, u.substring(a, b).c_str(), sizeof(d_host) - 1); d_host[sizeof(d_host) - 1] = 0;
+}
 
 // ---- zadanie w tle: tylko sieć ----
 static HTTPClient* http = NULL;
@@ -54,19 +69,24 @@ static bool openUrl(const char* url, uint32_t offset) {
   String u = url;
   for (int hop = 0; hop < 4; hop++) {
     closeHttp();
-    if (u.startsWith("https://")) { WiFiClientSecure* c = new WiFiClientSecure(); c->setInsecure(); c->setHandshakeTimeout(12); client = c; }
+    bool tls = u.startsWith("https://");
+    if (tls) { WiFiClientSecure* c = new WiFiClientSecure(); c->setInsecure(); client = c; }
     else client = new WiFiClient();
     http = new HTTPClient();
     http->setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
-    http->setConnectTimeout(8000);
-    http->setTimeout(12000);
+    http->setTimeout(15000);
     http->setReuse(false);
-    if (!http->begin(*client, u)) { last_code = -100; return false; }
+    if (!http->begin(*client, u)) { last_code = -100; noteFailure(u, hop, -100); return false; }
     static const char* KEYS[] = { "Location" };
     http->collectHeaders(KEYS, 1);
     if (offset > 0) { char r[32]; snprintf(r, sizeof(r), "bytes=%lu-", (unsigned long)offset); http->addHeader("Range", r); }
     int code = http->GET();
     last_code = code;
+    if (code < 0) {                                   // nie doszło do odpowiedzi serwera: zapisz, co mówi warstwa szyfrowania
+      d_tls[0] = 0;
+      if (tls) ((WiFiClientSecure*)client)->lastError(d_tls, sizeof(d_tls));
+      noteFailure(u, hop, code);
+    }
     if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
       String loc = http->getLocation();
       if (loc.length() == 0) loc = http->header("Location");
@@ -134,6 +154,10 @@ static void netTask(void* arg) {
 static void stopTask() { session = session + 1; net = N_IDLE; }
 
 static void fail(const char* why) {
+  snprintf(diag, sizeof(diag),
+           "%s\nEtap: %s, serwer %d: %s\nKod: %d\nSzyfrowanie: %s\nPamięć: %d kB wolne, blok %d kB\nWiFi: %d dBm, stan %d\nTeraz wolne: %u kB",
+           why, st == ST_CONNECT ? "WiFi" : st == ST_LIST ? "lista plików" : "plik mapy", (int)d_hop + 1, d_host[0] ? d_host : "-", (int)d_code,
+           d_tls[0] ? d_tls : "-", (int)d_heap, (int)d_block, (int)d_rssi, (int)d_wifi, (unsigned)(ESP.getFreeHeap() / 1024));
   st = ST_ERROR;
   failed_flag = true;
   snprintf(status, sizeof(status), "błąd");
@@ -227,7 +251,6 @@ void m9dlLoop() {
   switch (st) {
     case ST_CONNECT:
       if (WiFi.status() == WL_CONNECTED) {
-        WiFi.setSleep(false);                          // bez usypiania radia WiFi pobieranie jest wielokrotnie szybsze
         task_alive = true;
         if (xTaskCreatePinnedToCore(netTask, "m9dl", 16384, (void*)(uintptr_t)session, 1, NULL, 0) != pdPASS) { task_alive = false; fail("nie mogę uruchomić pobierania (pamięć)"); break; }
         st = ST_LIST; list_asked = false; t_retry = 0;
@@ -283,6 +306,7 @@ void m9dlLoop() {
         files[k + 1] = t;
       }
       detail[0] = 0;
+      WiFi.setSleep(false);                            // lista przyszła, połączenie działa: bez usypiania radia WiFi pobieranie jest szybsze
       st = ST_NEXT;
       break;
     }
@@ -341,6 +365,7 @@ bool m9dlFailed() { bool f = failed_flag; failed_flag = false; return f; }
 bool m9dlFinished() { bool f = done_flag; done_flag = false; return f; }
 const char* m9dlStatus() { return status; }
 const char* m9dlDetail() { return detail; }
+const char* m9dlDiag() { return diag; }
 
 #else
 // atrapa dla symulatora
@@ -353,4 +378,5 @@ bool m9dlFailed() { return false; }
 bool m9dlFinished() { return false; }
 const char* m9dlStatus() { return ""; }
 const char* m9dlDetail() { return ""; }
+const char* m9dlDiag() { return ""; }
 #endif

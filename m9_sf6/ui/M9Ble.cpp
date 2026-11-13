@@ -9,7 +9,8 @@ volatile uint8_t m9ble_fail_reason = 0;
 #include <Arduino.h>
 #include <BLEDevice.h>
 
-void m9bleShutdown() { BLEDevice::deinit(false); delay(200); }
+// true = oddaj pamięć Bluetooth do puli (kilkadziesiąt kB dla WiFi i szyfrowania); Bluetooth wraca dopiero po restarcie
+void m9bleShutdown() { BLEDevice::deinit(true); delay(200); }
 unsigned m9FreeHeapKB() { return ESP.getFreeHeap() / 1024; }
 
 int m9bleBondCount() { return esp_ble_get_bond_device_num(); }

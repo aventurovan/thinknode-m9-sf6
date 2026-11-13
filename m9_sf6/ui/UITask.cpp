@@ -2429,7 +2429,12 @@ void UITask::loop() {
   m9dlLoop();
   if (m9dlChanged()) _map.scan();
   if (m9dlFinished()) { _map.scan(); wake(); popup("Mapa pobrana", "możesz wyjść z menu (Wstecz)", false, 20000); }
-  if (m9dlFailed()) { char t[80]; snprintf(t, sizeof(t), "%s · pamięć %u kB", m9dlDetail(), m9FreeHeapKB()); wake(); popup("Pobieranie mapy: błąd", t, true, 15000); }
+  if (m9dlFailed()) {                                // błąd pobierania: ekran ze szczegółami (zostaje do naciśnięcia Wstecz)
+    wake();
+    kvOpen("Pobieranie mapy: błąd", M9_FW_VERSION);
+    kvText(m9dlDiag());
+    if (scr() != S_KV) push(S_KV);
+  }
   if (m9uploadActive() || m9dlActive()) { uint32_t ms = SLEEP_STEPS[_cfg.sleep_idx]; if (ms) _sleep_at = now + ms; }     // przy przesyłaniu mapy ekran nie gaśnie
 
   adminLoop();
