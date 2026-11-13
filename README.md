@@ -7,22 +7,28 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 
 ## Stan prac
 
-**Wersja testowa 0.5.0** — companion Bluetooth działa z aplikacją MeshCore (PIN **123456**), a na ekranie
-zamiast interfejsu są **cztery strony testowe**:
+**Wersja 0.9.0 — pierwszy etap właściwego interfejsu.** Companion Bluetooth działa z aplikacją MeshCore (PIN **123456**),
+a urządzenie ma własny kolorowy interfejs po polsku:
 
-1. **Klawiatura** — wykryta klawiatura, wersja kontrolera, ostatni klawisz z nazwą i historia 35 naciśnięć.
-2. **Karta SD + GPS** — typ i rozmiar karty, prędkość, pliki mapy, stan GPS, bateria, pamięć.
-3. **Mapa** — kolorowa mapa z karty SD (folder `/mapa`), wyśrodkowana na pozycji z GPS.
-   Krzyżak przesuwa, `I` / `O` zmienia zoom, Enter wraca do pozycji GPS.
-4. **Wgrywanie mapy** — karta w M9 jest wbudowana, więc pliki mapy wgrywa się przez WiFi:
-   urządzenie tworzy sieć **M9-MAPA** (hasło `mapa12345`), a strona `http://192.168.4.1` przyjmuje pliki `.mcm`.
+- **Start** — nowe wiadomości, ostatnio słyszane urządzenie, pozycja GPS, bateria i Bluetooth.
+- **Wiadomości** — kanały i rozmowy prywatne (nieprzeczytane na górze), rozmowa z dymkami, pisanie z klawiatury.
+- **Kontakty** — ulubione na górze, potem ostatnio słyszane; Enter otwiera rozmowę.
+- **Repeatery** — lista z odległością (gdy jest GPS) i szczegóły repeatera.
+- **Ustawienia** — preset SF6, advert, GPS, moc nadawania, Bluetooth, informacje.
 
-Następna strona: klawisz **Home**.
+Klawisze: ◄ ► zmiana ekranu, ▲ ▼ lista, Enter / środek krzyżaka — wybór, **Wstecz** — krok wstecz, **Home** — Start,
+**dymki** — Wiadomości, **wiadomość** — Kontakty, **mapa** — Repeatery. W rozmowie: Enter wysyła, **ctrl + litera** daje polską
+literę (a→ą, c→ć, e→ę, l→ł, n→ń, o→ó, s→ś, z→ż, x→ź), **pinezka** wstawia pozycję, ▲ ▼ przewija.
+
+Jeszcze nie ma (kolejne etapy): zapisu wiadomości po restarcie, zarządzania repeaterami, „Co tu słychać?”, „Usłyszanych”, mapy z karty SD.
+Strony testowe (karta SD, GPS, mapa, wgrywanie mapy przez WiFi) zostały w kodzie jako osobny wariant `ThinkNode_M9_sf6_test`.
 
 Klawiatura (protokół opisany i potwierdzony na sprzęcie w projekcie Launcher, `boards/elecrow-thinknode-m9/connections.md`):
 kontroler pod adresem 0x6C (płytka v1.0) albo 0x6D (v1.1) na magistrali SDA 20 / SCL 21; rejestr 0x01 trzyma oczekujący klawisz
 do odczytu, po odczycie zwraca 0x88; numer rejestru trzeba wysłać osobną transmisją (STOP) przed odczytem; linia KB_INT (pin 12)
-pojawia się tylko dla niektórych klawiszy, więc rejestr jest odpytywany. Karta SD i kolorowy ekran działają na wspólnej magistrali SPI.
+pojawia się tylko dla niektórych klawiszy, więc rejestr jest odpytywany.
+
+Czcionka ekranowa: Inter (SIL Open Font License 1.1), generowana skryptem `tools/gen_font.py`. Podgląd ekranów na komputerze: `tools/podglad`.
 
 Mapa: narzędzia i instrukcja są w folderze [`mapa`](mapa/README.md).
 
@@ -32,7 +38,7 @@ Pliki są w wydaniu **„Najnowszy build”** (zakładka *Releases*):
 
 - `…-pelny.bin` — pełny obraz, do pierwszego wgrania (od adresu `0x0`), np. flasherem w przeglądarce,
 - `…-aktualizacja.bin` — sama aplikacja, do późniejszych aktualizacji,
-- `mapa-testowa.zip` — mapa testowa (siatka i miasta): rozpakuj na komputerze i wgraj pliki `.mcm` przez stronę 4 (WiFi).
+- `mapa-testowa.zip` — mapa testowa (siatka i miasta) do późniejszego etapu z mapą.
 
 ## Budowanie
 

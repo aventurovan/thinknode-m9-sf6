@@ -10,7 +10,7 @@ on:
 env:
   # wersja MeshCore, na ktorej budujemy (ta sama co firmware Wio; zmien, zeby przejsc na nowsza)
   MESHCORE_REF: a366955cb2f67b8e6842d4f00d2b6a554dddd88a
-  PIO_ENV: ThinkNode_M9_sf6_test
+  PIO_ENV: ThinkNode_M9_sf6
 
 permissions:
   contents: write   # publikacja plików .bin w wydaniu „Najnowszy build”
@@ -34,6 +34,10 @@ jobs:
       - name: Wstaw nasz kod do MeshCore
         run: |
           cp -r m9/m9_sf6 MeshCore/examples/
+          # reszta companion bez zmian z MeshCore (nasz jest tylko MyMesh z funkcjami dla ekranu)
+          for f in main.cpp DataStore.cpp DataStore.h NodePrefs.h AbstractUITask.h; do
+            cp MeshCore/examples/companion_radio/$f MeshCore/examples/m9_sf6/companion/$f
+          done
           cat m9/platformio-m9.ini >> MeshCore/variants/thinknode_m9/platformio.ini
 
       - uses: actions/setup-python@v5
@@ -69,8 +73,8 @@ jobs:
         run: |
           VER=$(grep -oP 'M9_FW_VERSION\s+"\K[^"]+' m9/m9_sf6/Version.h)
           mkdir -p out
-          cp MeshCore/.pio/build/$PIO_ENV/firmware-merged.bin out/MC-SF6-ThinkNode-M9-test-$VER-pelny.bin
-          cp MeshCore/.pio/build/$PIO_ENV/firmware.bin out/MC-SF6-ThinkNode-M9-test-$VER-aktualizacja.bin
+          cp MeshCore/.pio/build/$PIO_ENV/firmware-merged.bin out/MC-SF6-ThinkNode-M9-$VER-pelny.bin
+          cp MeshCore/.pio/build/$PIO_ENV/firmware.bin out/MC-SF6-ThinkNode-M9-$VER-aktualizacja.bin
           cp mapa-testowa.zip out/mapa-testowa.zip
 
       - uses: actions/upload-artifact@v4
