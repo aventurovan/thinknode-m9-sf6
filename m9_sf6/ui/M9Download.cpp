@@ -5,6 +5,7 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <SD.h>
+#include <SPI.h>
 #include <esp_heap_caps.h>
 #include <mbedtls/platform.h>
 
@@ -24,7 +25,8 @@ static void tlsFree(void* p) { heap_caps_free(p); }
 // i wkłada odebrane dane do bufora. Główna pętla urządzenia tylko przepisuje bufor na kartę SD — dzięki temu
 // ekran i klawisze działają przez cały czas, a karta, radio i ekran (wspólna magistrala) są obsługiwane z jednego miejsca.
 
-enum { ST_IDLE, ST_CONNECT, ST_LIST, ST_NEXT, ST_BODY, ST_DONE, ST_ERROR };
+enum { ST_IDLE, ST_CONNECT, ST_LIST, ST_NEXT, ST_BODY, ST_WFAIL, ST_DONE, ST_ERROR };
+#define SD_CS 48
 enum { N_IDLE, N_REQ, N_OPEN, N_STREAM, N_DONE, N_FAIL };
 
 static uint8_t st = ST_IDLE;
@@ -46,6 +48,8 @@ static volatile int last_code = 0;                     // ostatni kod odpowiedzi
 static char req_url[220];
 static volatile uint32_t req_off = 0, req_total = 0;
 static volatile bool req_list = false;
+static volatile bool cancel = false;                   // pętla główna prosi zadanie o przerwanie bieżącego pliku
+static int sd_mhz = 40, w_errs = 0;                    // prędkość magistrali karty i liczba błędów zapisu w tej sesji
 static char list_body[4096];
 // diagnostyka ostatniej nieudanej próby (wypełnia zadanie w tle)
 static char d_tls[72] = "", diag[400] = "";
@@ -130,6 +134,7 @@ static void netTask(void* arg) {
     bool bad = false;
     WiFiClient* s = http->getStreamPtr();
     while (left > 0 && session == my) {
+      if (cancel) { last_code = -300; bad = true; break; }
       uint32_t used = r_head - r_tail;
       if (used >= RING_SZ) { t_last = millis(); vTaskDelay(2 / portTICK_PERIOD_MS); continue; }     // karta nie nadąża: czekamy na miejsce
       int av = s ? s->available() : 0;
@@ -178,6 +183,7 @@ static void request(const char* url, uint32_t off, uint32_t tot, bool list) {
   r_head = 0; r_tail = 0;                              // zadanie w tym momencie nie czyta (stan inny niż N_OPEN / N_STREAM)
   strncpy(req_url, url, sizeof(req_url) - 1); req_url[sizeof(req_url) - 1] = 0;
   req_off = off; req_total = tot; req_list = list;
+  cancel = false;
   t0 = millis();
   net = N_REQ;
 }
@@ -190,7 +196,7 @@ void m9dlStart(const char* ssid, const char* pass, const char* base_url, int max
   for (int i = 0; i < 60 && task_alive; i++) delay(50); // poprzednie zadanie kończy połączenie
   if (task_alive) { fail("poprzednie połączenie jeszcze się zamyka"); return; }
   snprintf(base, sizeof(base), "%s%s", base_url, base_url[strlen(base_url) - 1] == '/' ? "" : "/");
-  n_files = 0; cur = -1; done_files = 0; retries = 0; t_retry = 0; last_code = 0; list_asked = false;
+  n_files = 0; cur = -1; done_files = 0; retries = 0; t_retry = 0; last_code = 0; list_asked = false; w_errs = 0;
   max_zoom = max_zoom_ > 0 ? max_zoom_ : 99;
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, pass);
@@ -319,27 +325,55 @@ void m9dlLoop() {
       st = ST_NEXT;
       break;
     }
+    case ST_WFAIL:                                      // czekamy, aż zadanie w tle zamknie połączenie
+      if (net == N_DONE || net == N_FAIL || net == N_IDLE) {
+        r_tail = r_head;                               // reszta bufora przepada — plik wznowimy od rozmiaru na karcie
+        net = N_IDLE;
+        if (sd_mhz > 10) sd_mhz /= 2;
+        SD.end();
+        bool ok = SD.begin(SD_CS, SPI, (uint32_t)sd_mhz * 1000000UL);
+        changed = true;                                // interfejs odświeży listę plików mapy
+        if (!ok) { fail("karta nie odpowiada po błędzie zapisu"); break; }
+        snprintf(detail, sizeof(detail), "karta %d MHz, wznawiam (%d)", sd_mhz, w_errs);
+        cur--; st = ST_NEXT; t_retry = now + 1500;
+      }
+      break;
     case ST_NEXT:
       if (t_retry && (long)(now - t_retry) < 0) break;
       t_retry = 0;
       nextFile();
       break;
     case ST_BODY: {
-      // przepisz z bufora na kartę (najwyżej 64 kB na jedno wywołanie, żeby nie blokować urządzenia)
-      uint32_t budget = 64 * 1024;
+      // przepisz z bufora na kartę: kawałki po 4 kB (tak zapis był sprawdzony na tym urządzeniu), najwyżej 48 kB na jedno wywołanie
+      uint32_t budget = 48 * 1024;
       bool write_err = false;
+      uint32_t w_want = 0, w_done = 0;
       while (budget > 0) {
         uint32_t used = r_head - r_tail;
         if (used == 0) break;
         uint32_t pos = r_tail % RING_SZ, chunk = used;
         if (chunk > RING_SZ - pos) chunk = RING_SZ - pos;
-        if (chunk > budget) chunk = budget;
-        if (out.write(ring + pos, chunk) != chunk) { write_err = true; break; }
-        r_tail = r_tail + chunk; got += chunk; speed_bytes += chunk; budget -= chunk; retries = 0;
+        if (chunk > 4096) chunk = 4096;
+        size_t w = out.write(ring + pos, chunk);
+        if (w != chunk) { delay(20); if (w < chunk) w += out.write(ring + pos + w, chunk - w); }   // jedna ponowna próba reszty
+        if (w != chunk) { write_err = true; w_want = chunk; w_done = w; break; }
+        r_tail = r_tail + chunk; got += chunk; speed_bytes += chunk; budget -= chunk > budget ? budget : chunk; retries = 0;
       }
-      if (write_err) { fail("karta pełna albo błąd zapisu"); break; }
+      if (write_err) {
+        // Zapis się nie udał. Przerywamy ten plik, zwalniamy kartę (niższa prędkość magistrali) i wznawiamy od tego, co jest na karcie.
+        out.close();
+        if (++w_errs > 6) {
+          char why[96]; snprintf(why, sizeof(why), "błąd zapisu na kartę (%d×): %lu z %lu B po %lu kB, karta %d MHz", w_errs, (unsigned long)w_done, (unsigned long)w_want, (unsigned long)(got >> 10), sd_mhz);
+          fail(why);
+          break;
+        }
+        cancel = true;
+        st = ST_WFAIL;
+        snprintf(detail, sizeof(detail), "błąd zapisu (%d), zwalniam kartę…", w_errs);
+        break;
+      }
       if (now - t_speed >= 2000) { speed_kbs = (uint32_t)((uint64_t)speed_bytes * 1000 / 1024 / (now - t_speed)); speed_bytes = 0; t_speed = now; }
-      snprintf(status, sizeof(status), "%d z %d · WiFi %d dBm · %u kB", done_files + 1, n_files, (int)WiFi.RSSI(), (unsigned)(ESP.getFreeHeap() / 1024));
+      snprintf(status, sizeof(status), "%d z %d · WiFi %d · %u kB · SD %d", done_files + 1, n_files, (int)WiFi.RSSI(), (unsigned)(ESP.getFreeHeap() / 1024), sd_mhz);
       if (net == N_REQ || net == N_OPEN) snprintf(detail, sizeof(detail), "z%d · łączę z serwerem… %lu s", files[cur].zoom, (now - t0) / 1000);
       else snprintf(detail, sizeof(detail), "z%d · %lu/%lu MB · %lu kB/s", files[cur].zoom, (unsigned long)(got >> 20), (unsigned long)(total >> 20), (unsigned long)speed_kbs);
       if ((net == N_DONE || net == N_FAIL) && r_head == r_tail) {       // zadanie skończyło i wszystko jest już na karcie
@@ -368,7 +402,7 @@ void m9dlLoop() {
   }
 }
 
-bool m9dlActive() { return st == ST_CONNECT || st == ST_LIST || st == ST_NEXT || st == ST_BODY; }
+bool m9dlActive() { return st == ST_CONNECT || st == ST_LIST || st == ST_NEXT || st == ST_BODY || st == ST_WFAIL; }
 bool m9dlChanged() { bool c = changed; changed = false; return c; }
 bool m9dlFailed() { bool f = failed_flag; failed_flag = false; return f; }
 bool m9dlFinished() { bool f = done_flag; done_flag = false; return f; }
