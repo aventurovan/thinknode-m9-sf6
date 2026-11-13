@@ -7,7 +7,7 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 
 ## Stan prac
 
-**Wersja 0.14.0.** Companion Bluetooth dla aplikacji MeshCore i MeshSpeed (PIN losowany przy każdym uruchomieniu i pokazywany na ekranie przy parowaniu; stały można ustawić w Ustawieniach) i własny kolorowy interfejs po polsku:
+**Wersja 0.14.1.** Companion Bluetooth dla aplikacji MeshCore i MeshSpeed (PIN losowany przy każdym uruchomieniu i pokazywany na ekranie przy parowaniu; stały można ustawić w Ustawieniach) i własny kolorowy interfejs po polsku:
 
 - **Start** — zegar i sześć kafelków (Wiadomości, Kontakty, Repeatery, Pozycja, Radio, Urządzenie); po kafelkach chodzi się strzałkami, Enter wchodzi.
 - **Dolny pasek** — ikony: Start, Wiadomości, Kontakty, Repeatery, Ustawienia.
@@ -51,8 +51,7 @@ kontroler pod adresem 0x6C (płytka v1.0) albo 0x6D (v1.1) na magistrali SDA 20 
 do odczytu, po odczycie zwraca 0x88; numer rejestru trzeba wysłać osobną transmisją (STOP) przed odczytem; linia KB_INT (pin 12)
 pojawia się tylko dla niektórych klawiszy, więc rejestr jest odpytywany.
 
-Czcionka jak w aplikacji MeshSpeed: IBM Plex Sans (SIL Open Font License 1.1, pliki w `tools/fonts`; strzałki z Inter),
-generowana skryptem `tools/gen_font.py`; logo na ekranie startowym z ikony aplikacji (`tools/gen_logo.py`). Podgląd ekranów na komputerze: `tools/podglad`.
+Czcionka ekranowa: Inter (SIL Open Font License 1.1), generowana skryptem `tools/gen_font.py`; logo na ekranie startowym z ikony aplikacji MeshSpeed (`tools/gen_logo.py`).
 
 Mapa: narzędzia i instrukcja są w folderze [`mapa`](mapa/README.md).
 
