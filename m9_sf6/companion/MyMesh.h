@@ -113,7 +113,9 @@ public:
   uint16_t uiSendChannelText(int channel_idx, const char* text);
   uint16_t uiSendDirectText(const char* contact_name, const char* text);     // wiadomosc prywatna (kontakt po nazwie)
   #define UI_SENT_MAX 12
-  struct UiSent { uint16_t id; uint8_t kind; uint8_t repeats; bool delivered; uint32_t ack; uint8_t hash[8]; };   // kind: 1 kanał, 2 prywatna
+  #define UI_REP_MAX 6
+  struct UiSent { uint16_t id; uint8_t kind; uint8_t repeats; bool delivered; uint32_t ack; uint8_t hash[8];        // kind: 1 kanał, 2 prywatna
+                  uint8_t rep_n, rep_hs; uint8_t rep_id[UI_REP_MAX][3]; int8_t rep_snr[UI_REP_MAX]; };            // kto powtórzył (SNR x4)
   UiSent ui_sent[UI_SENT_MAX];
   int ui_sent_next = 0;
   uint16_t ui_sent_seq = 0;
@@ -122,6 +124,16 @@ public:
   // trasa ostatnio odebranej wiadomości (ustawiana tuż przed newMsg)
   uint8_t ui_rx_path[48]; uint8_t ui_rx_path_bytes = 0, ui_rx_hash_size = 1, ui_rx_hops = 0; bool ui_rx_direct = false;
   void uiNotePath(const mesh::Packet* pkt);
+  int8_t ui_rx_snr_x4 = 0; int16_t ui_rx_rssi = 0;
+  // „Co tu słychać?”
+  #define UI_DISC_MAX 12
+  struct UiDisc { uint8_t prefix[8]; int8_t snr_rx, snr_tx, rssi; };
+  UiDisc ui_disc[UI_DISC_MAX]; int ui_disc_n = 0; uint32_t ui_disc_tag = 0;
+  bool uiDiscoverStart();
+  void uiReboot();
+  bool uiFactoryReset();
+  void uiSetLatLon(double lat, double lon);
+  UiSent* uiSent(uint16_t id) { for (int i = 0; i < UI_SENT_MAX; i++) if (ui_sent[i].id == id) return &ui_sent[i]; return NULL; }
   int  uiToggleFavourite(const uint8_t* pub_key);                         // 1 = ulubiony, 0 = nie, -1 = brak kontaktu
   int  uiChannelIndex(const char* name);
 

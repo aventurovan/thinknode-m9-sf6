@@ -200,7 +200,8 @@ static void drawThread(Gfx& g, const UiView& v) {
     int bw = tw + 14, bh = headLine + n * lh + metaLine + pathLine + 6;
     int by = y - bh, bx = b.out ? GFX_W - 8 - bw : 8;
     if (by < top && i != v.nbub - 1) break;                  // dymek, który się nie mieści w całości, pomijamy
-    if (b.out) { g.fillRound(bx, by, bw, bh, 6, C_ACC); g.fillRound(bx + 1, by + 1, bw - 2, bh - 2, 5, C_TILE); }
+    if (b.sel) { g.fillRound(bx - 2, by - 2, bw + 4, bh + 4, 7, C_BLUE); g.fillRound(bx, by, bw, bh, 6, b.out ? C_TILE : C_BUB); }   // wybrana wiadomość
+    else if (b.out) { g.fillRound(bx, by, bw, bh, 6, C_ACC); g.fillRound(bx + 1, by + 1, bw - 2, bh - 2, 5, C_TILE); }
     else g.fillRound(bx, by, bw, bh, 6, C_BUB);
     int ty = by + 3;
     if (headLine) {
@@ -240,10 +241,13 @@ static void drawThread(Gfx& g, const UiView& v) {
 
 static void drawInfo(Gfx& g, const UiView& v) {
   drawHeader(g, v, STATUS_H);
+  if (v.more_up) g.fillRect(GFX_W - 3, STATUS_H + HEADER_H + 2, 2, 8, C_ACC);
+  if (v.more_dn) g.fillRect(GFX_W - 3, GFX_H - BOTTOM_H - 10, 2, 8, C_ACC);
   int y = STATUS_H + HEADER_H + 4;
   for (int i = 0; i < v.nkv; i++, y += 20) {
-    g.text(8, y + 2, v.kv[i].k, F_NORMAL, C_DIM);
-    g.textRight(GFX_W - 8, y + 2, v.kv[i].v, F_BOLD, C_TXT);
+    if (v.kv[i].v[0] == 0) { g.text(8, y + 2, v.kv[i].k, F_NORMAL, C_TXT, GFX_W - 16); continue; }     // sam tekst na całą szerokość
+    int vw = g.textRight(GFX_W - 8, y + 2, v.kv[i].v, F_BOLD, C_TXT);
+    g.text(8, y + 2, v.kv[i].k, F_NORMAL, C_DIM, GFX_W - 24 - vw);
   }
 }
 

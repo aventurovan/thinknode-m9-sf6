@@ -7,27 +7,38 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 
 ## Stan prac
 
-**Wersja 0.9.3 — pierwszy etap właściwego interfejsu.** Companion Bluetooth dla aplikacji MeshCore,
-a urządzenie ma własny kolorowy interfejs po polsku:
+**Wersja 0.10.0.** Companion Bluetooth dla aplikacji MeshCore (stały PIN **123456**, zmiana w Ustawieniach) i własny kolorowy interfejs po polsku:
 
 - **Start** — nowe wiadomości, ostatnio słyszane urządzenie, pozycja GPS, bateria i Bluetooth.
-- **Wiadomości** — kanały i rozmowy prywatne (nieprzeczytane na górze), rozmowa z dymkami, pisanie z klawiatury.
-- **Kontakty** — ulubione na górze, potem ostatnio słyszane; Enter otwiera rozmowę.
-- **Repeatery** — lista z odległością (gdy jest GPS) i szczegóły repeatera.
-- **Ustawienia** — radio (presety **SF6 — MeshCore Południe**: 869,618 · BW 62,5 · SF6 · CR 4/8 oraz **EU/UK Narrow**: 869,618 · BW 62,5 · SF8 · CR 4/8,
-  ręczna zmiana częstotliwości, BW, SF i CR), advert, GPS, moc nadawania, Bluetooth, informacje.
-- **Ustawienia (cd.)** — dźwięk wiadomości (wł./wył.), nazwa urządzenia, data i godzina (ręcznie, z GPS, z aplikacji), bajty trasy (1/2/3).
-- **Wysłane wiadomości** — na kanale licznik powtórzeń przez repeatery („powtórzeń: N”), w rozmowie prywatnej „dostarczono”.
-- **Kanały** — na liście Wiadomości pozycja „+ Dodaj kanał” (kanał z hasztagiem), Del na kanale usuwa go.
+- **Wiadomości** — kanały i rozmowy prywatne (nieprzeczytane na górze), dodawanie i usuwanie kanałów z hasztagiem,
+  rozmowa z dymkami, szybkie odpowiedzi, pozycja. Pod wysłaną wiadomością licznik powtórzeń (kanał) albo „dostarczono” (prywatna),
+  pod odebraną liczba skoków i trasa z identyfikatorami repeaterów. Menu wiadomości: szczegóły (trasa z nazwami repeaterów, SNR, RSSI,
+  kto powtórzył), odpowiedz, wyślij ponownie, kopiuj, usuń.
+- **Kontakty** — filtr roli (wszystkie / osoby / repeatery / pokoje / czujniki / ulubione), szukanie po nazwie, „Usłyszane” (adverty spoza kontaktów),
+  menu kontaktu: napisz, ulubiony, szczegóły, zarządzaj, usuń.
+- **Repeatery** — lista wg ostatniego kontaktu albo odległości, „Co tu słychać?” (ping do sąsiadów z SNR w obie strony),
+  zarządzanie: logowanie (hasła zapamiętywane), stan, sąsiedzi, akcje (advert, zegar, preset SF6, restart), konsola.
+- **Ustawienia** w działach: Urządzenie, Radio, Pozycja, Advert, Kontakty (co dodawać z advertów), Bluetooth, Wiadomości, System.
+- **Zapis** — wiadomości, ustawienia ekranu i hasła repeaterów zostają po restarcie.
 
-Bluetooth: stały PIN **123456** (własny można ustawić w aplikacji MeshCore).
+### Klawisze
 
-Klawisze: ◄ ► zmiana ekranu, ▲ ▼ lista, Enter / środek krzyżaka — wybór, **Wstecz** — krok wstecz, **Home** — Start,
-**dymki** — Wiadomości, **wiadomość** — Kontakty, **mapa** — Repeatery. W rozmowie: Enter wysyła, **ctrl + litera** daje polską
-literę (a→ą, c→ć, e→ę, l→ł, n→ń, o→ó, s→ś, z→ż, x→ź), **pinezka** wstawia pozycję, ▲ ▼ przewija.
+| Klawisz | Działanie |
+|---|---|
+| ◄ ► | poprzedni / następny ekran; w ustawieniach zmiana wartości |
+| ▲ ▼ | lista; w rozmowie wybór wiadomości |
+| Enter, środek krzyżaka | wybór; w rozmowie wysłanie (puste pole: szybkie odpowiedzi) |
+| ► w rozmowie | menu zaznaczonej wiadomości |
+| Wstecz | krok wstecz |
+| Home / Dymki / Wiadomość / Mapa | Start / Wiadomości / Kontakty / Repeatery |
+| Pinezka | Kontakty: filtr roli; Repeatery: sortowanie; rozmowa: wstaw pozycję; pole daty: zegar z GPS |
+| litery na liście Kontakty | szukanie po nazwie (Del kasuje) |
+| Del na kanale | usunięcie kanału |
+| ctrl, potem litera | ą ć ę ł ń ó ś ż (ź pod X) |
 
-Jeszcze nie ma (kolejne etapy): zapisu wiadomości po restarcie, zarządzania repeaterami, „Co tu słychać?”, „Usłyszanych”, mapy z karty SD.
-Strony testowe (karta SD, GPS, mapa, wgrywanie mapy przez WiFi) zostały w kodzie jako osobny wariant `ThinkNode_M9_sf6_test`.
+Jeszcze nie ma: mapy z karty SD (strony testowe karty, GPS i mapy są w wariancie `ThinkNode_M9_sf6_test`), ekranu blokady i SOS.
+
+Symulator interfejsu na komputerze (ten sam kod ekranów, atrapy sieci i sprzętu): `tools/sym`.
 
 Klawiatura (protokół opisany i potwierdzony na sprzęcie w projekcie Launcher, `boards/elecrow-thinknode-m9/connections.md`):
 kontroler pod adresem 0x6C (płytka v1.0) albo 0x6D (v1.1) na magistrali SDA 20 / SCL 21; rejestr 0x01 trzyma oczekujący klawisz

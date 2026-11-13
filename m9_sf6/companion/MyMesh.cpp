@@ -294,7 +294,15 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
       p.calculatePacketHash(h);
       for (int i = 0; i < UI_SENT_MAX; i++) {
         if (ui_sent[i].id && ui_sent[i].kind == 1 && memcmp(ui_sent[i].hash, h, MAX_HASH_SIZE) == 0) {
-          if (ui_sent[i].repeats < 250) ui_sent[i].repeats++;
+          UiSent& u = ui_sent[i];
+          if (u.repeats < 250) u.repeats++;
+          int hs = p.getPathHashSize(), hc = p.getPathHashCount();
+          if (hc > 0 && hs <= 3 && u.rep_n < UI_REP_MAX) {        // ostatni wpis trasy = repeater, którego właśnie słyszymy
+            bool known = false;
+            const uint8_t* last = &p.path[(hc - 1) * hs];
+            for (int k = 0; k < u.rep_n; k++) if (memcmp(u.rep_id[k], last, hs) == 0) known = true;
+            if (!known) { memset(u.rep_id[u.rep_n], 0, 3); memcpy(u.rep_id[u.rep_n], last, hs); u.rep_snr[u.rep_n] = (int8_t)(snr * 4); u.rep_hs = hs; u.rep_n++; }
+          }
           ui_sent_changed = true;
         }
       }
@@ -835,6 +843,24 @@ bool MyMesh::onContactPathRecv(ContactInfo& contact, uint8_t* in_path, uint8_t i
 }
 
 void MyMesh::onControlDataRecv(mesh::Packet *packet) {
+  // ekran: odpowiedzi na nasze „Co tu słychać?” zostają w urządzeniu
+  if (ui_disc_tag && packet->payload_len >= 6 + 4 && (packet->payload[0] & 0xF0) == 0x90) {
+    uint32_t tag; memcpy(&tag, &packet->payload[2], 4);
+    if (tag == ui_disc_tag) {
+      int klen = packet->payload_len - 6; if (klen > 8) klen = 8;
+      const uint8_t* key = &packet->payload[6];
+      bool known = false;
+      for (int i = 0; i < ui_disc_n; i++) if (memcmp(ui_disc[i].prefix, key, 4) == 0) known = true;
+      if (!known && ui_disc_n < UI_DISC_MAX && (packet->payload[0] & 0x0F) == ADV_TYPE_REPEATER) {
+        UiDisc& d = ui_disc[ui_disc_n++];
+        memset(&d, 0, sizeof(d));
+        memcpy(d.prefix, key, klen);
+        d.snr_rx = (int8_t)(_radio->getLastSNR() * 4); d.snr_tx = (int8_t)packet->payload[1]; d.rssi = (int8_t)_radio->getLastRSSI();
+        for (int i = ui_disc_n - 1; i > 0 && ui_disc[i].snr_rx > ui_disc[i - 1].snr_rx; i--) { UiDisc t = ui_disc[i]; ui_disc[i] = ui_disc[i - 1]; ui_disc[i - 1] = t; }
+      }
+      return;
+    }
+  }
   if (packet->payload_len + 4 > sizeof(out_frame)) {
     MESH_DEBUG_PRINTLN("onControlDataRecv(), payload_len too long: %d", packet->payload_len);
     return;
@@ -2407,6 +2433,39 @@ void MyMesh::uiNotePath(const mesh::Packet* pkt) {
   if (n > (int)sizeof(ui_rx_path)) n = sizeof(ui_rx_path);
   memcpy(ui_rx_path, pkt->path, n);
   ui_rx_path_bytes = n;
+  ui_rx_snr_x4 = (int8_t)(_radio->getLastSNR() * 4);
+  ui_rx_rssi = (int16_t)_radio->getLastRSSI();
+}
+// „Co tu słychać?”: jeden ping bez przekazywania; odpowiadają repeatery, które słyszą nas bezpośrednio
+bool MyMesh::uiDiscoverStart() {
+  uint8_t d[10];
+  d[0] = 0x80 | 0x01;                               // zapytanie, w odpowiedzi tylko początek klucza
+  d[1] = (1 << ADV_TYPE_REPEATER);
+  getRNG()->random(&d[2], 4);
+  memset(&d[6], 0, 4);
+  uint32_t tag; memcpy(&tag, &d[2], 4);
+  if (tag == 0) { tag = 1; memcpy(&d[2], &tag, 4); }
+  ui_disc_n = 0;
+  mesh::Packet* pkt = createControlData(d, sizeof(d));
+  if (!pkt) { ui_disc_tag = 0; return false; }
+  sendZeroHop(pkt);
+  ui_disc_tag = tag;
+  return true;
+}
+void MyMesh::uiReboot() {
+  if (dirty_contacts_expiry) saveContacts();
+  board.reboot();
+}
+bool MyMesh::uiFactoryReset() {
+  if (_serial) _serial->disable();
+  if (!_store->formatFileSystem()) return false;
+  delay(500);
+  board.reboot();
+  return true;
+}
+void MyMesh::uiSetLatLon(double lat, double lon) {
+  sensors.node_lat = lat; sensors.node_lon = lon;
+  savePrefs();
 }
 bool MyMesh::uiSentInfo(uint16_t id, uint8_t* repeats, bool* delivered) {
   for (int i = 0; i < UI_SENT_MAX; i++) {

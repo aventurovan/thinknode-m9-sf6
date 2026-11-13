@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 DIR = "/usr/share/fonts/opentype/inter/"
 FONTS = [("F_SMALL", "Inter-Medium.otf", 11), ("F_NORMAL", "Inter-Medium.otf", 13), ("F_BOLD", "Inter-Bold.otf", 13),
          ("F_BIG", "Inter-Bold.otf", 17), ("F_HUGE", "Inter-ExtraBold.otf", 40)]
-CHARS = [chr(c) for c in range(32, 127)] + list("ĄĆĘŁŃÓŚŹŻąćęłńóśźż·…„”–—°»«×◄►▲▼")
+CHARS = [chr(c) for c in range(32, 127)] + list("ĄĆĘŁŃÓŚŹŻąćęłńóśźż·…„”–—°»«×◄►▲▼›")
 HUGE_CHARS = list("0123456789: MCSF")
 
 def gen(name, file, size, out):
