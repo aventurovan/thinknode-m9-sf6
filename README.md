@@ -36,13 +36,16 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 | Enter, środek krzyżaka | wybór; w rozmowie wysłanie (puste pole: szybkie odpowiedzi) |
 | ► w rozmowie | menu zaznaczonej wiadomości |
 | Wstecz | krok wstecz |
-| Home / Dymki / Pinezka / Mapa | Start / Wiadomości / Repeatery / Kontakty (docelowo mapa) |
+| Home / Dymki / Pinezka / Mapa | Start / Wiadomości / Repeatery / Mapa |
 | Mała wiadomość pod Home („Menu”) | dodatkowe opcje na bieżącym ekranie: opcje rozmowy, menu kontaktu, sortowanie repeaterów, opcje wiadomości, zegar z GPS |
 | litery na liście Kontakty | szukanie po nazwie (Del kasuje) |
 | Del na kanale | usunięcie kanału |
 | ctrl, potem litera | ą ć ę ł ń ó ś ż (ź pod X) |
 
-Jeszcze nie ma: mapy z karty SD (strony testowe karty, GPS i mapy są w wariancie `ThinkNode_M9_sf6_test`), ekranu blokady i SOS.
+- **Mapa** (klawisz Mapa) — mapa z karty SD z Twoją pozycją, repeaterami i kontaktami; strzałki przesuwają, I / O zmieniają zoom, Enter wraca do pozycji GPS,
+  Menu otwiera pobieranie mapy z internetu, wgrywanie z telefonu i ustawienia WiFi. „Pokaż na mapie” jest w menu kontaktu.
+
+Jeszcze nie ma: SOS.
 
 Symulator interfejsu na komputerze (ten sam kod ekranów, atrapy sieci i sprzętu): `tools/sym`.
 
