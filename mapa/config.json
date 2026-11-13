@@ -1,7 +1,7 @@
 {
  "options": {
   "paths": {
-   "root": "/app/node_modules/tileserver-gl-styles",
+   "root": "/usr/src/app/node_modules/tileserver-gl-styles",
    "fonts": "fonts",
    "styles": "/data/styl",
    "mbtiles": "/data"
