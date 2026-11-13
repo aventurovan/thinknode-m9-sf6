@@ -148,7 +148,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   _map_lat = DEF_LAT; _map_lon = DEF_LON; _map_zoom = 12; _map_follow = true;
   memset(&_wifi, 0, sizeof(_wifi)); strcpy(_wifi.url, MAP_URL_DEFAULT);
   memset(_tf, 0, sizeof(_tf)); _tf_sel = 0; _snap = NULL;
-  _bt_killed = false; _adv_seen = 0;
+  _bt_killed = false; _adv_seen = 0; _sd_test_at = 0;
 }
 
 void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* node_prefs) {
@@ -1382,7 +1382,7 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
           if (!_map.sdOk()) strcpy(t, _sd_pending ? "sprawdzam kartę…" : "brak karty SD");
           else if (_map.numPacks() == 0) snprintf(t, sizeof(t), "karta %lu GB · brak mapy", (unsigned long)(_map.sdSizeMB() / 1024));
           else snprintf(t, sizeof(t), "plików %d · zoom %d–%d", _map.numPacks(), _map.minZoom(), _map.maxZoom());
-          setRow(r, "Karta i pliki mapy", t, UII_SD);
+          setRow(r, "Karta: test i pliki", t, UII_SD);
           break;
         case 7: setRow(r, "Zakres pobierania", _cfg.map_range == 1 ? "bez zoomu 15 · ok. 0,6 GB" : _cfg.map_range == 2 ? "do zoomu 13 · ok. 0,3 GB" : "cała mapa · ok. 1,4 GB");
           break;
@@ -1559,7 +1559,10 @@ void UITask::listEnter(uint8_t s, int i) {
       else if (i == 3) openInput(IN_WIFI_SSID, _wifi.ssid);
       else if (i == 4) openInput(IN_WIFI_PASS, _wifi.pass);
       else if (i == 5) openInput(IN_MAP_URL, _wifi.url);
-      else if (i == 6) { _map.mount(); _map.scan(); _sd_pending = false; }
+      else if (i == 6) {                              // test karty: zapis próbny, zawartość, wolne miejsce
+        if (m9dlActive() || m9uploadActive()) popup("Najpierw zatrzymaj przesyłanie", "");
+        else { _sd_pending = false; popup("Sprawdzam kartę SD…", "to potrwa do minuty, ekran stoi", false, 120000); _sd_test_at = millis() + 500; }
+      }
       else if (i == 7) {
         pickBegin(P_MAPRANGE, "Zakres pobierania");
         pickAdd("cała mapa: południe do zoomu 15 (1,4 GB)"); pickAdd("bez zoomu 15: południe do 14 (0,6 GB)"); pickAdd("do zoomu 13: cała Polska (0,3 GB)");
@@ -2428,6 +2431,20 @@ void UITask::loop() {
   if (m9uploadActive()) { m9uploadLoop(); if (m9uploadChanged()) _map.scan(); }
   m9dlLoop();
   if (m9dlChanged()) _map.scan();
+  if (_sd_test_at && (long)(now - _sd_test_at) >= 0) {
+    _sd_test_at = 0;
+    char* t = (char*)ps_malloc(1600);
+    if (t) {
+      _map.diag(t, 1600);
+      _map.scan();
+      _popup_until = 0;
+      kvOpen("Test karty SD", M9_FW_VERSION);
+      kvText(t);
+      free(t);
+      if (scr() != S_KV) push(S_KV);
+    }
+    uint32_t ms = SLEEP_STEPS[_cfg.sleep_idx]; if (ms) _sleep_at = millis() + ms;
+  }
   if (m9dlFinished()) { _map.scan(); wake(); popup("Mapa pobrana", "możesz wyjść z menu (Wstecz)", false, 20000); }
   if (m9dlFailed()) {                                // błąd pobierania: ekran ze szczegółami (zostaje do naciśnięcia Wstecz)
     wake();

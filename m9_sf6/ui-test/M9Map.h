@@ -31,6 +31,7 @@ public:
   int  scan(fs::FS& fs);              // szuka plików mapy; zwraca liczbę plików
   bool mount();                       // montuje kartę SD (CS 48, wspólne SPI); true = karta jest
   int  scan();                        // jak wyżej, na zamontowanej karcie
+  void diag(char* out, size_t n);     // test karty: zapis próbny, zawartość, wolne miejsce (trwa do minuty)
   bool sdOk() const { return _sd_ok; }
   uint32_t sdSizeMB() const { return _sd_mb; }
   int  numPacks() const { return _num; }

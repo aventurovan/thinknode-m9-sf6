@@ -2,6 +2,8 @@
 #include "M9Lcd.h"
 #include <SPI.h>
 #include <SD.h>
+#include <errno.h>
+#include <stdarg.h>
 
 #define M9MAP_SD_CS 48
 
@@ -163,4 +165,69 @@ void M9Map::drawCross() {
   int x = M9MAP_W / 2, y = M9MAP_H / 2;
   fillRect(x - 7, y, 15, 1, COL_WHITE);
   fillRect(x, y - 7, 1, 15, COL_WHITE);
+}
+
+
+// Test karty SD: czy da się na niej pisać, co na niej jest i ile jest wolnego miejsca.
+// Liczenie wolnego miejsca czyta całą tablicę plików karty — na tej karcie trwa to kilkadziesiąt sekund.
+void M9Map::diag(char* o, size_t n) {
+  o[0] = 0;
+  auto add = [&](const char* fmt, ...) {
+    size_t k = strlen(o);
+    if (k + 2 >= n) return;
+    va_list ap; va_start(ap, fmt); vsnprintf(o + k, n - k, fmt, ap); va_end(ap);
+  };
+  bool ok = mount();
+  add("Karta: %s, %lu MB\n", ok ? "odpowiada" : "NIE odpowiada", (unsigned long)_sd_mb);
+  if (!ok) return;
+
+  // zapis próbny: 4 kB do nowego pliku, odczyt i porównanie
+  const char* p = "/m9test.bin";
+  uint8_t* b = (uint8_t*)ps_malloc(8192);
+  if (b) {
+    for (int i = 0; i < 4096; i++) b[i] = (uint8_t)(i * 7 + 3);
+    errno = 0;
+    File f = SD.open(p, FILE_WRITE);
+    if (!f) add("Zapis próbny: nie mogę utworzyć pliku (błąd %d: %s)\n", errno, strerror(errno));
+    else {
+      errno = 0;
+      size_t w = f.write(b, 4096);
+      int e = errno;
+      f.close();
+      if (w != 4096) add("Zapis próbny: zapisano %u z 4096 B (błąd %d: %s)\n", (unsigned)w, e, strerror(e));
+      else {
+        File r = SD.open(p);
+        size_t g = r ? r.read(b + 4096, 4096) : 0;
+        if (r) r.close();
+        add("Zapis próbny: działa, odczyt %s\n", (g == 4096 && memcmp(b, b + 4096, 4096) == 0) ? "zgodny" : "NIEZGODNY");
+      }
+      SD.remove(p);
+    }
+    free(b);
+  }
+
+  // co jest na karcie
+  File d = SD.open("/");
+  int cnt = 0;
+  if (d) {
+    for (;;) {
+      File e = d.openNextFile();
+      if (!e) break;
+      if (cnt < 8) { if (e.isDirectory()) add("[folder] %s\n", e.name()); else add("%s %lu kB\n", e.name(), (unsigned long)(e.size() / 1024)); }
+      e.close();
+      if (++cnt >= 300) break;
+    }
+    d.close();
+  }
+  add("Katalog główny: pozycji %d%s\n", cnt, cnt >= 300 ? " lub więcej" : "");
+  d = SD.open("/mapa");
+  if (d) {
+    int files = 0; uint64_t bytes = 0;
+    for (;;) { File e = d.openNextFile(); if (!e) break; files++; bytes += e.size(); e.close(); if (files >= 300) break; }
+    d.close();
+    add("Folder /mapa: plików %d, %lu MB\n", files, (unsigned long)(bytes >> 20));
+  } else add("Folder /mapa: nie ma\n");
+
+  uint64_t tot = SD.totalBytes(), used = SD.usedBytes();
+  add("Zajęte: %lu z %lu MB, wolne %lu MB\n", (unsigned long)(used >> 20), (unsigned long)(tot >> 20), (unsigned long)((tot - used) >> 20));
 }

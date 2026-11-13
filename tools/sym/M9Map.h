@@ -12,6 +12,7 @@ public:
   bool begin() { return true; }
   bool mount() { return true; }
   int scan() { return 12; }
+  void diag(char* out, size_t n) { snprintf(out, n, "Karta: odpowiada, 14910 MB\nZapis próbny: działa, odczyt zgodny\nKatalog główny: 3 pozycje\n[folder] mapa\n[folder] System Volume Information\nnotatka.txt 1 kB\nFolder /mapa: 12 plików, 329 MB\nZajęte: 340 z 14910 MB"); }
   bool sdOk() const { return true; }
   uint32_t sdSizeMB() const { return 14910; }
   int numPacks() const { return 12; }

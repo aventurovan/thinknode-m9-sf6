@@ -81,6 +81,7 @@ class UITask : public AbstractUITask {
   M9Map _map; bool _map_ready, _sd_pending;
   double _map_lat, _map_lon; int _map_zoom; bool _map_follow;
   WifiCfg _wifi;
+  unsigned long _sd_test_at;             // zaplanowany test karty SD (po narysowaniu okienka)
   bool _bt_killed;                       // Bluetooth wyłączony na czas WiFi (do restartu)
   uint32_t _adv_seen;                    // ostatni advert, dla którego zagrał dźwięk
   int _tf[5]; int _tf_sel;               // ustawianie daty i godziny: rok, miesiąc, dzień, godzina, minuta
