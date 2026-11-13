@@ -119,6 +119,9 @@ public:
   uint16_t ui_sent_seq = 0;
   bool ui_sent_changed = false;
   bool uiSentInfo(uint16_t id, uint8_t* repeats, bool* delivered);
+  // trasa ostatnio odebranej wiadomości (ustawiana tuż przed newMsg)
+  uint8_t ui_rx_path[48]; uint8_t ui_rx_path_bytes = 0, ui_rx_hash_size = 1, ui_rx_hops = 0; bool ui_rx_direct = false;
+  void uiNotePath(const mesh::Packet* pkt);
   int  uiToggleFavourite(const uint8_t* pub_key);                         // 1 = ulubiony, 0 = nie, -1 = brak kontaktu
   int  uiChannelIndex(const char* name);
 

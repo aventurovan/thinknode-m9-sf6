@@ -50,6 +50,7 @@ int main() {
   const char* B[3][3] = { {"Ania", "13:58", "Nowy repeater w Ustroniu działa, sprawdźcie zasięg na Czantorii i Równicy"}, {"", "14:05 · wysłano", "U mnie słychać, SNR 7"},
                           {"Marek SP9", "14:30", "Ktoś słyszy Klimczok? U mnie cisza od rana. Żółć gęślą jaźń."} };
   for (int i = 0; i < 3; i++) { strcpy(v.bub[i].who, B[i][0]); strcpy(v.bub[i].meta, B[i][1]); strcpy(v.bub[i].text, B[i][2]); v.bub[i].out = i == 1; }
+  strcpy(v.bub[2].path, "a3f2 > 77c1 > 0b9e"); strcpy(v.bub[2].meta, "14:30 · skoki: 3");
   v.nbub = 3; strcpy(v.input, "Słyszę go ze Skrzycznego, SNR 9"); v.input_chars = 31;
   hint(v, "Enter", "wyślij"); hint(v, "ctrl", "ąęł"); hint(v, "Wstecz", "lista");
   uiRender(g, v); save("3-rozmowa.ppm");

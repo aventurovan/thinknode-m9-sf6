@@ -25,6 +25,8 @@ struct UiMsg {
   uint8_t chan, out, unread, hops;
   uint16_t sent_id;       // numer wysyłki (wiadomości własne)
   uint8_t repeats, delivered;
+  uint8_t direct, hash_size, path_bytes;   // trasa odebranej wiadomości
+  uint8_t path[24];
 };
 
 class UITask : public AbstractUITask {
@@ -53,6 +55,7 @@ class UITask : public AbstractUITask {
   uint8_t _input_mode;
   float _rf, _rbw; uint8_t _rsf, _rcr;   // ekran Radio: wartości przed „Zastosuj”
   uint8_t _confirm; char _confirm_name[32];
+  bool _show_path;
 
   bool _dirty, _awake;
   unsigned long _next_tick, _popup_until, _sleep_at, _boot_until;

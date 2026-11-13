@@ -67,6 +67,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   _pop1[0] = _pop2[0] = 0; _pop_danger = false;
   _msgcount = 0;
   _input_mode = IN_MSG; _confirm = 0; _confirm_name[0] = 0;
+  _show_path = true;
   _rf = 869.618f; _rbw = 62.5f; _rsf = 6; _rcr = 8;
 }
 
@@ -152,7 +153,13 @@ void UITask::newMsg(uint8_t path_len, const char* from_name, const char* text, i
       body = sep + 2;
     }
   }
-  addMsg(from_name, who, body, chan, false, path_len);
+  UiMsg* m = addMsg(from_name, who, body, chan, false, the_mesh.ui_rx_hops);
+  if (m) {
+    m->direct = the_mesh.ui_rx_direct;
+    m->hash_size = the_mesh.ui_rx_hash_size;
+    m->path_bytes = the_mesh.ui_rx_path_bytes > sizeof(m->path) ? sizeof(m->path) : the_mesh.ui_rx_path_bytes;
+    memcpy(m->path, the_mesh.ui_rx_path, m->path_bytes);
+  }
   if (!_prefs->buzzer_quiet && !_buzzer.isPlaying()) _buzzer.play(chan ? "ch:d=16,o=6,b=200:e,g" : "dm:d=16,o=6,b=200:e,g,c7");
   wake();
 }
@@ -415,7 +422,8 @@ void UITask::enter() {
           _prefs->path_hash_mode = (_prefs->path_hash_mode + 1) % 3;
           the_mesh.savePrefs();
           break;
-        case 10: _scr = S_INFO; break;
+        case 10: _show_path = !_show_path; break;
+        case 11: _scr = S_INFO; break;
       }
       break;
   }
@@ -531,7 +539,7 @@ void UITask::key(uint8_t k) {
   if (k == M9K_LEFT)  { go((_scr + 4) % 5); return; }
   if (k == M9K_RIGHT) { go((_scr + 1) % 5); return; }
   if (k == M9K_ENTER) { enter(); return; }
-  int count = _scr == S_MSGS ? _thread_n + 1 : (_scr == S_CONTACTS || _scr == S_RPTS) ? _list_n : _scr == S_SETTINGS ? 11 : 0;
+  int count = _scr == S_MSGS ? _thread_n + 1 : (_scr == S_CONTACTS || _scr == S_RPTS) ? _list_n : _scr == S_SETTINGS ? 12 : 0;
   keyList(k, count);
 }
 
@@ -715,11 +723,11 @@ void UITask::fillSettings() {
   v.screen = UIS_LIST; v.tab = 4;
   strcpy(v.title, "Ustawienia");
   strcpy(v.title_right, "Enter: zmień / wykonaj");
-  static const char* const names[11] = { "Radio", "Advert do sąsiadów", "Advert do całej sieci", "GPS", "Moc nadawania", "Bluetooth",
-                                          "Dźwięk wiadomości", "Nazwa urządzenia", "Data i godzina", "Bajty trasy", "Informacje" };
-  static const uint8_t icons[11] = { UII_TOWER, UII_NONE, UII_NONE, UII_GPS, UII_BOLT, UII_BT, UII_NONE, UII_USER, UII_NONE, UII_NONE, UII_NONE };
-  int first; windowRows(11, S_SETTINGS, &first);
-  for (int i = first; i < 11 && v.nrows < ROWS_VISIBLE; i++) {
+  static const char* const names[12] = { "Radio", "Advert do sąsiadów", "Advert do całej sieci", "GPS", "Moc nadawania", "Bluetooth",
+                                          "Dźwięk wiadomości", "Nazwa urządzenia", "Data i godzina", "Bajty trasy", "Trasa w wiadomościach", "Informacje" };
+  static const uint8_t icons[12] = { UII_TOWER, UII_NONE, UII_NONE, UII_GPS, UII_BOLT, UII_BT, UII_NONE, UII_USER, UII_NONE, UII_NONE, UII_NONE, UII_NONE };
+  int first; windowRows(12, S_SETTINGS, &first);
+  for (int i = first; i < 12 && v.nrows < ROWS_VISIBLE; i++) {
     UiRow& r = v.rows[v.nrows++];
     strcpy(r.text, names[i]); r.icon = icons[i];
     switch (i) {
@@ -740,7 +748,8 @@ void UITask::fillSettings() {
         break;
       }
       case 9: snprintf(r.right, sizeof(r.right), _prefs->path_hash_mode == 0 ? "1 bajt" : "%d bajty", _prefs->path_hash_mode + 1); break;
-      case 10: snprintf(r.right, sizeof(r.right), "wersja %s", M9_FW_VERSION); break;
+      case 10: strcpy(r.right, _show_path ? "pokazuj identyfikatory" : "tylko liczba skoków"); break;
+      case 11: snprintf(r.right, sizeof(r.right), "wersja %s", M9_FW_VERSION); break;
     }
   }
 }
@@ -788,9 +797,22 @@ void UITask::fillThread() {
     if (m.out && m.chan && m.repeats) snprintf(b.meta, sizeof(b.meta), "%s · powtórzeń: %d", t, m.repeats);
     else if (m.out && !m.chan && m.delivered) snprintf(b.meta, sizeof(b.meta), "%s · dostarczono", t);
     else if (m.out) snprintf(b.meta, sizeof(b.meta), "%s · wysłano", t);
-    else if (m.hops == 0xFF) snprintf(b.meta, sizeof(b.meta), "%s · bezpośrednio", t);
-    else if (m.hops == 0) scopy(b.meta, sizeof(b.meta), t);
+    else if (m.direct) snprintf(b.meta, sizeof(b.meta), "%s · trasą bezpośr.", t);
+    else if (m.hops == 0) snprintf(b.meta, sizeof(b.meta), "%s · bez skoków", t);
     else snprintf(b.meta, sizeof(b.meta), "%s · skoki: %d", t, m.hops);
+    // trasa: identyfikatory kolejnych repeaterów (2 znaki na bajt)
+    if (_show_path && !m.out && !m.direct && m.path_bytes > 0 && m.hash_size > 0) {
+      int total = m.path_bytes / m.hash_size, shown = 0;
+      for (int h = 0; h < total; h++) {
+        char id[12]; id[0] = 0;
+        for (int q = 0; q < m.hash_size; q++) { char x[4]; snprintf(x, sizeof(x), "%02x", m.path[h * m.hash_size + q]); strcat(id, x); }
+        if (strlen(b.path) + strlen(id) + 4 > sizeof(b.path) - 8) break;
+        if (b.path[0]) strcat(b.path, " > ");
+        strcat(b.path, id);
+        shown++;
+      }
+      if (m.hops > shown) { char more[12]; snprintf(more, sizeof(more), " > +%d", m.hops - shown); strcat(b.path, more); }
+    }
   }
   scopy(v.input, sizeof(v.input), _input);
   v.input_chars = _input_chars;

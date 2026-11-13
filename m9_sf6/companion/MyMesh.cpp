@@ -494,6 +494,7 @@ void MyMesh::queueMessage(const ContactInfo &from, uint8_t txt_type, mesh::Packe
   // we only want to show text messages on display, not cli data
   bool should_display = txt_type == TXT_TYPE_PLAIN || txt_type == TXT_TYPE_SIGNED_PLAIN;
   if (should_display && _ui) {
+    uiNotePath(pkt);
     _ui->newMsg(path_len, from.name, text, offline_queue_len);
     if (!_serial->isConnected()) {
       _ui->notify(UIEventType::contactMessage);
@@ -616,6 +617,7 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
   if (getChannel(channel_idx, channel_details)) {
     channel_name = channel_details.name;
   }
+  uiNotePath(pkt);
   if (_ui) _ui->newMsg(path_len, channel_name, text, offline_queue_len);
 #endif
 }
@@ -2395,6 +2397,16 @@ uint16_t MyMesh::uiSendDirectText(const char* contact_name, const char* text) {
     return u.id;
   }
   return 0;
+}
+// trasa ostatnio odebranej wiadomości (dla ekranu): identyfikatory repeaterów po kolei
+void MyMesh::uiNotePath(const mesh::Packet* pkt) {
+  ui_rx_direct = !pkt->isRouteFlood();
+  ui_rx_hash_size = pkt->getPathHashSize();
+  ui_rx_hops = ui_rx_direct ? 0 : pkt->getPathHashCount();
+  int n = ui_rx_direct ? 0 : pkt->getPathByteLen();
+  if (n > (int)sizeof(ui_rx_path)) n = sizeof(ui_rx_path);
+  memcpy(ui_rx_path, pkt->path, n);
+  ui_rx_path_bytes = n;
 }
 bool MyMesh::uiSentInfo(uint16_t id, uint8_t* repeats, bool* delivered) {
   for (int i = 0; i < UI_SENT_MAX; i++) {

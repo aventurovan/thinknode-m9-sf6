@@ -192,11 +192,12 @@ static void drawThread(Gfx& g, const UiView& v) {
     char head[52]; head[0] = 0;
     if (!b.out && b.who[0]) snprintf(head, sizeof(head), "%s", b.who);
     int hw = head[0] ? Gfx::textWidth(head, F_SMALL) : 0, mw = Gfx::textWidth(b.meta, F_SMALL);
-    int headLine = (head[0] || !b.out) ? 13 : 0, metaLine = b.out ? 12 : 0;
+    int headLine = (head[0] || !b.out) ? 13 : 0, metaLine = b.out ? 12 : 0, pathLine = b.path[0] ? 13 : 0;
+    if (pathLine) { int pw = Gfx::textWidth(b.path, F_SMALL); if (pw > tw) tw = pw; }
     if (!b.out && hw + mw + 8 > tw) tw = hw + mw + 8;
     if (b.out && mw > tw) tw = mw;
     if (tw > maxW) tw = maxW;
-    int bw = tw + 14, bh = headLine + n * lh + metaLine + 6;
+    int bw = tw + 14, bh = headLine + n * lh + metaLine + pathLine + 6;
     int by = y - bh, bx = b.out ? GFX_W - 8 - bw : 8;
     if (by < top && i != v.nbub - 1) break;                  // dymek, który się nie mieści w całości, pomijamy
     if (b.out) { g.fillRound(bx, by, bw, bh, 6, C_ACC); g.fillRound(bx + 1, by + 1, bw - 2, bh - 2, 5, C_TILE); }
@@ -210,6 +211,7 @@ static void drawThread(Gfx& g, const UiView& v) {
     }
     for (int k = 0; k < n; k++, ty += lh) g.textN(bx + 7, ty, b.text + ln[k].start, ln[k].len, F_NORMAL, C_TXT);
     if (metaLine) g.textRight(bx + bw - 7, ty, b.meta, F_SMALL, C_DIM);
+    if (pathLine) g.text(bx + 7, ty, b.path, F_SMALL, C_ACC, maxW);
     y = by - 4;
   }
   g.fillRect(0, STATUS_H + HEADER_H, GFX_W, 2, C_BG);      // dymek nie wchodzi pod nagłówek
