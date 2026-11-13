@@ -101,6 +101,8 @@ public:
 
   // interfejs ekranu MC SF6 (ThinkNode M9)
   bool uiRadioIsSF6();
+  int  uiAddHashtagChannel(const char* name);      // indeks kanału, -1 = brak miejsca, -2 = już jest
+  bool uiRemoveChannel(const char* name);
   void uiSetGps(bool on);
   void uiSetRadioSF6();
   void uiSetRadio(float freq, float bw, uint8_t sf, uint8_t cr);

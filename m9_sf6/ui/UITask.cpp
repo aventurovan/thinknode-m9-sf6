@@ -10,6 +10,7 @@
 #define ROWS_VISIBLE     8
 
 static const int8_t TX_STEPS[] = { 10, 14, 17, 20, 22 };
+static const float BW_STEPS[] = { 31.25f, 41.7f, 62.5f, 125.0f, 250.0f, 500.0f };
 
 // ---------------- pomocnicze ----------------
 
@@ -65,6 +66,8 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   _next_tick = _popup_until = _sleep_at = _boot_until = 0;
   _pop1[0] = _pop2[0] = 0; _pop_danger = false;
   _msgcount = 0;
+  _input_mode = IN_MSG; _confirm = 0; _confirm_name[0] = 0;
+  _rf = 869.618f; _rbw = 62.5f; _rsf = 6; _rcr = 8;
 }
 
 void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* node_prefs) {
@@ -173,14 +176,46 @@ void UITask::openThread(const char* name, bool chan) {
   _cur_chan = chan;
   _scroll = 0;
   _input[0] = 0; _input_chars = 0; _polish = false;
+  _input_mode = IN_MSG;
   markRead(name, chan);
   _back_scr = _scr < 5 ? _scr : S_MSGS;
   _scr = S_THREAD;
   _dirty = true;
 }
 
+void UITask::openInput(uint8_t mode, const char* initial) {
+  _input_mode = mode;
+  scopy(_input, sizeof(_input), initial);
+  _input_chars = strlen(_input);
+  _polish = false;
+  _scr = S_THREAD;
+  _dirty = true;
+}
+
+void UITask::radioLoad() { _rf = _prefs->freq; _rbw = _prefs->bw; _rsf = _prefs->sf; _rcr = _prefs->cr; }
+bool UITask::radioChanged() { return fabsf(_rf - _prefs->freq) > 0.0005f || fabsf(_rbw - _prefs->bw) > 0.01f || _rsf != _prefs->sf || _rcr != _prefs->cr; }
+
 void UITask::sendInput() {
   if (_input[0] == 0) return;
+  if (_input_mode == IN_CHANNEL) {                   // nowy kanał z hasztagiem
+    char name[32];
+    snprintf(name, sizeof(name), "%s%s", _input[0] == '#' ? "" : "#", _input);
+    for (char* p = name; *p; p++) if (*p >= 'A' && *p <= 'Z') *p += 32;      // nazwy kanałów z hasztagiem są małymi literami
+    if (strlen(name) < 2) return;
+    int r = the_mesh.uiAddHashtagChannel(name);
+    go(S_MSGS);
+    if (r >= 0) popup("Dodano kanał", name);
+    else if (r == -2) popup("Ten kanał już jest", name);
+    else popup("Brak miejsca na kanał", "usuń któryś z istniejących", true);
+    return;
+  }
+  if (_input_mode == IN_FREQ) {                      // częstotliwość w MHz
+    for (char* p = _input; *p; p++) if (*p == ',') *p = '.';
+    float f = atof(_input);
+    _scr = S_RADIO;
+    if (f >= 150.0f && f <= 960.0f) _rf = f; else popup("Zła częstotliwość", "podaj w MHz, np. 869.618", true);
+    return;
+  }
   bool ok;
   if (_cur_chan) { int idx = the_mesh.uiChannelIndex(_cur); ok = idx >= 0 && the_mesh.uiSendChannelText(idx, _input); }
   else ok = the_mesh.uiSendDirectText(_cur, _input);
@@ -251,8 +286,9 @@ void UITask::wake() {
 
 void UITask::back() {
   switch (_scr) {
-    case S_THREAD: go(_back_scr); break;
+    case S_THREAD: go(_input_mode == IN_CHANNEL ? (uint8_t)S_MSGS : _input_mode == IN_FREQ ? (uint8_t)S_RADIO : _back_scr); break;
     case S_INFO:   go(S_SETTINGS); break;
+    case S_RADIO:  go(S_SETTINGS); break;
     case S_RPT:    go(S_RPTS); break;
     case S_START:  break;
     default:       go(S_START); break;
@@ -272,6 +308,7 @@ void UITask::enter() {
     case S_START: go(S_MSGS); break;
     case S_MSGS:
       if (_sel[S_MSGS] < _thread_n) openThread(_threads[_sel[S_MSGS]].name, _threads[_sel[S_MSGS]].chan);
+      else openInput(IN_CHANNEL, "#");
       break;
     case S_CONTACTS:
       if (_sel[S_CONTACTS] < _list_n && the_mesh.getContactByIdx(_list[_sel[S_CONTACTS]], c)) openThread(c.name, false);
@@ -281,7 +318,7 @@ void UITask::enter() {
       break;
     case S_SETTINGS:
       switch (_sel[S_SETTINGS]) {
-        case 0: the_mesh.uiSetRadioSF6(); popup("Radio: preset SF6", "869,618 MHz · BW 62,5 · SF6 · CR 4/5"); break;
+        case 0: radioLoad(); _sel[S_RADIO] = 0; _scr = S_RADIO; break;
         case 1: popup(the_mesh.advert() ? "Advert wysłany" : "Błąd advertu", "do sąsiadów (bez przekazywania)"); break;
         case 2: popup(the_mesh.uiAdvertFlood() ? "Advert wysłany" : "Błąd advertu", "do całej sieci"); break;
         case 3: {
@@ -300,13 +337,43 @@ void UITask::enter() {
         }
         case 5:
           if (isBluetoothEnabled()) { disableBluetooth(); popup("Bluetooth wyłączony"); }
-          else { enableBluetooth(); popup("Bluetooth włączony"); }
+          else {
+            char t[40]; snprintf(t, sizeof(t), "PIN do parowania: %06lu", (unsigned long)the_mesh.getBLEPin());
+            enableBluetooth(); popup("Bluetooth włączony", t, false, 6000);
+          }
           break;
         case 6: _scr = S_INFO; break;
       }
       break;
   }
   _dirty = true;
+}
+
+void UITask::keyRadio(uint8_t k) {
+  int& sel = _sel[S_RADIO];
+  if (k == M9K_UP && sel > 0) sel--;
+  if (k == M9K_DOWN && sel < 6) sel++;
+  int dir = k == M9K_LEFT ? -1 : (k == M9K_RIGHT || k == M9K_ENTER) ? 1 : 0;
+  if (dir == 0) return;
+  switch (sel) {
+    case 0: if (k == M9K_ENTER) { the_mesh.uiSetRadioSF6(); radioLoad(); popup("Radio: SF6 — MeshCore Południe", "869,618 MHz · BW 62,5 · SF6 · CR 4/8"); } break;
+    case 1: if (k == M9K_ENTER) { the_mesh.uiSetRadio(869.618f, 62.5f, 8, 8); radioLoad(); popup("Radio: EU/UK Narrow", "869,618 MHz · BW 62,5 · SF8 · CR 4/8"); } break;
+    case 2: if (k == M9K_ENTER) { char t[16]; snprintf(t, sizeof(t), "%.3f", _rf); openInput(IN_FREQ, t); } break;
+    case 3: {
+      int n = sizeof(BW_STEPS) / sizeof(BW_STEPS[0]), cur = 2;
+      for (int i = 0; i < n; i++) if (fabsf(BW_STEPS[i] - _rbw) < 0.5f) cur = i;
+      _rbw = BW_STEPS[(cur + dir + n) % n];
+      break;
+    }
+    case 4: { int v = _rsf + dir; if (v > 12) v = 5; if (v < 5) v = 12; _rsf = v; break; }
+    case 5: { int v = _rcr + dir; if (v > 8) v = 5; if (v < 5) v = 8; _rcr = v; break; }
+    case 6:
+      if (k == M9K_ENTER) {
+        if (!radioChanged()) popup("Brak zmian do zastosowania");
+        else { the_mesh.uiSetRadio(_rf, _rbw, _rsf, _rcr); radioLoad(); popup("Radio: ustawienia własne", "zapisane i włączone"); }
+      }
+      break;
+  }
 }
 
 void UITask::keyThread(uint8_t k) {
@@ -323,9 +390,9 @@ void UITask::keyThread(uint8_t k) {
     return;
   }
   if (k == M9K_BKSP_LONG) { _input[0] = 0; _input_chars = 0; return; }
-  if (k == M9K_UP) { _scroll++; return; }
-  if (k == M9K_DOWN) { if (_scroll > 0) _scroll--; return; }
-  if (k == M9K_F4) {                                 // pinezka: wstaw moją pozycję
+  if (_input_mode == IN_MSG && k == M9K_UP) { _scroll++; return; }
+  if (_input_mode == IN_MSG && k == M9K_DOWN) { if (_scroll > 0) _scroll--; return; }
+  if (_input_mode == IN_MSG && k == M9K_F4) {                                 // pinezka: wstaw moją pozycję
     double lat, lon; int sats;
     if (gpsFix(&lat, &lon, &sats)) {
       char t[48]; snprintf(t, sizeof(t), "Moja pozycja: %.5f, %.5f", lat, lon);
@@ -333,7 +400,10 @@ void UITask::keyThread(uint8_t k) {
     } else popup("Brak pozycji GPS", "włącz GPS w Ustawieniach i wyjdź pod niebo");
     return;
   }
-  if (k >= 32 && k < 127 && _input_chars < UI_INPUT_MAX) {
+  int limit = _input_mode == IN_CHANNEL ? 24 : _input_mode == IN_FREQ ? 8 : UI_INPUT_MAX;
+  if (_input_mode == IN_CHANNEL && (k == ' ' || (k == '#' && _input_chars > 0))) return;      // nazwa kanału bez spacji
+  if (_input_mode == IN_FREQ && !((k >= '0' && k <= '9') || k == '.' || k == ',')) return;
+  if (k >= 32 && k < 127 && _input_chars < limit) {
     const char* pl = _polish ? polishFor(k) : NULL;
     if (pl) strcat(_input, pl);
     else { int n = strlen(_input); _input[n] = (char)k; _input[n + 1] = 0; }
@@ -343,6 +413,20 @@ void UITask::keyThread(uint8_t k) {
 }
 
 void UITask::key(uint8_t k) {
+  if (_confirm) {                                     // pytanie w okienku: Enter potwierdza, inny klawisz anuluje
+    uint8_t what = _confirm;
+    _confirm = 0; _popup_until = 0;
+    if (k == M9K_ENTER && what == 1) {
+      bool ok = the_mesh.uiRemoveChannel(_confirm_name);
+      for (int i = 0; i < _msg_n; ) {                 // razem z kanałem znikają jego wiadomości
+        if (_msgs[i].chan && strcmp(_msgs[i].thread, _confirm_name) == 0) { memmove(&_msgs[i], &_msgs[i + 1], sizeof(UiMsg) * (_msg_n - i - 1)); _msg_n--; }
+        else i++;
+      }
+      go(S_MSGS);
+      popup(ok ? "Kanał usunięty" : "Nie udało się usunąć", _confirm_name, !ok);
+    }
+    return;
+  }
   if (_popup_until) { _popup_until = 0; }             // dowolny klawisz zamyka okienko (i działa dalej)
   if (_scr == S_BOOT) { _boot_until = 0; _scr = S_START; return; }
 
@@ -354,13 +438,21 @@ void UITask::key(uint8_t k) {
   if (k == M9K_BACK) { back(); return; }
 
   if (_scr == S_THREAD) { keyThread(k); return; }
+  if (_scr == S_RADIO) { keyRadio(k); return; }
+  if (_scr == S_MSGS && (k == M9K_BKSP || k == M9K_BKSP_LONG) && _sel[S_MSGS] < _thread_n && _threads[_sel[S_MSGS]].chan) {
+    scopy(_confirm_name, sizeof(_confirm_name), _threads[_sel[S_MSGS]].name);
+    _confirm = 1;
+    char t[40]; snprintf(t, sizeof(t), "Usunąć kanał %s?", _confirm_name);
+    popup(t, "Enter = usuń · inny klawisz = anuluj", true, 15000);
+    return;
+  }
   if (_scr == S_INFO || _scr == S_RPT) { if (k == M9K_ENTER || k == M9K_LEFT) back(); return; }
 
   // ekrany z zakładkami
   if (k == M9K_LEFT)  { go((_scr + 4) % 5); return; }
   if (k == M9K_RIGHT) { go((_scr + 1) % 5); return; }
   if (k == M9K_ENTER) { enter(); return; }
-  int count = _scr == S_MSGS ? _thread_n : (_scr == S_CONTACTS || _scr == S_RPTS) ? _list_n : _scr == S_SETTINGS ? 7 : 0;
+  int count = _scr == S_MSGS ? _thread_n + 1 : (_scr == S_CONTACTS || _scr == S_RPTS) ? _list_n : _scr == S_SETTINGS ? 7 : 0;
   keyList(k, count);
 }
 
@@ -425,7 +517,7 @@ void UITask::fillStart() {
   UiView& v = *_v;
   v.screen = UIS_START; v.tab = 0;
   scopy(v.name, sizeof(v.name), _prefs->node_name);
-  snprintf(v.preset, sizeof(v.preset), "%.3f · BW %.4g · SF%d · CR %d", _prefs->freq, _prefs->bw, _prefs->sf, _prefs->cr);
+  snprintf(v.preset, sizeof(v.preset), "%.3f · BW %.4g · SF%d · CR 4/%d", _prefs->freq, _prefs->bw, _prefs->sf, _prefs->cr);
   for (char* p = v.preset; *p; p++) if (*p == '.') *p = ',';
 
   buildThreads();
@@ -475,8 +567,14 @@ void UITask::fillMsgs() {
   if (v.unread > 0) snprintf(v.title_right, sizeof(v.title_right), "nieprzeczytane: %d", v.unread);
   strcpy(v.empty, "Nie ma jeszcze żadnych kanałów ani rozmów. Dodaj kanał w aplikacji MeshCore albo napisz do kogoś z listy Kontakty.");
   buildThreads();
-  int first; windowRows(_thread_n, S_MSGS, &first);
-  for (int i = first; i < _thread_n && v.nrows < ROWS_VISIBLE; i++) {
+  strcpy(v.title_right + strlen(v.title_right), v.title_right[0] ? "" : "Del: usuń kanał");
+  int first; windowRows(_thread_n + 1, S_MSGS, &first);
+  for (int i = first; i <= _thread_n && v.nrows < ROWS_VISIBLE; i++) {
+    if (i == _thread_n) {
+      UiRow& r = v.rows[v.nrows++];
+      strcpy(r.text, "+ Dodaj kanał"); strcpy(r.right, "kanał z hasztagiem, np. #beskidy");
+      continue;
+    }
     Thread& t = _threads[i];
     UiRow& r = v.rows[v.nrows++];
     scopy(r.text, sizeof(r.text), t.name);
@@ -538,14 +636,17 @@ void UITask::fillSettings() {
   v.screen = UIS_LIST; v.tab = 4;
   strcpy(v.title, "Ustawienia");
   strcpy(v.title_right, "Enter: zmień / wykonaj");
-  static const char* const names[7] = { "Preset SF6", "Advert do sąsiadów", "Advert do całej sieci", "GPS", "Moc nadawania", "Bluetooth", "Informacje" };
+  static const char* const names[7] = { "Radio", "Advert do sąsiadów", "Advert do całej sieci", "GPS", "Moc nadawania", "Bluetooth", "Informacje" };
   static const uint8_t icons[7] = { UII_TOWER, UII_NONE, UII_NONE, UII_GPS, UII_BOLT, UII_BT, UII_NONE };
   int first; windowRows(7, S_SETTINGS, &first);
   for (int i = first; i < 7 && v.nrows < ROWS_VISIBLE; i++) {
     UiRow& r = v.rows[v.nrows++];
     strcpy(r.text, names[i]); r.icon = icons[i];
     switch (i) {
-      case 0: strcpy(r.right, the_mesh.uiRadioIsSF6() ? "aktywny" : "ustaw teraz"); break;
+      case 0:
+        if (the_mesh.uiRadioIsSF6()) strcpy(r.right, "SF6 — MeshCore Południe");
+        else snprintf(r.right, sizeof(r.right), "%.3f · %.4g · SF%d · CR 4/%d", _prefs->freq, _prefs->bw, _prefs->sf, _prefs->cr);
+        break;
       case 1: strcpy(r.right, "wyślij"); break;
       case 2: strcpy(r.right, "wyślij"); break;
       case 3: strcpy(r.right, _prefs->gps_enabled ? "włączony" : "wyłączony"); break;
@@ -559,6 +660,18 @@ void UITask::fillSettings() {
 void UITask::fillThread() {
   UiView& v = *_v;
   v.screen = UIS_THREAD; v.tab = -1;
+  if (_input_mode != IN_MSG) {                       // pole do wpisania nazwy kanału albo częstotliwości
+    bool ch = _input_mode == IN_CHANNEL;
+    strcpy(v.title, ch ? "Nowy kanał" : "Częstotliwość");
+    strcpy(v.title_right, ch ? "kanał z hasztagiem" : "MHz");
+    strcpy(v.line1, ch ? "Wpisz nazwę, np. #beskidy. Kto wpisze tę samą nazwę, ten jest na kanale." : "Wpisz częstotliwość w MHz, np. 869.618");
+    scopy(v.input, sizeof(v.input), _input);
+    v.input_chars = _input_chars;
+    strcpy(v.hint[0].key, "Enter"); strcpy(v.hint[0].txt, ch ? "dodaj" : "zatwierdź");
+    strcpy(v.hint[1].key, "Wstecz"); strcpy(v.hint[1].txt, "anuluj");
+    v.nhints = 2;
+    return;
+  }
   snprintf(v.title, sizeof(v.title), "%s%s", _cur_chan ? "# " : "", _cur);
   strcpy(v.title_right, _cur_chan ? "kanał" : "rozmowa prywatna");
   markRead(_cur, _cur_chan);
@@ -598,6 +711,34 @@ static void kvAdd(UiView& v, const char* k, const char* val) {
   scopy(v.kv[v.nkv].k, sizeof(v.kv[0].k), k);
   scopy(v.kv[v.nkv].v, sizeof(v.kv[0].v), val);
   v.nkv++;
+}
+
+void UITask::fillRadio() {
+  UiView& v = *_v;
+  v.screen = UIS_LIST; v.tab = -1;
+  strcpy(v.title, "Radio");
+  snprintf(v.title_right, sizeof(v.title_right), "teraz: %.3f · %.4g · SF%d · CR 4/%d", _prefs->freq, _prefs->bw, _prefs->sf, _prefs->cr);
+  bool sf6 = the_mesh.uiRadioIsSF6();
+  bool narrow = fabsf(_prefs->freq - 869.618f) < 0.005f && fabsf(_prefs->bw - 62.5f) < 0.1f && _prefs->sf == 8 && _prefs->cr == 8;
+  static const char* const names[7] = { "SF6 — MeshCore Południe", "EU/UK Narrow (SF8)", "Częstotliwość", "Pasmo (BW)", "Rozpraszanie (SF)", "Kodowanie (CR)", "Zastosuj własne ustawienia" };
+  int first; windowRows(7, S_RADIO, &first);
+  for (int i = first; i < 7 && v.nrows < ROWS_VISIBLE; i++) {
+    UiRow& r = v.rows[v.nrows++];
+    strcpy(r.text, names[i]);
+    switch (i) {
+      case 0: strcpy(r.right, sf6 ? "aktywny" : "Enter: włącz"); r.icon = UII_STAR; r.icon_accent = sf6; break;
+      case 1: strcpy(r.right, narrow ? "aktywny" : "Enter: włącz"); r.icon = UII_STAR; r.icon_accent = narrow; break;
+      case 2: snprintf(r.right, sizeof(r.right), "%.3f MHz", _rf); break;
+      case 3: snprintf(r.right, sizeof(r.right), "%.4g kHz", _rbw); break;
+      case 4: snprintf(r.right, sizeof(r.right), "SF%d", _rsf); break;
+      case 5: snprintf(r.right, sizeof(r.right), "4/%d", _rcr); break;
+      case 6: strcpy(r.right, radioChanged() ? "Enter: zapisz i włącz" : "brak zmian"); break;
+    }
+  }
+  strcpy(v.hint[0].key, "Enter"); strcpy(v.hint[0].txt, "wybierz");
+  strcpy(v.hint[1].key, "◄►"); strcpy(v.hint[1].txt, "zmień wartość");
+  strcpy(v.hint[2].key, "Wstecz"); strcpy(v.hint[2].txt, "");
+  v.nhints = 3;
 }
 
 void UITask::fillInfo() {
@@ -659,6 +800,7 @@ void UITask::fill() {
     case S_CONTACTS: fillContacts(); break;
     case S_RPTS: fillRpts(); break;
     case S_SETTINGS: fillSettings(); break;
+    case S_RADIO: fillRadio(); break;
     case S_THREAD: fillThread(); break;
     case S_INFO: fillInfo(); break;
     case S_RPT: fillRpt(); break;
@@ -693,7 +835,7 @@ void UITask::loop() {
   }
 
   if (_scr == S_BOOT && (long)(now - _boot_until) >= 0) { _scr = S_START; _dirty = true; }
-  if (_popup_until && (long)(now - _popup_until) >= 0) { _popup_until = 0; _dirty = true; }
+  if (_popup_until && (long)(now - _popup_until) >= 0) { _popup_until = 0; _confirm = 0; _dirty = true; }
 
   if (_awake && (long)(now - _sleep_at) >= 0) {    // wygaszenie: gaśnie ekran i klawiatura, radio i Bluetooth działają
     _awake = false;

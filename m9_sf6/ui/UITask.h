@@ -26,7 +26,8 @@ struct UiMsg {
 };
 
 class UITask : public AbstractUITask {
-  enum Scr { S_START = 0, S_MSGS = 1, S_CONTACTS = 2, S_RPTS = 3, S_SETTINGS = 4, S_THREAD, S_INFO, S_RPT, S_BOOT };
+  enum Scr { S_START = 0, S_MSGS = 1, S_CONTACTS = 2, S_RPTS = 3, S_SETTINGS = 4, S_RADIO = 5, S_THREAD, S_INFO, S_RPT, S_BOOT };
+  enum InputMode { IN_MSG = 0, IN_CHANNEL = 1, IN_FREQ = 2 };
   struct Thread { char name[32]; uint8_t chan; uint8_t unread; uint32_t last; int16_t last_msg; };
 
   DisplayDriver* _display;
@@ -41,11 +42,14 @@ class UITask : public AbstractUITask {
   uint16_t* _list; int _list_n;         // indeksy kontaktów dla bieżącej listy
 
   uint8_t _scr, _back_scr;
-  int _sel[5], _top[5];
+  int _sel[6], _top[6];
   char _cur[32]; bool _cur_chan;        // otwarta rozmowa
   int _scroll;                          // ile najnowszych wiadomości pominąć (przewijanie)
   char _input[UI_INPUT_MAX * 2 + 4]; int _input_chars; bool _polish;
   uint8_t _rpt_key[32];
+  uint8_t _input_mode;
+  float _rf, _rbw; uint8_t _rsf, _rcr;   // ekran Radio: wartości przed „Zastosuj”
+  uint8_t _confirm; char _confirm_name[32];
 
   bool _dirty, _awake;
   unsigned long _next_tick, _popup_until, _sleep_at, _boot_until;
@@ -66,6 +70,11 @@ class UITask : public AbstractUITask {
   void key(uint8_t k);
   void keyList(uint8_t k, int count);
   void keyThread(uint8_t k);
+  void keyRadio(uint8_t k);
+  void openInput(uint8_t mode, const char* initial);
+  void radioLoad();
+  bool radioChanged();
+  void fillRadio();
   void enter();
   void back();
 

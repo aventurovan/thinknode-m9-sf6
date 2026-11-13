@@ -988,16 +988,9 @@ void MyMesh::begin(bool has_display) {
 
 #ifdef BLE_PIN_CODE // 123456 by default
   if (_prefs.ble_pin == 0) {
-#ifdef DISPLAY_CLASS
-    if (has_display && BLE_PIN_CODE == 123456) {
-      StdRNG rng;
-      _active_ble_pin = rng.nextInt(100000, 999999); // random pin each session
-    } else {
-      _active_ble_pin = BLE_PIN_CODE; // otherwise static pin
-    }
-#else
-    _active_ble_pin = BLE_PIN_CODE; // otherwise static pin
-#endif
+    // M9: stały PIN (oryginał MeshCore losuje PIN przy każdym starcie, gdy urządzenie ma ekran);
+    // własny PIN można ustawić w aplikacji MeshCore
+    _active_ble_pin = BLE_PIN_CODE;
   } else {
     _active_ble_pin = _prefs.ble_pin;
   }
@@ -2265,10 +2258,38 @@ void MyMesh::checkSerialInterface() {
 }
 
 bool MyMesh::uiRadioIsSF6() {            // preset SF6 sieci MeshCore Poludnie: 869,618 MHz, BW 62,5 kHz, SF6
-  return fabsf(_prefs.freq - 869.618f) < 0.005f && fabsf(_prefs.bw - 62.5f) < 0.1f && _prefs.sf == 6;
+  return fabsf(_prefs.freq - 869.618f) < 0.005f && fabsf(_prefs.bw - 62.5f) < 0.1f && _prefs.sf == 6 && _prefs.cr == 8;
 }
-void MyMesh::uiSetRadioSF6() {           // preset sieci MeshCore Poludnie
-  uiSetRadio(869.618f, 62.5f, 6, 5);
+void MyMesh::uiSetRadioSF6() {           // preset sieci MeshCore Poludnie: CR 4/8
+  uiSetRadio(869.618f, 62.5f, 6, 8);
+}
+// kanał z hasztagiem: klucz to pierwsze 16 bajtów SHA-256 z nazwy (razem ze znakiem #), jak w aplikacji MeshCore
+int MyMesh::uiAddHashtagChannel(const char* name) {
+  ChannelDetails cd;
+  int free_idx = -1;
+  for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+    if (!getChannel(i, cd)) break;
+    if (cd.name[0] == 0) { if (free_idx < 0) free_idx = i; continue; }
+    if (strcmp(cd.name, name) == 0) return -2;            // już jest
+  }
+  if (free_idx < 0) return -1;
+  memset(&cd, 0, sizeof(cd));
+  StrHelper::strncpy(cd.name, name, sizeof(cd.name));
+  uint8_t hash[32];
+  mesh::Utils::sha256(hash, sizeof(hash), (const uint8_t*)name, strlen(name));
+  memcpy(cd.channel.secret, hash, 16);
+  if (!setChannel(free_idx, cd)) return -1;
+  saveChannels();
+  return free_idx;
+}
+bool MyMesh::uiRemoveChannel(const char* name) {
+  int idx = uiChannelIndex(name);
+  if (idx < 0) return false;
+  ChannelDetails cd;
+  memset(&cd, 0, sizeof(cd));
+  if (!setChannel(idx, cd)) return false;
+  saveChannels();
+  return true;
 }
 void MyMesh::uiSetRadio(float freq, float bw, uint8_t sf, uint8_t cr) {
   _prefs.freq = freq; _prefs.bw = bw; _prefs.sf = sf; _prefs.cr = cr;

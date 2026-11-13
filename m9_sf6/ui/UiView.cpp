@@ -215,7 +215,11 @@ static void drawThread(Gfx& g, const UiView& v) {
   g.fillRect(0, STATUS_H + HEADER_H, GFX_W, 2, C_BG);      // dymek nie wchodzi pod nagłówek
   g.fillRect(0, STATUS_H, GFX_W, HEADER_H, C_BG);
   drawHeader(g, v, STATUS_H);
-  if (v.nbub == 0) g.textCenter(GFX_W / 2, 100, "Brak wiadomości — napisz pierwszą", F_SMALL, C_DIM);
+  if (v.line1[0] || v.line2[0]) {                    // pole do wpisania czegoś innego niż wiadomość: objaśnienie
+    GfxLine ln[4];
+    int n = Gfx::wrap(v.line1, F_NORMAL, GFX_W - 32, ln, 4);
+    for (int i = 0; i < n; i++) g.textN(16, 70 + i * 17, v.line1 + ln[i].start, ln[i].len, F_NORMAL, C_DIM);
+  } else if (v.nbub == 0) g.textCenter(GFX_W / 2, 100, "Brak wiadomości — napisz pierwszą", F_SMALL, C_DIM);
 
   // pole pisania
   int iy = GFX_H - BOTTOM_H - inputH - 2;
@@ -228,7 +232,7 @@ static void drawThread(Gfx& g, const UiView& v) {
   // pokazujemy koniec tekstu, jeśli się nie mieści
   const char* s = v.input;
   while (*s && Gfx::textWidth(s, F_NORMAL) > avail) { s++; while ((*s & 0xC0) == 0x80) s++; }
-  int w = v.input[0] ? g.text(13, iy + 5, s, F_NORMAL, C_TXT) : g.text(13, iy + 5, v.polish_next ? "ctrl: teraz litera (ą ć ę ł ń ó ś ź ż)" : "Napisz wiadomość…", F_NORMAL, C_DIM);
+  int w = v.input[0] ? g.text(13, iy + 5, s, F_NORMAL, C_TXT) : g.text(13, iy + 5, v.polish_next ? "ctrl: teraz litera (ą ć ę ł ń ó ś ź ż)" : (v.line1[0] ? "" : "Napisz wiadomość…"), F_NORMAL, C_DIM);
   if (v.input[0] || !v.polish_next) g.fillRect(13 + (v.input[0] ? w : 0) + 1, iy + 5, 2, 15, v.polish_next ? C_BLUE : C_ACC);
 }
 
