@@ -315,7 +315,7 @@ static void drawBoot(Gfx& g, const UiView& v) {
       if (yy * 10 >= r * 5) g.fillRect(GFX_W / 2 + a - 1, 78 - yy - 1, 3, 3, c);
     }
   }
-  g.textCenter(GFX_W / 2, 84, "MC SF6", F_HUGE, C_TXT);
+  g.textCenter(GFX_W / 2, 84, "MeshSpeed", F_HUGE, C_TXT);
   g.textCenter(GFX_W / 2, 134, "MeshCore Południe", F_BOLD, C_ACC);
   g.textCenter(GFX_W / 2, 162, v.line1, F_SMALL, C_DIM);
   g.textCenter(GFX_W / 2, 178, v.line2, F_SMALL, C_DIM);
