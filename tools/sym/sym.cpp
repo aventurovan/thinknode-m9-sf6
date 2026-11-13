@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
     printf("fuzz ok, kontaktow %d, kanalow %d\n", (int)the_mesh.cts.size(), (int)the_mesh.chans.size());
     return 0;
   }
-  mkdir("/tmp/symfs", 0777); remove("/tmp/symfs/m9ui.cfg"); remove("/tmp/symfs/m9ui.msg"); remove("/tmp/symfs/m9ui.pw");
+  mkdir("/tmp/symfs", 0777); remove("/tmp/symfs/m9ui.cfg"); remove("/tmp/symfs/m9ui.msg"); remove("/tmp/symfs/m9ui.pw"); remove("/tmp/symfs/m9ui.mut");
   ui.begin(&disp, &sens, &the_mesh.prefs);
   run(3000);
   rx("Public", "Ania: Nowy repeater w Ustroniu działa, sprawdźcie", 3); rx("Marek SP9", "Jadę na Równicę, będę o 16", 2);
