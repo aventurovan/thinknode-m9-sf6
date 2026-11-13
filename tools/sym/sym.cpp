@@ -101,6 +101,9 @@ int main(int argc, char** argv) {
   keys({ M9K_RIGHT, 'i' }); save("mapa-przesunieta");
   keys({ M9K_F3 }); save("mapa-menu");
   keys({ M9K_BACK, M9K_F4, M9K_DOWN, M9K_ENTER }); save("menu-repeatera-mapa");
+  keys({ M9K_HOME, M9K_LEFT, M9K_RIGHT, M9K_ENTER, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("zegar");
+  keys({ M9K_RIGHT, M9K_UP, M9K_RIGHT, M9K_RIGHT, M9K_DOWN }); save("zegar-zmiana");
+  keys({ M9K_BACK, M9K_HOME, M9K_DOWN, M9K_DOWN, M9K_RIGHT, M9K_RIGHT }); save("pasek-podglad");
   printf("zrzutow: %d\n", shot);
   return 0;
 }

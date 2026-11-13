@@ -13,3 +13,6 @@
 
 // wysyła prostokąt pikseli (już w kolejności bajtów panelu)
 void m9lcdBlit(int x, int y, int w, int h, const uint16_t* pixels);
+
+// jasność podświetlenia w procentach (0 = zgaszone); pin 17, aktywny stan niski, sterowanie PWM
+void m9lcdBacklight(int percent);

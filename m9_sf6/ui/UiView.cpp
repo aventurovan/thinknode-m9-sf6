@@ -4,8 +4,8 @@
 #include <string.h>
 #include <stdio.h>
 
-#define C_BG    GFX_RGB(0x0B, 0x0F, 0x14)
-#define C_BAR   GFX_RGB(0x13, 0x1A, 0x22)
+#define C_BG    GFX_RGB(0x00, 0x00, 0x00)
+#define C_BAR   GFX_RGB(0x0C, 0x10, 0x15)
 #define C_LINE  GFX_RGB(0x24, 0x30, 0x40)
 #define C_TXT   GFX_RGB(0xF2, 0xF5, 0xF7)
 #define C_DIM   GFX_RGB(0x9A, 0xA7, 0xB4)
@@ -15,8 +15,8 @@
 #define C_RED   GFX_RGB(0xFF, 0x4D, 0x5E)
 #define C_PINK  GFX_RGB(0xFF, 0x8A, 0x95)
 #define C_BLUE  GFX_RGB(0x7C, 0xC4, 0xFF)
-#define C_TILE  GFX_RGB(0x15, 0x1C, 0x24)
-#define C_BUB   GFX_RGB(0x1A, 0x23, 0x2E)
+#define C_TILE  GFX_RGB(0x11, 0x16, 0x1D)
+#define C_BUB   GFX_RGB(0x16, 0x1D, 0x26)
 #define C_SELT  GFX_RGB(0x22, 0x1C, 0x10)
 
 #define STATUS_H 20
@@ -261,8 +261,8 @@ static void drawThread(Gfx& g, const UiView& v) {
     int bw = tw + 14, bh = headLine + n * lh + metaLine + pathLine + 6;
     int by = y - bh, bx = b.out ? GFX_W - 8 - bw : 8;
     if (by < top && i != v.nbub - 1) break;                  // dymek, który się nie mieści w całości, pomijamy
-    if (b.sel) { g.fillRound(bx - 2, by - 2, bw + 4, bh + 4, 7, C_BLUE); g.fillRound(bx, by, bw, bh, 6, b.out ? C_TILE : C_BUB); }   // wybrana wiadomość
-    else if (b.out) { g.fillRound(bx, by, bw, bh, 6, C_ACC); g.fillRound(bx + 1, by + 1, bw - 2, bh - 2, 5, C_TILE); }
+    if (b.sel) g.fillRect(bx - 6, by + 1, 3, bh - 2, C_ACC);       // wybrana wiadomość (do opcji): pasek z lewej strony
+    if (b.out) { g.fillRound(bx, by, bw, bh, 6, C_ACC); g.fillRound(bx + 1, by + 1, bw - 2, bh - 2, 5, C_TILE); }
     else g.fillRound(bx, by, bw, bh, 6, C_BUB);
     int ty = by + 3;
     if (headLine) {
@@ -329,12 +329,31 @@ static void drawLock(Gfx& g, const UiView& v) {
   if (v.batt > 0 && v.popup1[0]) g.textCenter(GFX_W / 2, 214, v.popup1, F_BOLD, C_ACC);     // postęp przytrzymania
 }
 
+// ustawianie daty i godziny: pięć pól, ◄ ► wybiera pole, ▲ ▼ zmienia wartość
+static void drawTime(Gfx& g, const UiView& v) {
+  drawHeader(g, v, STATUS_H);
+  static const int W[5] = { 76, 48, 48, 48, 48 };
+  int x = 12, y = 78;
+  for (int i = 0; i < 5; i++) {
+    bool sel = i == v.sel;
+    if (i == 3) x += 12;                              // odstęp między datą a godziną
+    if (sel) { g.fillRound(x - 2, y - 2, W[i] + 4, 58, 8, C_ACC); g.fillRound(x, y, W[i], 54, 6, C_SELT); }
+    else g.fillRound(x, y, W[i], 54, 6, C_TILE);
+    g.textCenter(x + W[i] / 2, y + 6, v.tile[i].label, F_SMALL, sel ? C_ACC : C_DIM);
+    g.textCenter(x + W[i] / 2, y + 24, v.tile[i].value, F_BIG, C_TXT);
+    if (sel) { g.textCenter(x + W[i] / 2, y - 18, "▲", F_SMALL, C_ACC); g.textCenter(x + W[i] / 2, y + 60, "▼", F_SMALL, C_ACC); }
+    x += W[i] + 6;
+  }
+  g.textCenter(GFX_W / 2, 168, v.line1, F_SMALL, C_DIM);
+}
+
 void uiRender(Gfx& g, const UiView& v) {
   g.clear(C_BG);
   switch (v.screen) {
     case UIS_BOOT: drawBoot(g, v); return;
     case UIS_LOCK: drawStatus(g, v); drawLock(g, v); return;
     case UIS_START: case UIS_GRID: drawGrid(g, v); break;
+    case UIS_TIME: drawTime(g, v); break;
     case UIS_LIST: drawList(g, v); break;
     case UIS_THREAD: drawThread(g, v); break;
     case UIS_INFO: drawInfo(g, v); break;

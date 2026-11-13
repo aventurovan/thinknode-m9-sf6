@@ -13,6 +13,17 @@ static void lcdRange(uint8_t cmd, uint16_t a, uint16_t b) {
   SPI.transfer(b >> 8); SPI.transfer(b & 0xFF);
 }
 
+#define M9LCD_PIN_BL   17
+#define M9LCD_BL_CH    5
+
+void m9lcdBacklight(int percent) {
+  static bool ready = false;
+  if (!ready) { ledcSetup(M9LCD_BL_CH, 5000, 8); ledcAttachPin(M9LCD_PIN_BL, M9LCD_BL_CH); ready = true; }
+  if (percent < 0) percent = 0;
+  if (percent > 100) percent = 100;
+  ledcWrite(M9LCD_BL_CH, 255 - percent * 255 / 100);       // stan niski = świeci
+}
+
 void m9lcdBlit(int x, int y, int w, int h, const uint16_t* pixels) {
   if (w <= 0 || h <= 0) return;
   SPI.beginTransaction(SPISettings(40000000, MSBFIRST, SPI_MODE0));

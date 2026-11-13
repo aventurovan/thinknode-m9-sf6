@@ -1,0 +1,132 @@
+name: Mapa — budowanie (Polska)
+
+# Buduje mapę na kartę SD ThinkNode M9: cała Polska w zoomach 6–13, południe Polski w zoomach 14–15.
+# Wynik: wydanie „mapa” z plikami .mcm i lista.txt — urządzenie pobiera je samo przez WiFi.
+# Start: zmiana pliku mapa/BUDUJ.txt (albo ręcznie z zakładki Actions).
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths: [ 'mapa/BUDUJ.txt' ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mapa-buduj
+  cancel-in-progress: true
+
+jobs:
+  dane:
+    name: Dane OSM Polski
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - name: Miejsce na dysku
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h /
+      - name: Planetiler (wyciąg Polski -> kafelki wektorowe)
+        run: |
+          mkdir -p data
+          docker run -e JAVA_TOOL_OPTIONS="-Xmx11g" -v "$(pwd)/data":/data ghcr.io/onthegomap/planetiler:latest --download --area=poland --storage=mmap --nodemap-type=sparsearray > planetiler.log 2>&1 || { tail -60 planetiler.log; exit 1; }
+          tail -8 planetiler.log
+          ls -la data; df -h /
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dane-polska
+          path: data/output.mbtiles
+          retention-days: 3
+          compression-level: 0
+      - name: Dziennik przy błędzie
+        if: failure()
+        run: |
+          mkdir w && cd w && (tail -80 ../planetiler.log > planetiler.txt 2>/dev/null; df -h / > dysk.txt; free -m > pamiec.txt) || true
+          git init -q -b mapa-log-dane && git add -A && git -c user.name="github-actions" -c user.email="actions@users.noreply.github.com" commit -q -m "dziennik" && git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" mapa-log-dane
+
+  kafelki:
+    name: Kafelki ${{ matrix.nazwa }}
+    needs: dane
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # cała Polska: 14.07–24.20 E, 48.95–54.90 N
+          - { nazwa: pl-06-11, obszar: "14.07,48.95,24.20,54.90", zoom: "6-11" }
+          - { nazwa: pl-12,    obszar: "14.07,48.95,24.20,54.90", zoom: "12" }
+          - { nazwa: pl-13-a,  obszar: "14.07,48.95,19.10,54.90", zoom: "13" }
+          - { nazwa: pl-13-b,  obszar: "19.10,48.95,24.20,54.90", zoom: "13" }
+          # południe: 14.80–24.20 E, 48.95–51.20 N
+          - { nazwa: pd-14-a,  obszar: "14.80,48.95,19.50,51.20", zoom: "14" }
+          - { nazwa: pd-14-b,  obszar: "19.50,48.95,24.20,51.20", zoom: "14" }
+          - { nazwa: pd-15-a,  obszar: "14.80,48.95,15.97,51.20", zoom: "15" }
+          - { nazwa: pd-15-b,  obszar: "15.97,48.95,17.15,51.20", zoom: "15" }
+          - { nazwa: pd-15-c,  obszar: "17.15,48.95,18.32,51.20", zoom: "15" }
+          - { nazwa: pd-15-d,  obszar: "18.32,48.95,19.50,51.20", zoom: "15" }
+          - { nazwa: pd-15-e,  obszar: "19.50,48.95,20.67,51.20", zoom: "15" }
+          - { nazwa: pd-15-f,  obszar: "20.67,48.95,21.85,51.20", zoom: "15" }
+          - { nazwa: pd-15-g,  obszar: "21.85,48.95,23.02,51.20", zoom: "15" }
+          - { nazwa: pd-15-h,  obszar: "23.02,48.95,24.20,51.20", zoom: "15" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dane-polska
+          path: data
+      - name: Serwer kafelków
+        run: |
+          mkdir -p data/styl
+          cp mapa/styl/ciemna.json data/styl/
+          cp mapa/config.json data/
+          docker run -d --name ts -v "$(pwd)/data":/data -p 8080:8080 maptiler/tileserver-gl -p 8080 --config /data/config.json
+          for i in $(seq 1 60); do curl -sf http://localhost:8080/styles.json > /dev/null && break; sleep 2; done
+          curl -sf http://localhost:8080/styles.json > /dev/null
+      - name: Pakowanie
+        run: |
+          pip install pillow numpy > /dev/null
+          cd mapa
+          python3 pakuj_mape.py mapa --zrodlo "http://localhost:8080/styles/ciemna/256/{z}/{x}/{y}.png" --obszar "${{ matrix.obszar }}" --zoom "${{ matrix.zoom }}" --wyjscie ../paczki --watki 6 2>&1 | tee ../pakowanie.log | grep -E "zoom|zapisano|100" || true
+          ls -la ../paczki
+          test -n "$(ls ../paczki/*.mcm 2>/dev/null)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: paczki-${{ matrix.nazwa }}
+          path: paczki/*.mcm
+          retention-days: 3
+          compression-level: 0
+      - name: Dziennik przy błędzie
+        if: failure()
+        run: |
+          mkdir w && cd w && (tail -60 ../pakowanie.log > pakowanie.txt 2>/dev/null; docker logs ts 2>&1 | tail -60 > serwer.txt; df -h / > dysk.txt) || true
+          git init -q -b mapa-log-${{ matrix.nazwa }} && git add -A && git -c user.name="github-actions" -c user.email="actions@users.noreply.github.com" commit -q -m "dziennik" && git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" mapa-log-${{ matrix.nazwa }}
+
+  wydanie:
+    name: Wydanie „mapa”
+    needs: kafelki
+    if: always() && needs.dane.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: paczki-*
+          path: paczki
+          merge-multiple: true
+      - name: Lista plików i wydanie
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd paczki
+          ls -la
+          : > lista.txt
+          for f in *.mcm; do echo "$f $(stat -c %s "$f")" >> lista.txt; done
+          cat lista.txt
+          NOTES="Mapa na kartę SD ThinkNode M9 (firmware MeshSpeed): Polska w zoomach 6–13, południe Polski w zoomach 14–15. Na urządzeniu: Mapa → Menu → Pobierz z internetu. Dane mapy © autorzy OpenStreetMap (licencja ODbL). Zbudowano $(date -u +%Y-%m-%d), plików: $(ls *.mcm | wc -l), razem $(du -ch *.mcm | tail -1 | cut -f1)."
+          gh release delete mapa -y --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create mapa --title "Mapa Polski dla M9" --notes "$NOTES" --target "$GITHUB_SHA" -R "$GITHUB_REPOSITORY"
+          for f in lista.txt *.mcm; do gh release upload mapa "$f" --clobber -R "$GITHUB_REPOSITORY"; done
+          # podsumowanie do gałęzi, żeby dało się je odczytać bez dzienników
+          mkdir ../w && cp lista.txt ../w/ && cd ../w && echo "${{ needs.kafelki.result }}" > wynik-kafelki.txt
+          git init -q -b mapa-wyniki && git add -A && git -c user.name="github-actions" -c user.email="actions@users.noreply.github.com" commit -q -m "Mapa: lista plików" && git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" mapa-wyniki

@@ -18,11 +18,12 @@
 #define FILE_MSGS        "/m9ui.msg"
 #define FILE_MUTED       "/m9ui.mut"
 #define FILE_WIFI        "/m9ui.wifi"
-#define MAP_URL_DEFAULT  "https://github.com/aventurovan/m9-mapa/releases/download/mapa/"
+#define MAP_URL_DEFAULT  "https://github.com/aventurovan/thinknode-m9-sf6/releases/download/mapa/"
+#define MAP_URL_OLD      "https://github.com/aventurovan/m9-mapa/releases/download/mapa/"
 #define DEF_LAT          49.8225         // środek mapy, gdy nie ma pozycji: Bielsko-Biała
 #define DEF_LON          19.0469
 #define FILE_MSGS_TMP    "/m9ui.tmp"
-#define SAVE_DELAY_MS    300000UL       // wiadomości zapisujemy 5 min po zmianie (albo po wygaszeniu ekranu)
+#define SAVE_DELAY_MS    45000UL        // wiadomości zapisujemy 45 s po zmianie (albo po wygaszeniu ekranu)
 #define SAVE_CHUNK       6              // ile wiadomości na jedno przejście pętli
 
 static const int8_t TX_STEPS[] = { 10, 14, 17, 20, 22 };
@@ -31,7 +32,9 @@ static const uint32_t SLEEP_STEPS[] = { 30000UL, 60000UL, 300000UL, 0 };        
 static const char* const SLEEP_NAMES[] = { "30 s", "1 min", "5 min", "nigdy" };
 static const uint8_t ADV_HOURS[] = { 0, 1, 3, 6, 12, 24 };
 static const char* const FILTER_NAMES[] = { "wszystkie", "osoby", "repeatery", "pokoje", "czujniki", "ulubione" };
-static const char* const QUICK[] = { "OK", "Tak", "Nie", "Zaraz będę", "Oddzwonię później", "Moja pozycja", "Moja pozycja + link do mapy" };
+static const char* const QUICK[] = { "Test", "OK", "Tak", "Nie", "Zaraz będę", "Oddzwonię później", "Moja pozycja", "Moja pozycja + link do mapy" };
+#define N_QUICK_TEXT 6      // pierwsze pozycje to gotowy tekst, dwie ostatnie to pozycja
+static const uint8_t BRIGHT_STEPS[] = { 10, 25, 50, 75, 100 };
 static const char* const CLI_CMDS[] = { "ver", "clock", "neighbors", "get radio", "get tx", "get name", "get repeat" };
 
 // ---------------- pomocnicze ----------------
@@ -144,6 +147,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   _map_ready = false; _sd_pending = true;
   _map_lat = DEF_LAT; _map_lon = DEF_LON; _map_zoom = 12; _map_follow = true;
   memset(&_wifi, 0, sizeof(_wifi)); strcpy(_wifi.url, MAP_URL_DEFAULT);
+  memset(_tf, 0, sizeof(_tf)); _tf_sel = 0; _snap = NULL;
 }
 
 void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* node_prefs) {
@@ -157,12 +161,14 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   _msgs = (UiMsg*)ps_calloc(UI_MSG_MAX, sizeof(UiMsg));
   _list = (uint16_t*)ps_calloc(UI_LIST_MAX, sizeof(uint16_t));
   _kv = (UiKV*)ps_calloc(UI_KVS_MAX, sizeof(UiKV));
+  _snap = (UiMsg*)ps_calloc(UI_MSG_MAX, sizeof(UiMsg));
 
   loadAll();
   _kb.begin();
   _buzzer.begin();
   _buzzer.quiet(_prefs->buzzer_quiet);
   if (_display) _display->turnOn();
+  m9lcdBacklight(brightPercent());
   _boot_until = millis() + 2500;
   _sleep_at = millis() + 60000UL;
   if (ADV_HOURS[_cfg.adv_idx]) _next_advert = millis() + 120000UL;
@@ -210,7 +216,7 @@ void UITask::loadAll() {
     if (f.read((uint8_t*)&w, sizeof(w)) == sizeof(w)) { w.ssid[32] = 0; w.pass[63] = 0; w.url[127] = 0; _wifi = w; }
     f.close();
   }
-  if (!_wifi.url[0]) strcpy(_wifi.url, MAP_URL_DEFAULT);
+  if (!_wifi.url[0] || strcmp(_wifi.url, MAP_URL_OLD) == 0) strcpy(_wifi.url, MAP_URL_DEFAULT);
 
   f = SPIFFS.open(FILE_MUTED, "r");
   if (f) {
@@ -277,29 +283,28 @@ static int sv_idx = 0, sv_n = 0;
 
 bool UITask::saveStep() {
   if (!sv_active) {
-    if (_msgs == NULL) { _msgs_dirty = false; return false; }
+    if (_msgs == NULL || _snap == NULL) { _msgs_dirty = false; return false; }
     sv_file = SPIFFS.open(FILE_MSGS_TMP, "w");
     if (!sv_file) { _save_at = millis() + SAVE_DELAY_MS; return false; }
+    // zapisujemy kopię zrobioną w tej chwili: nowe wiadomości przychodzące w trakcie nie przerywają zapisu,
+    // tylko oznaczają, że potrzebny będzie następny
     sv_n = _msg_n; sv_idx = 0;
+    memcpy(_snap, _msgs, sizeof(UiMsg) * sv_n);
     uint8_t h[6] = { 'M', 'A', (uint8_t)(sizeof(UiMsg) & 0xFF), 0, (uint8_t)(sv_n & 0xFF), (uint8_t)(sv_n >> 8) };
     if (sv_file.write(h, 6) != 6) { sv_file.close(); SPIFFS.remove(FILE_MSGS_TMP); _save_at = millis() + SAVE_DELAY_MS; return false; }
     sv_active = true;
-    _msgs_dirty = false;                              // zmiany od tej chwili oznaczą zapis jako nieaktualny
+    _msgs_dirty = false;
     return true;
   }
-  if (_msgs_dirty || sv_n != _msg_n) {                // w trakcie coś się zmieniło: zaczniemy od nowa później
-    sv_file.close(); SPIFFS.remove(FILE_MSGS_TMP); sv_active = false;
-    _msgs_dirty = true; _save_at = millis() + 30000UL;
-    return false;
-  }
   int n = sv_n - sv_idx; if (n > SAVE_CHUNK) n = SAVE_CHUNK;
-  bool ok = n <= 0 || sv_file.write((const uint8_t*)&_msgs[sv_idx], sizeof(UiMsg) * n) == sizeof(UiMsg) * n;
+  bool ok = n <= 0 || sv_file.write((const uint8_t*)&_snap[sv_idx], sizeof(UiMsg) * n) == sizeof(UiMsg) * n;
   sv_idx += n;
   if (!ok) { sv_file.close(); SPIFFS.remove(FILE_MSGS_TMP); sv_active = false; return false; }     // brak miejsca: zostaje poprzedni plik
   if (sv_idx >= sv_n) {
     sv_file.close(); sv_active = false;
     SPIFFS.remove(FILE_MSGS);
     SPIFFS.rename(FILE_MSGS_TMP, FILE_MSGS);
+    if (_msgs_dirty) _save_at = millis() + SAVE_DELAY_MS;
     return false;
   }
   return true;
@@ -633,12 +638,15 @@ void UITask::ask(uint8_t what, const char* a, const char* name) {
   popup(a, "Enter = tak · inny klawisz = anuluj", true, 15000);
 }
 
+int UITask::brightPercent() { return (_cfg.bright >= 1 && _cfg.bright <= 5) ? BRIGHT_STEPS[_cfg.bright - 1] : 100; }
+
 void UITask::wake() {
   uint32_t ms = SLEEP_STEPS[_cfg.sleep_idx];
   _sleep_at = ms ? millis() + ms : 0;
   if (!_awake) {
     _awake = true;
     if (_display) _display->turnOn();
+    m9lcdBacklight(brightPercent());
   }
   _kb.setBacklight(_cfg.kb_light != 0 && !_locked);
   _dirty = true;
@@ -1187,7 +1195,7 @@ int UITask::listCount(uint8_t s) {
     case S_RPTS: return _list_n + 1;
     case S_HEARD: return the_mesh.ui_heard_n;
     case S_MENU: return _menu_n;
-    case S_QUICK: return 7;
+    case S_QUICK: return N_QUICK_TEXT + 2;
     case S_DISC: return the_mesh.ui_disc_n + 1;
     case S_LOGIN: return pwGet(_ck) ? 3 : 2;
     case S_ADMIN: return 5;
@@ -1201,7 +1209,7 @@ int UITask::listCount(uint8_t s) {
     case S_SET_ADV: return 3;
     case S_SET_CT: return 6;
     case S_SET_MSG: return 4;
-    case S_SET_SCR: return 4;
+    case S_SET_SCR: return 5;
     case S_SET_SYS: return 6;
   }
   return 0;
@@ -1334,7 +1342,7 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
         case A_DELTHREAD: setRow(r, "Usuń rozmowę", "wiadomości z tego urządzenia"); break;
       }
       return;
-    case S_QUICK: setRow(r, QUICK[i], "", i >= 5 ? UII_GPS : UII_NONE); return;
+    case S_QUICK: setRow(r, QUICK[i], "", i >= N_QUICK_TEXT ? UII_GPS : UII_NONE); return;
     case S_PICK: setRow(r, _pick_opt[i], i == _pick_cur ? "teraz" : "", i == _pick_cur ? UII_CHECK : UII_NONE, true); return;
     case S_MAP_NET:
       t[0] = 0;
@@ -1477,7 +1485,8 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       if (i == 0) setRow(r, "Wygaszanie ekranu", SLEEP_NAMES[_cfg.sleep_idx], UII_SCREEN);
       else if (i == 1) setRow(r, "Podświetlenie klawiatury", _cfg.kb_light ? "świeci, gdy ekran świeci" : "wyłączone");
       else if (i == 2) setRow(r, "Nowa wiadomość budzi ekran", yesNo(!_cfg.no_wake));
-      else setRow(r, "Blokada klawiszy", _cfg.lock ? "po wygaszeniu ekranu" : "wyłączona", UII_LOCK);
+      else if (i == 3) setRow(r, "Blokada klawiszy", _cfg.lock ? "po wygaszeniu ekranu" : "wyłączona", UII_LOCK);
+      else { snprintf(t, sizeof(t), "%d%%", brightPercent()); setRow(r, "Jasność ekranu", t, UII_SCREEN); }
       return;
     case S_SET_SYS: {
       if (i == 0) setRow(r, "Informacje", "wersja, pamięć, klucz");
@@ -1533,11 +1542,11 @@ void UITask::listEnter(uint8_t s, int i) {
       return;
     case S_QUICK: {
       char t[100];
-      if (i < 5) scopy(t, sizeof(t), QUICK[i]);
+      if (i < N_QUICK_TEXT) scopy(t, sizeof(t), QUICK[i]);
       else {
         double lat, lon; int sats;
         if (!gpsFix(&lat, &lon, &sats)) { popup("Brak pozycji GPS", "włącz GPS w Ustawieniach i wyjdź pod niebo"); return; }
-        if (i == 5) snprintf(t, sizeof(t), "Moja pozycja: %.5f, %.5f", lat, lon);
+        if (i == N_QUICK_TEXT) snprintf(t, sizeof(t), "Moja pozycja: %.5f, %.5f", lat, lon);
         else snprintf(t, sizeof(t), "Moja pozycja: https://maps.google.com/?q=%.5f,%.5f", lat, lon);
       }
       pop();
@@ -1611,11 +1620,7 @@ void UITask::listEnter(uint8_t s, int i) {
     case S_SET_SYS:
       if (i == 0) detailInfo();
       else if (i == 1) openInput(IN_NAME, _prefs->node_name);
-      else if (i == 2) {
-        struct tm lt; localTime(the_mesh.getRTCClock()->getCurrentTime(), &lt);
-        char b[24]; snprintf(b, sizeof(b), "%04d-%02d-%02d %02d:%02d", lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min);
-        openInput(IN_TIME, b);
-      }
+      else if (i == 2) openTime();
       else if (i == 3) ask(C_CLEAR_PW, "Usunąć zapamiętane hasła?", "");
       else if (i == 4) ask(C_REBOOT, "Zrestartować urządzenie?", "");
       else ask(C_FACTORY, "Skasować WSZYSTKO?", "");
@@ -1695,7 +1700,8 @@ bool UITask::settingPick(uint8_t s, int i) {
       if (i == 0) { pickBegin(P_SLEEP, "Wygaszanie ekranu"); for (int q = 0; q < 4; q++) pickAdd(SLEEP_NAMES[q]); pickOpen(_cfg.sleep_idx); }
       else if (i == 1) two(P_KBLIGHT, "Podświetlenie klawiatury", "świeci, gdy ekran świeci", "wyłączone", _cfg.kb_light ? 0 : 1);
       else if (i == 2) two(P_WAKE, "Nowa wiadomość budzi ekran", "tak", "nie", _cfg.no_wake ? 1 : 0);
-      else two(P_LOCK, "Blokada klawiszy", "wyłączona", "po wygaszeniu ekranu", _cfg.lock ? 1 : 0);
+      else if (i == 3) two(P_LOCK, "Blokada klawiszy", "wyłączona", "po wygaszeniu ekranu", _cfg.lock ? 1 : 0);
+      else { pickBegin(P_BRIGHT, "Jasność ekranu"); for (int q = 0; q < 5; q++) { snprintf(t, sizeof(t), "%d%%", BRIGHT_STEPS[q]); pickAdd(t); } pickOpen((_cfg.bright >= 1 && _cfg.bright <= 5) ? _cfg.bright - 1 : 4); }
       return true;
   }
   return false;
@@ -1751,6 +1757,7 @@ void UITask::applyPick(uint8_t id, int i) {
     case P_KBLIGHT: _cfg.kb_light = i == 0; saveCfg(); _kb.setBacklight(_cfg.kb_light != 0); break;
     case P_WAKE: _cfg.no_wake = i == 1; saveCfg(); break;
     case P_RPTSORT: _cfg.rpt_sort = i; saveCfg(); break;
+    case P_BRIGHT: _cfg.bright = i + 1; saveCfg(); m9lcdBacklight(brightPercent()); break;
     case P_LOCK: _cfg.lock = i == 1; saveCfg(); if (i == 1) popup("Blokada włączona", "odblokowanie: przytrzymaj Wstecz 2 s", false, 5000); break;
   }
   _dirty = true;
@@ -1812,6 +1819,73 @@ void UITask::lockKey(uint8_t k) {
     _kb.setBacklight(_cfg.kb_light != 0);
   }
   _dirty = true;
+}
+
+// ---------------- data i godzina ----------------
+
+static int daysInMonth(int Y, int M) {
+  static const uint8_t D[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+  if (M == 2 && ((Y % 4 == 0 && Y % 100 != 0) || Y % 400 == 0)) return 29;
+  return D[(M - 1) % 12];
+}
+
+// ustawia zegar urządzenia z czasu polskiego (zegar wewnątrz chodzi w UTC)
+void UITask::setLocalTime(int Y, int M, int D, int h, int mi) {
+  int y = Y - (M <= 2), era = y / 400, yoe = y - era * 400, mp = (M + 9) % 12;
+  int doy = (153 * mp + 2) / 5 + D - 1, doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  long days = (long)era * 146097 + doe - 719468;
+  uint32_t local = (uint32_t)(days * 86400L + h * 3600L + mi * 60L);
+  uint32_t utc = local - 3600;
+  struct tm chk; localTime(utc, &chk);
+  if (chk.tm_hour != h) utc -= 3600;                 // czas letni
+  the_mesh.getRTCClock()->setCurrentTime(utc);
+}
+
+void UITask::openTime() {
+  struct tm lt; localTime(the_mesh.getRTCClock()->getCurrentTime(), &lt);
+  _tf[0] = lt.tm_year + 1900; _tf[1] = lt.tm_mon + 1; _tf[2] = lt.tm_mday; _tf[3] = lt.tm_hour; _tf[4] = lt.tm_min;
+  if (_tf[0] < 2025) _tf[0] = 2026;
+  _tf_sel = 0;
+  push(S_TIME);
+}
+
+void UITask::keyTime(uint8_t k) {
+  static const int LO[5] = { 2025, 1, 1, 0, 0 }, HI[5] = { 2099, 12, 31, 23, 59 };
+  if (k == M9K_LEFT) { _tf_sel = (_tf_sel + 4) % 5; return; }
+  if (k == M9K_RIGHT) { _tf_sel = (_tf_sel + 1) % 5; return; }
+  if (k == M9K_UP || k == M9K_DOWN) {
+    int hi = _tf_sel == 2 ? daysInMonth(_tf[0], _tf[1]) : HI[_tf_sel];
+    int v = _tf[_tf_sel] + (k == M9K_UP ? 1 : -1);
+    if (v > hi) v = LO[_tf_sel];
+    if (v < LO[_tf_sel]) v = hi;
+    _tf[_tf_sel] = v;
+    int dm = daysInMonth(_tf[0], _tf[1]);
+    if (_tf[2] > dm) _tf[2] = dm;                    // np. 31 → 30 po zmianie miesiąca
+    return;
+  }
+  if (k == M9K_F3) {                                 // Menu: zegar z GPS
+    if (timeFromGps()) { pop(); popup("Zegar ustawiony z GPS"); } else popup("GPS nie ma jeszcze czasu", "włącz GPS i wyjdź pod niebo", true);
+    return;
+  }
+  if (k == M9K_ENTER) {
+    setLocalTime(_tf[0], _tf[1], _tf[2], _tf[3], _tf[4]);
+    char t[32]; snprintf(t, sizeof(t), "%d.%02d.%04d %d:%02d", _tf[2], _tf[1], _tf[0], _tf[3], _tf[4]);
+    pop();
+    popup("Zegar ustawiony", t);
+  }
+}
+
+void UITask::fillTime() {
+  UiView& v = *_v;
+  v.screen = UIS_TIME; v.tab = -1;
+  strcpy(v.title, "Data i godzina"); strcpy(v.title_right, "czas polski");
+  static const char* const L[5] = { "rok", "miesiąc", "dzień", "godz.", "min" };
+  for (int i = 0; i < 5; i++) { strcpy(v.tile[i].label, L[i]); snprintf(v.tile[i].value, sizeof(v.tile[i].value), i == 0 ? "%d" : "%02d", _tf[i]); }
+  v.ntiles = 5; v.sel = _tf_sel;
+  strcpy(v.line1, "Zegar ustawia się też sam: z aplikacji w telefonie i z GPS.");
+  static const char* const H[4][2] = { { "◄►", "pole" }, { "▲▼", "zmień" }, { "Enter", "zapisz" }, { "Menu", "z GPS" } };
+  for (int i = 0; i < 4; i++) { strcpy(v.hint[i].key, H[i][0]); strcpy(v.hint[i].txt, H[i][1]); }
+  v.nhints = 4;
 }
 
 // ---------------- mapa ----------------
@@ -1932,15 +2006,17 @@ void UITask::key(uint8_t k) {
   if (k == M9K_BACK) { if (_bar) _bar = false; else back(); return; }
 
   if (_bar) {                                         // chodzenie po dolnym pasku
-    if (k == M9K_LEFT) _bar_sel = (_bar_sel + 4) % 5;
-    else if (k == M9K_RIGHT) _bar_sel = (_bar_sel + 1) % 5;
-    else if (k == M9K_UP) _bar = false;
-    else if (k == M9K_ENTER) { uint8_t t = (uint8_t)_bar_sel; _bar = false; if (t != s) { if (t == S_START) _tabsel[S_START] = 0; tab(t); } }
+    if (k == M9K_LEFT || k == M9K_RIGHT) {            // przejście po pasku od razu pokazuje wybrany ekran
+      uint8_t t = (uint8_t)((_bar_sel + (k == M9K_LEFT ? 4 : 1)) % 5);
+      tab(t);
+      _bar = true; _bar_sel = (int8_t)t;
+    } else if (k == M9K_UP || k == M9K_ENTER) _bar = false;       // wejście w zawartość ekranu
     return;
   }
 
   if (s == S_THREAD) { keyThread(k); return; }
   if (s == S_MAP) { keyMap(k); return; }
+  if (s == S_TIME) { keyTime(k); return; }
   if (s == S_KV) {
     int16_t& top = _nav[_depth - 1].top;
     if (k == M9K_UP && top > 0) top--;
@@ -2257,6 +2333,7 @@ void UITask::fill() {
   fillStatus();
   if (_locked) { fillLock(); return; }
   if (s == S_START) fillStart();
+  else if (s == S_TIME) fillTime();
   else if (s == S_SETTINGS) fillSettings();
   else if (s == S_THREAD) fillThread();
   else if (s == S_KV) fillKv();
@@ -2328,6 +2405,7 @@ void UITask::loop() {
     _awake = false;
     if (_cfg.lock) { _locked = true; _ul_first = 0; _ul_back = false; }
     if (_msgs_dirty) _save_at = now;                 // ekran zgasł: dobry moment na zapis
+    m9lcdBacklight(0);
     if (_display) _display->turnOff();
     _kb.setBacklight(false);
   }
