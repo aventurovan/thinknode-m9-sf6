@@ -24,8 +24,11 @@ static File out;
 static uint8_t* buf = NULL;
 static bool changed = false;
 
+static bool failed_flag = false;
+
 static void fail(const char* why) {
   st = ST_ERROR;
+  failed_flag = true;
   snprintf(status, sizeof(status), "błąd");
   snprintf(detail, sizeof(detail), "%s", why);
   if (out) out.close();
@@ -113,7 +116,10 @@ void m9dlLoop() {
   switch (st) {
     case ST_CONNECT:
       if (WiFi.status() == WL_CONNECTED) { st = ST_LIST; snprintf(status, sizeof(status), "czytam listę plików…"); detail[0] = 0; }
-      else if (now - t0 > 25000) fail("nie połączono z WiFi (nazwa, hasło, zasięg?)");
+      else if (now - t0 > 25000) {
+        int ws = (int)WiFi.status();
+        fail(ws == WL_NO_SSID_AVAIL ? "nie widzę takiej sieci WiFi (nazwa? sieć 5 GHz?)" : ws == WL_CONNECT_FAILED ? "sieć odrzuciła połączenie (hasło?)" : "nie połączono z WiFi (nazwa, hasło, zasięg?)");
+      }
       break;
     case ST_LIST: {
       char url[220]; snprintf(url, sizeof(url), "%slista.txt", base);
@@ -172,6 +178,7 @@ void m9dlLoop() {
 
 bool m9dlActive() { return st == ST_CONNECT || st == ST_LIST || st == ST_NEXT || st == ST_BODY; }
 bool m9dlChanged() { bool c = changed; changed = false; return c; }
+bool m9dlFailed() { bool f = failed_flag; failed_flag = false; return f; }
 const char* m9dlStatus() { return status; }
 const char* m9dlDetail() { return detail; }
 
@@ -182,6 +189,7 @@ void m9dlStop() { }
 void m9dlLoop() { }
 bool m9dlActive() { return false; }
 bool m9dlChanged() { return false; }
+bool m9dlFailed() { return false; }
 const char* m9dlStatus() { return ""; }
 const char* m9dlDetail() { return ""; }
 #endif

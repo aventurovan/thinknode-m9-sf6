@@ -7,7 +7,7 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 
 ## Stan prac
 
-**Wersja 0.16.0.** Companion Bluetooth dla aplikacji MeshCore i MeshSpeed (PIN losowany przy każdym uruchomieniu i pokazywany na ekranie przy parowaniu; stały można ustawić w Ustawieniach) i własny kolorowy interfejs po polsku:
+**Wersja 0.16.1.** Companion Bluetooth dla aplikacji MeshCore i MeshSpeed (PIN losowany przy każdym uruchomieniu i pokazywany na ekranie przy parowaniu; stały można ustawić w Ustawieniach) i własny kolorowy interfejs po polsku:
 
 - **Start** — zegar i sześć kafelków (Wiadomości, Kontakty, Repeatery, Pozycja, Radio, Urządzenie); po kafelkach chodzi się strzałkami, Enter wchodzi.
 - **Dolny pasek** — ikony: Start, Wiadomości, Kontakty, Repeatery, Ustawienia.
@@ -23,7 +23,7 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 - **Zapis** — wiadomości (do 300), ustawienia ekranu, wyciszenia i hasła repeaterów zostają po restarcie. Kontaktów do 500.
 - **Ustawienia** — każdą wartość wybiera się z listy (Enter otwiera listę); presety radia są pod pozycją „Preset”.
 - **Dolny pasek** — ▼ z ostatniego wiersza lub dolnego rzędu kafelków schodzi na pasek, ◄ ► wybiera ikonę, Enter wchodzi, ▲ wraca.
-- **Blokada klawiszy** (Ustawienia › Ekran i dźwięk) — włącza się z wygaszeniem ekranu; odblokowanie: przytrzymanie Wstecz 2 s albo Wstecz i Enter.
+- **Blokada klawiszy** (Ustawienia › Ekran i dźwięk) — włącza się z wygaszeniem ekranu; odblokowanie: Wstecz, potem Enter.
 - **Wyciszanie rozmów** — Pinezka na liście Wiadomości otwiera opcje rozmowy (wycisz, oznacz jako przeczytane, usuń).
 - **Bluetooth** — w ustawieniach liczniki połączeń, parowań i ramek do diagnozy (łatka `tools/patch_ble.py`).
 

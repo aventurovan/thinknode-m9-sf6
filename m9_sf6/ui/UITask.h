@@ -46,11 +46,11 @@ class UITask : public AbstractUITask {
   enum InputMode { IN_MSG = 0, IN_CHANNEL, IN_FREQ, IN_NAME, IN_TIME, IN_PASS, IN_CLI, IN_LAT, IN_LON, IN_PIN, IN_WIFI_SSID, IN_WIFI_PASS, IN_MAP_URL };
   enum Act { A_WRITE, A_FAV, A_DETAIL, A_MANAGE, A_DELETE, A_REPLY, A_RESEND, A_COPY, A_DELMSG, A_OPEN, A_MUTE, A_MARKREAD, A_DELCHAN, A_DELTHREAD, A_REPLY_ACK, A_SHOWMAP };
   enum Pick { P_PRESET, P_BW, P_SF, P_CR, P_TX, P_HASH, P_AIR, P_BT, P_GPS, P_ADVLOC, P_TEL0, P_TEL1, P_TEL2, P_AUTOADV, P_AA_MODE, P_AA_T0, P_AA_T1, P_AA_T2, P_AA_T3,
-              P_AA_FULL, P_AA_HOPS, P_SHOWPATH, P_MULTIACK, P_SOUND, P_SLEEP, P_KBLIGHT, P_WAKE, P_LOCK, P_RPTSORT, P_BRIGHT };
-  enum Confirm { C_NONE = 0, C_DEL_CHANNEL, C_DEL_CONTACT, C_REBOOT, C_FACTORY, C_RPT_REBOOT, C_RPT_SF6, C_CLEAR_MSGS, C_CLEAR_PW, C_CLEAR_BONDS, C_DEL_THREAD };
+              P_AA_FULL, P_AA_HOPS, P_SHOWPATH, P_MULTIACK, P_SOUND, P_SLEEP, P_KBLIGHT, P_WAKE, P_LOCK, P_RPTSORT, P_BRIGHT, P_MSGSND, P_ADVSND };
+  enum Confirm { C_NONE = 0, C_DEL_CHANNEL, C_DEL_CONTACT, C_REBOOT, C_FACTORY, C_RPT_REBOOT, C_RPT_SF6, C_CLEAR_MSGS, C_CLEAR_PW, C_CLEAR_BONDS, C_DEL_THREAD, C_WIFI_DL, C_WIFI_AP, C_BT_RESTART };
   struct Thread { char name[32]; uint8_t chan; uint8_t unread; uint32_t last; int16_t last_msg; };
   struct Nav { uint8_t scr; int16_t sel, top; };
-  struct Cfg { uint32_t magic; uint8_t show_path, sleep_idx, kb_light, adv_idx, ct_filter, rpt_sort, no_wake, lock, bright, spare[3]; };   // bright: 0 = nie ustawiono (pełna jasność), 1..5 = poziom
+  struct Cfg { uint32_t magic; uint8_t show_path, sleep_idx, kb_light, adv_idx, ct_filter, rpt_sort, no_wake, lock, bright, no_msg_snd, adv_snd, spare[1]; };   // bright: 0 = nie ustawiono (pełna jasność), 1..5 = poziom
   struct Pw { uint8_t key[6]; char pw[16]; };
   struct WifiCfg { char ssid[33]; char pass[64]; char url[128]; };
 
@@ -81,6 +81,8 @@ class UITask : public AbstractUITask {
   M9Map _map; bool _map_ready, _sd_pending;
   double _map_lat, _map_lon; int _map_zoom; bool _map_follow;
   WifiCfg _wifi;
+  bool _bt_killed;                       // Bluetooth wyłączony na czas WiFi (do restartu)
+  uint32_t _adv_seen;                    // ostatni advert, dla którego zagrał dźwięk
   int _tf[5]; int _tf_sel;               // ustawianie daty i godziny: rok, miesiąc, dzień, godzina, minuta
   UiMsg* _snap;                          // kopia wiadomości na czas zapisu
   int _msg_idx;
@@ -182,6 +184,7 @@ class UITask : public AbstractUITask {
   void keyMap(uint8_t k);
   void saveWifi();
   void openTime();
+  void wifiPrepare();
   void keyTime(uint8_t k);
   void fillTime();
   void setLocalTime(int Y, int M, int D, int h, int mi);

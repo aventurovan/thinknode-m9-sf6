@@ -148,6 +148,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   _map_lat = DEF_LAT; _map_lon = DEF_LON; _map_zoom = 12; _map_follow = true;
   memset(&_wifi, 0, sizeof(_wifi)); strcpy(_wifi.url, MAP_URL_DEFAULT);
   memset(_tf, 0, sizeof(_tf)); _tf_sel = 0; _snap = NULL;
+  _bt_killed = false; _adv_seen = 0;
 }
 
 void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* node_prefs) {
@@ -393,7 +394,7 @@ void UITask::newMsg(uint8_t path_len, const char* from_name, const char* text, i
     m->snr_x4 = the_mesh.ui_rx_snr_x4; m->rssi = the_mesh.ui_rx_rssi;
   }
   bool muted = isMuted(from_name);                   // wyciszona rozmowa: bez dźwięku i bez budzenia ekranu
-  if (!muted && !_prefs->buzzer_quiet && !_buzzer.isPlaying()) _buzzer.play(chan ? "ch:d=16,o=6,b=200:e,g" : "dm:d=16,o=6,b=200:e,g,c7");
+  if (!muted && !_prefs->buzzer_quiet && !_cfg.no_msg_snd && !_buzzer.isPlaying()) _buzzer.play(chan ? "ch:d=16,o=6,b=200:e,g" : "dm:d=16,o=6,b=200:e,g,c7");
   if (_awake) _dirty = true;
   else if (!muted && !_cfg.no_wake) wake();
 }
@@ -408,7 +409,7 @@ void UITask::pollSent() {
     MyMesh::UiSent* u = the_mesh.uiSent(m.sent_id);
     if (!u) continue;
     if (u->repeats != m.repeats || u->delivered != (m.delivered != 0) || u->rep_n != m.rep_n) {
-      if (!_prefs->buzzer_quiet && !_buzzer.isPlaying() && ((u->repeats > 0 && m.repeats == 0) || (u->delivered && !m.delivered))) _buzzer.play("ack:d=32,o=8,b=120:c");
+      if (!_prefs->buzzer_quiet && !_cfg.no_msg_snd && !_buzzer.isPlaying() && ((u->repeats > 0 && m.repeats == 0) || (u->delivered && !m.delivered))) _buzzer.play("ack:d=32,o=8,b=120:c");
       m.repeats = u->repeats; m.delivered = u->delivered;
       m.rep_n = u->rep_n; m.rep_hs = u->rep_hs;
       memcpy(m.rep_id, u->rep_id, sizeof(m.rep_id)); memcpy(m.rep_snr, u->rep_snr, sizeof(m.rep_snr));
@@ -620,7 +621,8 @@ void UITask::pop() {
 void UITask::back() {
   if (scr() == S_THREAD && _input_mode != IN_MSG) _input_mode = IN_MSG;   // anulowane pole do wpisania
   if (scr() == S_ADMIN) the_mesh.uiAdminLogout();
-  if (scr() == S_MAP_NET && (m9uploadActive() || m9dlActive())) { m9uploadStop(); m9dlStop(); _map.scan(); popup("WiFi wyłączone", "przesyłanie mapy zatrzymane"); }
+  if (scr() == S_MAP_NET && (m9uploadActive() || m9dlActive())) { m9uploadStop(); m9dlStop(); _map.scan(); }
+  if (scr() == S_MAP_NET && _bt_killed) { pop(); ask(C_BT_RESTART, "Zrestartować, żeby wrócił Bluetooth?", ""); return; }
   pop();
 }
 
@@ -902,6 +904,18 @@ void UITask::doConfirm(uint8_t what) {
       if (!the_mesh.uiFactoryReset()) popup("Nie udało się wyczyścić pamięci", "", true);
       break;
     case C_RPT_REBOOT: adminCli("reboot"); break;
+    case C_WIFI_DL:
+      wifiPrepare();
+      m9uploadStop(); m9dlStart(_wifi.ssid, _wifi.pass, _wifi.url);
+      break;
+    case C_WIFI_AP: {
+      wifiPrepare();
+      m9dlStop();
+      if (m9uploadStart()) popup("WiFi: " M9UP_SSID, "hasło " M9UP_PASS " · w telefonie otwórz 192.168.4.1", false, 8000);
+      else { char t[48]; snprintf(t, sizeof(t), "wolna pamięć: %u kB", m9FreeHeapKB()); popup("Nie udało się uruchomić WiFi", t, true, 8000); }
+      break;
+    }
+    case C_BT_RESTART: if (_msgs_dirty || true) saveMsgs(); the_mesh.uiReboot(); break;
     case C_CLEAR_MSGS: _msg_n = 0; _msg_idx = -1; saveMsgs(); popup("Wiadomości usunięte"); break;
     case C_CLEAR_PW: _pw_n = 0; savePw(); popup("Hasła repeaterów usunięte"); break;
     case C_CLEAR_BONDS: {
@@ -1208,8 +1222,8 @@ int UITask::listCount(uint8_t s) {
     case S_SET_POS: return 9;
     case S_SET_ADV: return 3;
     case S_SET_CT: return 6;
-    case S_SET_MSG: return 4;
-    case S_SET_SCR: return 5;
+    case S_SET_MSG: return 3;
+    case S_SET_SCR: return 8;
     case S_SET_SYS: return 6;
   }
   return 0;
@@ -1427,7 +1441,7 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       return;
     }
     case S_SET_BT: {
-      if (i == 0) setRow(r, "Bluetooth", isBluetoothEnabled() ? (hasConnection() ? "włączony · połączony z aplikacją" : "włączony · czeka na telefon") : "wyłączony", UII_BT);
+      if (i == 0) setRow(r, "Bluetooth", _bt_killed ? "wyłączony do restartu (WiFi)" : isBluetoothEnabled() ? (hasConnection() ? "włączony · połączony z aplikacją" : "włączony · czeka na telefon") : "wyłączony", UII_BT);
       else if (i == 1) { snprintf(t, sizeof(t), "%06lu", (unsigned long)the_mesh.getBLEPin()); setRow(r, "PIN do parowania", t, UII_LOCK); }
       else if (i == 2) { int n = m9bleBondCount(); if (n < 0) strcpy(t, "—"); else snprintf(t, sizeof(t), "%d", n); setRow(r, "Zapamiętane telefony", t); }
       else if (i == 3) setRow(r, "Zapomnij wszystkie telefony", "gdy parowanie nie działa");
@@ -1478,7 +1492,6 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
     case S_SET_MSG:
       if (i == 0) setRow(r, "Trasa pod wiadomością", _cfg.show_path ? "identyfikatory repeaterów" : "tylko liczba skoków");
       else if (i == 1) setRow(r, "Dodatkowe potwierdzenia", _prefs->multi_acks ? "włączone (pewniej, więcej ruchu)" : "wyłączone");
-      else if (i == 2) setRow(r, "Dźwięk wiadomości", onOff(!_prefs->buzzer_quiet));
       else { snprintf(t, sizeof(t), "zapisanych: %d", _msg_n); setRow(r, "Usuń wszystkie wiadomości", t); }
       return;
     case S_SET_SCR:
@@ -1486,7 +1499,10 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       else if (i == 1) setRow(r, "Podświetlenie klawiatury", _cfg.kb_light ? "świeci, gdy ekran świeci" : "wyłączone");
       else if (i == 2) setRow(r, "Nowa wiadomość budzi ekran", yesNo(!_cfg.no_wake));
       else if (i == 3) setRow(r, "Blokada klawiszy", _cfg.lock ? "po wygaszeniu ekranu" : "wyłączona", UII_LOCK);
-      else { snprintf(t, sizeof(t), "%d%%", brightPercent()); setRow(r, "Jasność ekranu", t, UII_SCREEN); }
+      else if (i == 4) { snprintf(t, sizeof(t), "%d%%", brightPercent()); setRow(r, "Jasność ekranu", t, UII_SCREEN); }
+      else if (i == 5) setRow(r, "Dźwięki urządzenia", _prefs->buzzer_quiet ? "wyciszone (wszystkie)" : "włączone", UII_MUTE, _prefs->buzzer_quiet);
+      else if (i == 6) setRow(r, "Dźwięk wiadomości", _cfg.no_msg_snd ? "wyłączony" : "włączony");
+      else setRow(r, "Dźwięk advertu repeatera", _cfg.adv_snd == 0 ? "wyłączony" : _cfg.adv_snd == 1 ? "każdy repeater" : "tylko ulubione");
       return;
     case S_SET_SYS: {
       if (i == 0) setRow(r, "Informacje", "wersja, pamięć, klucz");
@@ -1529,11 +1545,13 @@ void UITask::listEnter(uint8_t s, int i) {
         if (m9dlActive()) { m9dlStop(); _map.scan(); }
         else if (!_map.sdOk()) popup("Brak karty SD", "", true);
         else if (!_wifi.ssid[0]) popup("Najpierw ustaw sieć WiFi", "pozycje niżej: sieć i hasło");
-        else { m9uploadStop(); m9dlStart(_wifi.ssid, _wifi.pass, _wifi.url); }
+        else if (!_bt_killed) ask(C_WIFI_DL, "WiFi wyłączy Bluetooth do restartu", "");
+        else doConfirm(C_WIFI_DL);
       } else if (i == 2) {
         if (m9uploadActive()) { m9uploadStop(); _map.scan(); }
         else if (!_map.sdOk()) popup("Brak karty SD", "", true);
-        else { m9dlStop(); if (m9uploadStart()) popup("WiFi: " M9UP_SSID, "hasło " M9UP_PASS " · w telefonie otwórz 192.168.4.1", false, 8000); else popup("Nie udało się uruchomić WiFi", "", true); }
+        else if (!_bt_killed) ask(C_WIFI_AP, "WiFi wyłączy Bluetooth do restartu", "");
+        else doConfirm(C_WIFI_AP);
       }
       else if (i == 3) openInput(IN_WIFI_SSID, _wifi.ssid);
       else if (i == 4) openInput(IN_WIFI_PASS, _wifi.pass);
@@ -1614,7 +1632,7 @@ void UITask::listEnter(uint8_t s, int i) {
       else settingPick(s, i);
       return;
     case S_SET_MSG:
-      if (i == 3) ask(C_CLEAR_MSGS, "Usunąć wszystkie wiadomości?", "");
+      if (i == 2) ask(C_CLEAR_MSGS, "Usunąć wszystkie wiadomości?", "");
       else settingPick(s, i);
       return;
     case S_SET_SYS:
@@ -1693,7 +1711,6 @@ bool UITask::settingPick(uint8_t s, int i) {
     case S_SET_MSG:
       if (i == 0) two(P_SHOWPATH, "Trasa pod wiadomością", "identyfikatory repeaterów", "tylko liczba skoków", _cfg.show_path ? 0 : 1);
       else if (i == 1) two(P_MULTIACK, "Dodatkowe potwierdzenia", "włączone (pewniej, więcej ruchu)", "wyłączone", _prefs->multi_acks ? 0 : 1);
-      else if (i == 2) two(P_SOUND, "Dźwięk wiadomości", "włączony", "wyłączony", _prefs->buzzer_quiet ? 1 : 0);
       else return false;
       return true;
     case S_SET_SCR:
@@ -1701,7 +1718,10 @@ bool UITask::settingPick(uint8_t s, int i) {
       else if (i == 1) two(P_KBLIGHT, "Podświetlenie klawiatury", "świeci, gdy ekran świeci", "wyłączone", _cfg.kb_light ? 0 : 1);
       else if (i == 2) two(P_WAKE, "Nowa wiadomość budzi ekran", "tak", "nie", _cfg.no_wake ? 1 : 0);
       else if (i == 3) two(P_LOCK, "Blokada klawiszy", "wyłączona", "po wygaszeniu ekranu", _cfg.lock ? 1 : 0);
-      else { pickBegin(P_BRIGHT, "Jasność ekranu"); for (int q = 0; q < 5; q++) { snprintf(t, sizeof(t), "%d%%", BRIGHT_STEPS[q]); pickAdd(t); } pickOpen((_cfg.bright >= 1 && _cfg.bright <= 5) ? _cfg.bright - 1 : 4); }
+      else if (i == 4) { pickBegin(P_BRIGHT, "Jasność ekranu"); for (int q = 0; q < 5; q++) { snprintf(t, sizeof(t), "%d%%", BRIGHT_STEPS[q]); pickAdd(t); } pickOpen((_cfg.bright >= 1 && _cfg.bright <= 5) ? _cfg.bright - 1 : 4); }
+      else if (i == 5) two(P_SOUND, "Dźwięki urządzenia", "włączone", "wyciszone (wszystkie)", _prefs->buzzer_quiet ? 1 : 0);
+      else if (i == 6) two(P_MSGSND, "Dźwięk wiadomości", "włączony", "wyłączony", _cfg.no_msg_snd ? 1 : 0);
+      else { pickBegin(P_ADVSND, "Dźwięk advertu repeatera"); pickAdd("wyłączony"); pickAdd("każdy repeater"); pickAdd("tylko ulubione"); pickOpen(_cfg.adv_snd < 3 ? _cfg.adv_snd : 0); }
       return true;
   }
   return false;
@@ -1721,6 +1741,7 @@ void UITask::applyPick(uint8_t id, int i) {
     case P_HASH: _prefs->path_hash_mode = i; the_mesh.savePrefs(); break;
     case P_AIR: _prefs->airtime_factor = AIRTIME_STEPS[i]; the_mesh.savePrefs(); break;
     case P_BT:
+      if (_bt_killed) { popup("Bluetooth wróci po restarcie", "był wyłączony na czas WiFi"); break; }
       if (i == 0 && !isBluetoothEnabled()) { char t[40]; snprintf(t, sizeof(t), "PIN do parowania: %06lu", (unsigned long)the_mesh.getBLEPin()); enableBluetooth(); popup("Bluetooth włączony", t, false, 5000); }
       if (i == 1 && isBluetoothEnabled()) { disableBluetooth(); popup("Bluetooth wyłączony"); }
       break;
@@ -1757,8 +1778,10 @@ void UITask::applyPick(uint8_t id, int i) {
     case P_KBLIGHT: _cfg.kb_light = i == 0; saveCfg(); _kb.setBacklight(_cfg.kb_light != 0); break;
     case P_WAKE: _cfg.no_wake = i == 1; saveCfg(); break;
     case P_RPTSORT: _cfg.rpt_sort = i; saveCfg(); break;
+    case P_MSGSND: _cfg.no_msg_snd = i == 1; saveCfg(); if (i == 0 && !_prefs->buzzer_quiet) _buzzer.play("dm:d=16,o=6,b=200:e,g,c7"); break;
+    case P_ADVSND: _cfg.adv_snd = i; saveCfg(); if (i > 0 && !_prefs->buzzer_quiet) _buzzer.play("adv:d=32,o=7,b=160:g,p,g"); break;
     case P_BRIGHT: _cfg.bright = i + 1; saveCfg(); m9lcdBacklight(brightPercent()); break;
-    case P_LOCK: _cfg.lock = i == 1; saveCfg(); if (i == 1) popup("Blokada włączona", "odblokowanie: przytrzymaj Wstecz 2 s", false, 5000); break;
+    case P_LOCK: _cfg.lock = i == 1; saveCfg(); if (i == 1) popup("Blokada włączona", "odblokowanie: Wstecz, potem Enter", false, 5000); break;
   }
   _dirty = true;
 }
@@ -1804,21 +1827,23 @@ bool UITask::gridKey(uint8_t k, int count, int cols) {
   return false;
 }
 
-// ekran blokady: odblokowuje przytrzymanie Wstecz przez 2 s (klawiatura powtarza wtedy kod) albo Wstecz i zaraz Enter
+// ekran blokady: odblokowuje Wstecz, a zaraz po nim Enter
 void UITask::lockKey(uint8_t k) {
   unsigned long now = millis();
-  bool unlock = false;
-  if (k == M9K_BACK) {
-    if (_ul_first == 0 || now - _ul_last > 800) _ul_first = now;      // nowe przytrzymanie
-    _ul_last = now; _ul_back = true;
-    if (now - _ul_first >= 1500) unlock = true;
-  } else if (k == M9K_ENTER && _ul_back && now - _ul_last < 3000) unlock = true;
-  else { _ul_first = 0; _ul_back = false; }
-  if (unlock) {
-    _locked = false; _ul_first = 0; _ul_back = false;
+  if (k == M9K_BACK) { _ul_back = true; _ul_last = now; }
+  else if (k == M9K_ENTER && _ul_back && now - _ul_last < 4000) {
+    _locked = false; _ul_back = false;
     _kb.setBacklight(_cfg.kb_light != 0);
-  }
+  } else _ul_back = false;
   _dirty = true;
+}
+
+// WiFi i Bluetooth naraz nie mieszczą się w pamięci urządzenia: przed WiFi Bluetooth jest wyłączany i wraca po restarcie
+void UITask::wifiPrepare() {
+  if (_bt_killed) return;
+  if (isBluetoothEnabled()) disableBluetooth();
+  m9bleShutdown();
+  _bt_killed = true;
 }
 
 // ---------------- data i godzina ----------------
@@ -2191,8 +2216,8 @@ void UITask::fillSettings() {
       case 2: snprintf(t.sub, sizeof(t.sub), "GPS %s · prywatność", _prefs->gps_enabled ? "wł." : "wył."); break;
       case 3: if (ADV_HOURS[_cfg.adv_idx]) snprintf(t.sub, sizeof(t.sub), "co %d godz.", ADV_HOURS[_cfg.adv_idx]); else strcpy(t.sub, "wyślij · auto wył."); break;
       case 4: strcpy(t.sub, (_prefs->manual_add_contacts & 1) ? "dodaje wybrane typy" : "dodaje wszystko"); break;
-      case 5: snprintf(t.sub, sizeof(t.sub), "dźwięk %s · trasa", _prefs->buzzer_quiet ? "wył." : "wł."); break;
-      case 6: snprintf(t.sub, sizeof(t.sub), "gaśnie: %s", SLEEP_NAMES[_cfg.sleep_idx]); break;
+      case 5: strcpy(t.sub, "trasa · potwierdzenia"); break;
+      case 6: snprintf(t.sub, sizeof(t.sub), "%s · %s", SLEEP_NAMES[_cfg.sleep_idx], _prefs->buzzer_quiet ? "wyciszone" : "dźwięk wł."); break;
       case 7: strcpy(t.sub, "informacje · zegar"); break;
     }
   }
@@ -2354,8 +2379,8 @@ void UITask::fillLock() {
   snprintf(v.line1, sizeof(v.line1), "%s · %s, %d.%02d", _prefs->node_name, DNI[lt.tm_wday % 7], lt.tm_mday, lt.tm_mon + 1);
   if (_popup_until && _pin_popup) snprintf(v.line2, sizeof(v.line2), "Bluetooth: %s", _pop2);
   else if (v.unread > 0) snprintf(v.line2, sizeof(v.line2), v.unread == 1 ? "1 nowa wiadomość" : "nowe wiadomości: %d", v.unread);
-  strcpy(v.footer, "Przytrzymaj Wstecz 2 s (albo Wstecz, potem Enter)");
-  if (_ul_back && millis() - _ul_last < 3000) strcpy(v.popup1, "…trzymaj dalej albo naciśnij Enter");
+  strcpy(v.footer, "Odblokowanie: Wstecz, potem Enter");
+  if (_ul_back && millis() - _ul_last < 4000) strcpy(v.popup1, "teraz naciśnij Enter");
 }
 
 void UITask::draw() {
@@ -2394,6 +2419,7 @@ void UITask::loop() {
   if (m9uploadActive()) { m9uploadLoop(); if (m9uploadChanged()) _map.scan(); }
   m9dlLoop();
   if (m9dlChanged()) _map.scan();
+  if (m9dlFailed()) { char t[80]; snprintf(t, sizeof(t), "%s · pamięć %u kB", m9dlDetail(), m9FreeHeapKB()); wake(); popup("Pobieranie mapy: błąd", t, true, 15000); }
   if (m9uploadActive() || m9dlActive()) { uint32_t ms = SLEEP_STEPS[_cfg.sleep_idx]; if (ms) _sleep_at = now + ms; }     // przy przesyłaniu mapy ekran nie gaśnie
 
   adminLoop();
@@ -2420,6 +2446,16 @@ void UITask::loop() {
     }
   }
   if (_pin_popup && (m9ble_auth_ok != _ble_auth_seen || !_popup_until)) { if (_popup_until) { _popup_until = 0; _dirty = true; } _pin_popup = false; }
+
+  // dźwięk przy advercie repeatera (jeśli włączony w Ustawieniach › Ekran i dźwięk)
+  if (the_mesh.ui_heard_n > 0 && the_mesh.ui_heard_at[0] != _adv_seen) {
+    bool first = _adv_seen == 0;
+    _adv_seen = the_mesh.ui_heard_at[0];
+    ContactInfo& h = the_mesh.ui_heard[0];
+    ContactInfo c;
+    bool fav = _cfg.adv_snd == 2 && ctByKey(h.id.pub_key, c) && (c.flags & 1);
+    if (!first && h.type == ADV_TYPE_REPEATER && !_prefs->buzzer_quiet && !_buzzer.isPlaying() && (_cfg.adv_snd == 1 || fav)) _buzzer.play("adv:d=32,o=7,b=160:g,p,g");
+  }
 
   _buzzer.loop();
   if (the_mesh.ui_sent_changed) { the_mesh.ui_sent_changed = false; pollSent(); }

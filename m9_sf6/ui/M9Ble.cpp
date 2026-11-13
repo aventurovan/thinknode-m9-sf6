@@ -6,6 +6,11 @@ volatile uint8_t m9ble_fail_reason = 0;
 #if defined(ESP32)
 #include <esp_gap_ble_api.h>
 #include <stdlib.h>
+#include <Arduino.h>
+#include <BLEDevice.h>
+
+void m9bleShutdown() { BLEDevice::deinit(false); delay(200); }
+unsigned m9FreeHeapKB() { return ESP.getFreeHeap() / 1024; }
 
 int m9bleBondCount() { return esp_ble_get_bond_device_num(); }
 
@@ -24,4 +29,6 @@ int m9bleClearBonds() {
 #else
 int m9bleBondCount() { return 1; }
 int m9bleClearBonds() { return 1; }
+void m9bleShutdown() { }
+unsigned m9FreeHeapKB() { return 90; }
 #endif
