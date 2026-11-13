@@ -8,12 +8,16 @@ on:
     branches: [ main ]
     paths: [ 'mapa/**', '.github/workflows/mapa-test.yml' ]
 
+permissions:
+  contents: write   # wyniki próby (podglądy i dzienniki) trafiają do gałęzi „proba-wyniki”
+
 jobs:
   proba:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      - run: mkdir -p proba
       - name: Dane wektorowe (Monako — mały obszar do próby)
         run: |
           mkdir -p data/styl
@@ -23,15 +27,18 @@ jobs:
         run: |
           cp mapa/styl/ciemna.json data/styl/
           cp mapa/config.json data/
-          docker run --rm --entrypoint sh maptiler/tileserver-gl -c "find / -type d -name 'Noto Sans Regular' 2>/dev/null | head -5; ls / | head -30" || true
+          docker run --rm --entrypoint sh maptiler/tileserver-gl -c "find / -type d -name 'Noto Sans*' 2>/dev/null | head -8; echo ---; find / -name 'tileserver-gl-styles' -maxdepth 6 2>/dev/null | head; echo ---; ls /" > proba/obraz.txt 2>&1 || true
           docker run -d --name ts -v "$(pwd)/data":/data -p 8080:8080 maptiler/tileserver-gl -p 8080 --config /data/config.json
           for i in $(seq 1 30); do curl -sf http://localhost:8080/styles.json > /dev/null && break; sleep 2; done
-          docker logs ts 2>&1 | tail -40
-          curl -s http://localhost:8080/styles.json | head -c 600; echo
+          docker logs ts > proba/serwer.txt 2>&1 || true
+          curl -s http://localhost:8080/styles.json | head -c 800 > proba/styles.json || true
+          curl -s -o proba/kafelek-serwer.png -w "%{http_code} %{size_download}\n" "http://localhost:8080/styles/ciemna/256/13/4264/2985.png" > proba/kafelek-kod.txt || true
       - name: Pakowanie i podgląd
         run: |
-          pip install pillow numpy
+          set -o pipefail
+          pip install pillow numpy > /dev/null
           cd mapa
+          exec > >(tee ../proba/pakowanie.txt) 2>&1
           python3 pakuj_mape.py mapa --zrodlo "http://localhost:8080/styles/ciemna/256/{z}/{x}/{y}.png" --obszar 7.38,43.71,7.46,43.76 --zoom 11-15 --wyjscie ../proba/mapa --watki 4
           ls -la ../proba/mapa
           python3 - <<'PY'
@@ -51,8 +58,14 @@ jobs:
               W.save('../proba/podglad-z%d.png' % z)
               t = pm.read_tile(f, x, y); print('z', z, 'kafelek', x, y, 'bajtow', len(t) if t else None)
           PY
-          docker logs ts 2>&1 | grep -i -E "error|font|glyph" | head -20 || true
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mapa-proba
-          path: proba/
+      - name: Wyniki do gałęzi proba-wyniki
+        if: always()
+        run: |
+          docker logs ts > proba/serwer-koniec.txt 2>&1 || true
+          tail -30 planetiler.log > proba/planetiler.txt 2>/dev/null || true
+          rm -rf proba/mapa
+          cd proba
+          git init -q -b proba-wyniki
+          git add -A
+          git -c user.name="github-actions" -c user.email="actions@users.noreply.github.com" commit -q -m "Wyniki próby mapy (${GITHUB_SHA::7})"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" proba-wyniki

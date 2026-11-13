@@ -47,3 +47,12 @@ struct UiView {
 };
 
 void uiRender(Gfx& g, const UiView& v);
+
+// Mapa: UITask sam składa podkład w buforze, a te funkcje dorysowują resztę.
+#define UI_MAP_TOP 20          // mapa zajmuje wiersze 20..215 (196 px)
+#define UI_MAP_H   196
+enum UiMapMark { UIM_ME, UIM_RPT, UIM_RPT_FAV, UIM_PERSON, UIM_CROSS };
+void uiMapMarker(Gfx& g, int x, int y, uint8_t kind, const char* label);
+void uiMapLabels(Gfx& g, const char* top_right, const char* bottom_left, const char* note);
+void uiRenderOverlay(Gfx& g, const UiView& v);     // pasek stanu, dolny pasek i okienko na wierzchu mapy
+uint16_t uiColorBg();

@@ -1,0 +1,14 @@
+#pragma once
+// Pobieranie plików mapy z internetu prosto na kartę SD: urządzenie łączy się z siecią WiFi (domową albo z telefonu),
+// czyta listę plików spod podanego adresu i ściąga brakujące. Przerwane pobieranie jest wznawiane.
+// Pod adresem bazowym musi leżeć plik lista.txt: w każdym wierszu „nazwa_pliku rozmiar_w_bajtach”.
+
+#include <stdint.h>
+
+void m9dlStart(const char* ssid, const char* pass, const char* base_url);
+void m9dlStop();
+void m9dlLoop();                 // wołać w pętli
+bool m9dlActive();               // trwa łączenie albo pobieranie
+bool m9dlChanged();              // true raz, gdy na karcie przybył plik (trzeba odświeżyć listę map)
+const char* m9dlStatus();        // krótki stan, np. „pobieram 3 z 12”
+const char* m9dlDetail();        // szczegóły, np. nazwa pliku i postęp

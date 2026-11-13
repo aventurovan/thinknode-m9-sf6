@@ -1,5 +1,9 @@
 #include "M9Map.h"
 #include "M9Lcd.h"
+#include <SPI.h>
+#include <SD.h>
+
+#define M9MAP_SD_CS 48
 
 #define COL_BG      M9LCD_RGB(16, 23, 31)
 #define COL_GRID    M9LCD_RGB(40, 52, 68)
@@ -14,6 +18,17 @@ bool M9Map::begin() {
   if (_tile == NULL) _tile = (uint8_t*)malloc(MCM_MAX_TILE_LEN);
   return _fb != NULL && _tile != NULL;
 }
+
+bool M9Map::mount() {
+  SD.end();
+  _sd_ok = SD.begin(M9MAP_SD_CS, SPI, 40000000);
+  if (!_sd_ok) { SD.end(); _sd_ok = SD.begin(M9MAP_SD_CS, SPI, 20000000); }
+  if (_sd_ok && SD.cardType() == CARD_NONE) { SD.end(); _sd_ok = false; }
+  _sd_mb = _sd_ok ? (uint32_t)(SD.cardSize() / (1024ULL * 1024ULL)) : 0;
+  return _sd_ok;
+}
+
+int M9Map::scan() { return _sd_ok ? scan(SD) : 0; }
 
 int M9Map::scan(fs::FS& fs) {
   _fs = &fs;

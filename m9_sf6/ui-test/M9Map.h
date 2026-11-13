@@ -19,6 +19,8 @@ class M9Map {
   int _open_idx = -1;
   uint8_t* _tile = NULL;
   uint16_t* _fb = NULL;
+  bool _sd_ok = false;
+  uint32_t _sd_mb = 0;
 
   bool loadTile(int zoom, uint32_t x, uint32_t y, uint32_t* len);
   void fillRect(int x, int y, int w, int h, uint16_t col);
@@ -27,6 +29,10 @@ class M9Map {
 public:
   bool begin();                       // przydział pamięci (PSRAM); false = brak pamięci
   int  scan(fs::FS& fs);              // szuka plików mapy; zwraca liczbę plików
+  bool mount();                       // montuje kartę SD (CS 48, wspólne SPI); true = karta jest
+  int  scan();                        // jak wyżej, na zamontowanej karcie
+  bool sdOk() const { return _sd_ok; }
+  uint32_t sdSizeMB() const { return _sd_mb; }
   int  numPacks() const { return _num; }
   int  minZoom() const;
   int  maxZoom() const;

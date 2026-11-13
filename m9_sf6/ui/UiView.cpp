@@ -338,3 +338,54 @@ void uiRender(Gfx& g, const UiView& v) {
   drawBottom(g, v);
   if (v.popup) drawPopup(g, v);
 }
+
+// ---------- mapa ----------
+
+uint16_t uiColorBg() { return C_BG; }
+
+static void dot(Gfx& g, int cx, int cy, int r, uint16_t c) {
+  for (int dy = -r; dy <= r; dy++) {
+    int dx = 0;
+    while ((dx + 1) * (dx + 1) + dy * dy <= r * r) dx++;
+    g.fillRect(cx - dx, cy + dy, 2 * dx + 1, 1, c);
+  }
+}
+
+void uiMapMarker(Gfx& g, int x, int y, uint8_t kind, const char* label) {
+  if (kind == UIM_CROSS) { g.fillRect(x - 7, y, 15, 1, C_TXT); g.fillRect(x, y - 7, 1, 15, C_TXT); return; }
+  if (kind == UIM_ME) { dot(g, x, y, 8, C_TXT); dot(g, x, y, 6, C_ACC); dot(g, x, y, 2, C_INK); }
+  else if (kind == UIM_PERSON) { dot(g, x, y, 5, C_INK); dot(g, x, y, 4, C_GRN); }
+  else { dot(g, x, y, 7, C_INK); dot(g, x, y, 6, kind == UIM_RPT_FAV ? C_ACC : C_BLUE); g.fillRect(x - 1, y - 3, 2, 7, C_INK); g.fillRect(x - 3, y + 3, 6, 1, C_INK); }
+  if (label && label[0]) {
+    int w = Gfx::textWidth(label, F_SMALL);
+    int lx = x + 10;
+    if (lx + w + 6 > GFX_W) lx = x - 12 - w;                // przy prawej krawędzi podpis idzie na lewo
+    g.fillRound(lx - 2, y - 7, w + 6, 15, 3, C_BAR);
+    g.text(lx + 1, y - 7, label, F_SMALL, C_TXT);
+  }
+}
+
+void uiMapLabels(Gfx& g, const char* top_right, const char* bottom_left, const char* note) {
+  if (top_right && top_right[0]) {
+    int w = Gfx::textWidth(top_right, F_SMALL);
+    g.fillRound(GFX_W - w - 14, UI_MAP_TOP + 4, w + 10, 16, 4, C_BAR);
+    g.text(GFX_W - w - 9, UI_MAP_TOP + 5, top_right, F_SMALL, C_TXT);
+  }
+  if (bottom_left && bottom_left[0]) {
+    int w = Gfx::textWidth(bottom_left, F_SMALL);
+    g.fillRound(4, UI_MAP_TOP + UI_MAP_H - 20, w + 10, 16, 4, C_BAR);
+    g.text(9, UI_MAP_TOP + UI_MAP_H - 19, bottom_left, F_SMALL, C_DIM);
+  }
+  if (note && note[0]) {
+    GfxLine ln[3];
+    int n = Gfx::wrap(note, F_SMALL, GFX_W - 60, ln, 3);
+    g.fillRound(20, UI_MAP_TOP + 8, GFX_W - 40, n * 14 + 8, 5, C_BAR);
+    for (int i = 0; i < n; i++) g.textN(28, UI_MAP_TOP + 12 + i * 14, note + ln[i].start, ln[i].len, F_SMALL, C_TXT);
+  }
+}
+
+void uiRenderOverlay(Gfx& g, const UiView& v) {
+  drawStatus(g, v);
+  drawBottom(g, v);
+  if (v.popup) drawPopup(g, v);
+}
