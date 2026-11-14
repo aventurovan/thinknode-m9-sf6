@@ -2035,7 +2035,7 @@ bool UITask::buildRoute(int idx) {
     _route_star = true;
     if (me) add(mlat, mlon, "ja", UIM_ME);
     for (int i = 0; i < m.rep_n && i < 6; i++) {
-      if (findRepeater(m.rep_id[i], m.rep_hs, mlat, mlon, me, c)) add(c.gps_lat / 1e6, c.gps_lon / 1e6, c.name, UIM_RPT);
+      if (findRepeater(m.rep_id[i], m.rep_hs, mlat, mlon, me, c)) { snprintf(lab, sizeof(lab), "%02X%02X", c.id.pub_key[0], c.id.pub_key[1]); add(c.gps_lat / 1e6, c.gps_lon / 1e6, lab, UIM_RPT); }
       else _route_unknown++;
     }
     snprintf(_route_title, sizeof(_route_title), "powtórzyli: %d", m.rep_n);
@@ -2045,7 +2045,8 @@ bool UITask::buildRoute(int idx) {
     int total = the_mesh.getTotalContactSlots();
     for (int i = MAX_ANON_CONTACTS; i < total && who[0]; i++) {
       if (the_mesh.getContactByIdx(i, c) && c.type != ADV_TYPE_REPEATER && strcmp(c.name, who) == 0 && (c.gps_lat || c.gps_lon)) {
-        add(c.gps_lat / 1e6, c.gps_lon / 1e6, c.name, UIM_PERSON); sender = true; break;
+        snprintf(lab, sizeof(lab), "%.10s", c.name);
+        add(c.gps_lat / 1e6, c.gps_lon / 1e6, lab, UIM_PERSON); sender = true; break;
       }
     }
     if (!sender) _route_unknown++;
@@ -2054,7 +2055,7 @@ bool UITask::buildRoute(int idx) {
     bool prev = sender;
     for (int h = 0; h < cnt; h++) {
       if (findRepeater(&m.path[h * hs], hs, plat, plon, prev, c)) {
-        snprintf(lab, sizeof(lab), "%d. %s", h + 1, c.name);
+        snprintf(lab, sizeof(lab), "%d %02X%02X", h + 1, c.id.pub_key[0], c.id.pub_key[1]);
         add(c.gps_lat / 1e6, c.gps_lon / 1e6, lab, UIM_RPT);
         plat = c.gps_lat / 1e6; plon = c.gps_lon / 1e6; prev = true;
       } else _route_unknown++;
@@ -2089,7 +2090,7 @@ void UITask::fitRoute() {
     double x0, y0, x1, y1;
     mcmLatLonToPixel(la1, lo0, z, &x0, &y0);
     mcmLatLonToPixel(la0, lo1, z, &x1, &y1);
-    if (x1 - x0 <= GFX_W - 60 && y1 - y0 <= UI_MAP_H - 50) { _map_zoom = z; break; }
+    if (x1 - x0 <= GFX_W - 110 && y1 - y0 <= UI_MAP_H - 70) { _map_zoom = z; break; }
   }
 }
 
@@ -2176,7 +2177,10 @@ void UITask::drawMap() {
       mcmLatLonToPixel(c.gps_lat / 1e6, c.gps_lon / 1e6, _map_zoom, &qx, &qy);
       int x = mx + (int)(qx - cx), y = my + (int)(qy - cy);
       if (x < 8 || x > GFX_W - 8 || y < UI_MAP_TOP + 10 || y > UI_MAP_TOP + UI_MAP_H - 10) continue;
-      uiMapMarker(g, x, y, c.type == ADV_TYPE_REPEATER ? (fav ? UIM_RPT_FAV : UIM_RPT) : UIM_PERSON, names || fav ? c.name : "");
+      char lab[16];
+      if (c.type == ADV_TYPE_REPEATER) snprintf(lab, sizeof(lab), "%02X%02X", c.id.pub_key[0], c.id.pub_key[1]);
+      else snprintf(lab, sizeof(lab), "%.10s", c.name);
+      uiMapMarker(g, x, y, c.type == ADV_TYPE_REPEATER ? (fav ? UIM_RPT_FAV : UIM_RPT) : UIM_PERSON, names || fav ? lab : "");
       drawn++;
     }
   }
@@ -2196,8 +2200,9 @@ void UITask::drawMap() {
   else if (_map.numPacks() == 0) strcpy(note, "Na karcie nie ma jeszcze mapy. Klawisz Menu: pobierz z internetu albo wgraj z telefonu.");
   else if (tiles == 0) strcpy(note, "Dla tego miejsca i zoomu nie ma mapy na karcie.");
   if (_route_n) {
-    snprintf(bl, sizeof(bl), "trasa: %s", _route_title);
-    if (_route_unknown && !note[0]) snprintf(note, sizeof(note), "Punktów bez pozycji na mapie: %d (nie ma ich w kontaktach albo nie podają pozycji).", _route_unknown);
+    if (_route_unknown) snprintf(bl, sizeof(bl), "trasa: %s · bez pozycji: %d", _route_title, _route_unknown);
+    else snprintf(bl, sizeof(bl), "trasa: %s", _route_title);
+    if (tiles > 0 || _map.numPacks() > 0) note[0] = 0;    // na trasie okienko u góry zasłaniałoby punkty na północy
   }
   uiMapLabels(g, tr, bl, note);
   uiRenderOverlay(g, v);
