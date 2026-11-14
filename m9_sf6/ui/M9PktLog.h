@@ -4,6 +4,7 @@
 
 #define M9LOG_MAX   200
 #define M9LOG_RAW   255
+#define M9LOG_MAX_PAYLOAD 184    // jak MAX_PACKET_PAYLOAD w MeshCore: dłuższych pakietów sieć nie przyjmuje
 
 struct M9Pkt {
   uint32_t seq;          // kolejny numer (rośnie)

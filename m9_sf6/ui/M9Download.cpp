@@ -130,6 +130,7 @@ static bool openUrl(const char* url, uint32_t from, uint32_t to) {
       String loc = http->getLocation();
       if (loc.length() == 0) loc = http->header("Location");
       if (loc.length() == 0) return false;
+      if (tls && !loc.startsWith("https://")) { last_code = -102; noteFailure(u, hop, -102); return false; }   // z szyfrowanego połączenia nie schodzimy na nieszyfrowane
       u = loc;
       continue;
     }
@@ -156,7 +157,7 @@ static void netTask(void* arg) {
       ota_err[0] = 0;
       if (!Update.begin(ota_size, U_FLASH)) snprintf(ota_err, sizeof(ota_err), "nie mogę zacząć zapisu (%s)", Update.errorString());
       else {
-        if (ota_md5[0]) Update.setMD5(ota_md5);
+        Update.setMD5(ota_md5);
         WiFiClient* s = http->getStreamPtr();
         static uint8_t ob[4096];
         unsigned long t_last = millis();
@@ -258,6 +259,7 @@ void m9dlStart(const char* ssid, const char* pass, const char* base_url, int max
   mbedtls_platform_set_calloc_free(tlsCalloc, tlsFree);
   for (int i = 0; i < 60 && task_alive; i++) delay(50); // poprzednie zadanie kończy połączenie
   if (task_alive) { fail("poprzednie połączenie jeszcze się zamyka"); return; }
+  if (base_url == NULL || base_url[0] == 0) { fail("brak adresu serwera"); return; }
   snprintf(base, sizeof(base), "%s%s", base_url, base_url[strlen(base_url) - 1] == '/' ? "" : "/");
   strncpy(w_ssid, ssid, sizeof(w_ssid) - 1); w_ssid[sizeof(w_ssid) - 1] = 0;
   strncpy(w_pass, pass, sizeof(w_pass) - 1); w_pass[sizeof(w_pass) - 1] = 0;
@@ -414,8 +416,12 @@ void m9dlLoop() {
       net = N_IDLE;
       {
         char fn[72] = "", md[40] = "", ver[16] = ""; unsigned long sz = 0;
-        if (sscanf(list_body, "%15s %71s %lu %39s", ver, fn, &sz, md) < 3 || sz < 100000) { fail("zły plik wersja.txt"); break; }
-        strcpy(ota_ver, ver); strcpy(ota_file, fn); strcpy(ota_md5, md); ota_size = sz;
+        // wymagane wszystkie cztery pola; bez sumy MD5 (32 znaki szesnastkowe) nie instalujemy
+        bool okf = sscanf(list_body, "%15s %71s %lu %39s", ver, fn, &sz, md) == 4 && sz >= 100000 && sz < 16UL * 1024 * 1024 && strlen(md) == 32;
+        for (const char* c = md; okf && *c; c++) if (!isxdigit((unsigned char)*c)) okf = false;
+        for (const char* c = fn; okf && *c; c++) if (!(isalnum((unsigned char)*c) || *c == '.' || *c == '_' || *c == '-')) okf = false;   // sama nazwa pliku, bez ścieżki
+        if (!okf) { fail("zły plik wersja.txt"); break; }
+        snprintf(ota_ver, sizeof(ota_ver), "%s", ver); snprintf(ota_file, sizeof(ota_file), "%s", fn); snprintf(ota_md5, sizeof(ota_md5), "%s", md); ota_size = sz;
       }
       st = ST_OTA_READY;
       snprintf(status, sizeof(status), "%s", verNum(ota_ver) > verNum(ota_cur) ? "jest nowsza wersja" : "masz aktualną wersję");

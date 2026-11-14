@@ -506,6 +506,7 @@ void MyMesh::queueMessage(const ContactInfo &from, uint8_t txt_type, mesh::Packe
   bool should_display = txt_type == TXT_TYPE_PLAIN || txt_type == TXT_TYPE_SIGNED_PLAIN;
   if (should_display && _ui) {
     uiNotePath(pkt);
+    ui_rx_chan = false;                               // wiadomość prywatna (ekran nie zgaduje tego po nazwie)
     _ui->newMsg(path_len, from.name, text, offline_queue_len);
     if (!_serial->isConnected()) {
       _ui->notify(UIEventType::contactMessage);
@@ -629,6 +630,7 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
     channel_name = channel_details.name;
   }
   uiNotePath(pkt);
+  ui_rx_chan = true;                                  // wiadomość z kanału
   if (_ui) _ui->newMsg(path_len, channel_name, text, offline_queue_len);
 #endif
 }
@@ -2588,7 +2590,7 @@ bool MyMesh::hasPendingWork() const {
 // log pakietów: kto napisał na kanale (odszyfrowanie kluczem kanału o pasującym hashu)
 bool MyMesh::uiDecodeGroup(const uint8_t* payload, int len, char* chan, int chan_n, char* who, int who_n) {
   chan[0] = who[0] = 0;
-  if (len < 4) return false;
+  if (len < 4 || len > MAX_PACKET_PAYLOAD) return false;       // dłuższy pakiet przepełniłby bufor odszyfrowania
   ChannelDetails cd;
   for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
     if (!getChannel(i, cd) || cd.name[0] == 0 || cd.channel.hash[0] != payload[0]) continue;

@@ -6,7 +6,7 @@ i oglądasz mapę bez telefonu. Przez Bluetooth łączy się z aplikacjami **Mes
 
 Domyślny preset radia: **SF6 — 869,618 MHz · BW 62,5 kHz · SF6 · CR 4/8**. Do wyboru jest też **EU/UK Narrow (SF8)**.
 
-Aktualna wersja: **0.19.1** (numer jest też na ekranie startowym i w Ustawieniach).
+Aktualna wersja: **0.19.2** (numer jest też na ekranie startowym i w Ustawieniach).
 
 ---
 

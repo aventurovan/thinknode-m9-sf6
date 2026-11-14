@@ -52,7 +52,8 @@ bool m9logParse(const M9Pkt& p, M9PktInfo& o) {
   if (i + bl > p.len) return false;
   o.path = &p.raw[i]; i += bl;
   o.payload = &p.raw[i]; o.payload_len = p.len - i;
-  return o.payload_len >= 0;
+  // pakiet z dłuższą treścią niż dopuszcza MeshCore jest błędny albo spreparowany — nie analizujemy go dalej
+  return o.payload_len > 0 && o.payload_len <= M9LOG_MAX_PAYLOAD;
 }
 
 const char* m9logTypeShort(uint8_t t) {
@@ -67,9 +68,11 @@ const char* m9logTypeLong(uint8_t t) {
 }
 
 void m9logPath(const M9PktInfo& in, char* d, int n, int maxIds) {
+  if (n <= 0) return;
   d[0] = 0;
   int len = 0;
   for (int k = 0; k < in.hops; k++) {
+    if (n - len < 16) break;                          // zawsze zostaje miejsce na „…→” i jeden identyfikator
     if (k == maxIds - 1 && in.hops > maxIds) {        // za długa: pierwsze, „…”, ostatnia
       len += snprintf(d + len, n - len, "…→");
       k = in.hops - 1;
@@ -80,6 +83,5 @@ void m9logPath(const M9PktInfo& in, char* d, int n, int maxIds) {
     else if (in.hash_size == 2) snprintf(t, sizeof(t), "%02X%02X", id[0], id[1]);
     else snprintf(t, sizeof(t), "%02X%02X%02X", id[0], id[1], id[2]);
     len += snprintf(d + len, n - len, "%s%s", t, k < in.hops - 1 ? "→" : "");
-    if (len >= n - 1) break;
   }
 }

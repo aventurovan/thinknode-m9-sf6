@@ -49,6 +49,7 @@ static void type(const char* s) { for (; *s; s++) { sim_keys.push_back((uint8_t)
 static void rx(const char* thread, const char* text, int hops) {
   the_mesh.ui_rx_hops = hops; the_mesh.ui_rx_hash_size = 2; the_mesh.ui_rx_path_bytes = hops * 2; the_mesh.ui_rx_direct = false;
   uint8_t p[6] = { 0xa3, 0xf2, 0x77, 0xc1, 0x55, 0x66 }; memcpy(the_mesh.ui_rx_path, p, 6);
+  the_mesh.ui_rx_chan = the_mesh.uiChannelIndex(thread) >= 0;
   ui.newMsg(0, thread, text, 0);
 }
 
@@ -88,10 +89,29 @@ int main(int argc, char** argv) {
       if (i % 37 == 0) rx(i % 2 ? "Public" : "Marek SP9", i % 2 ? "Ania: test wiadomości z polskimi znakami żółć" : "prywatna wiadomość testowa", i % 5);
       if (i % 501 == 0) the_mesh.ui_sent_changed = true;
       if (i % 23 == 0) pkt(i / 23, i);
+      if (i % 7 == 0) { uint8_t rb[255]; int rl = 1 + rand() % 255; for (int q = 0; q < rl; q++) rb[q] = (uint8_t)rand(); if (i % 21 == 0) rb[0] = (uint8_t)((4 << 2) | 1); if (i % 28 == 0) { rb[0] = (uint8_t)((5 << 2) | 1); rb[1] = 0; rb[2] = 0; } m9logAdd(1794580320UL, sim_millis, 3, -90, rb, rl); }   // losowe (także spreparowane) pakiety w logu
       sim_millis += 40; ui.loop();
       if (i % 997 == 0) { sim_millis += 40000; ui.loop(); }
     }
     printf("fuzz ok, kontaktow %d, kanalow %d\n", (int)the_mesh.cts.size(), (int)the_mesh.chans.size());
+    return 0;
+  }
+  if (argc > 1 && strcmp(argv[1], "logfuzz") == 0) {   // spreparowane pakiety: każdy oglądamy na liście i w szczegółach
+    mkdir("/tmp/symfs", 0777); remove("/tmp/symfs/m9ui.cfg");
+    ui.begin(&disp, &sens, &the_mesh.prefs);
+    run(3000);
+    srand(argc > 2 ? atoi(argv[2]) : 1);
+    for (int round = 0; round < 40; round++) {
+      for (int k = 0; k < 200; k++) {
+        uint8_t rb[255]; int rl = 1 + rand() % 255; for (int q = 0; q < rl; q++) rb[q] = (uint8_t)rand();
+        int kind = rand() % 6;                           // część z poprawnym nagłówkiem, żeby dojść do głębszego parsowania
+        if (kind < 5) { static const uint8_t T[5] = { 4, 5, 2, 8, 6 }; rb[0] = (uint8_t)((T[kind] << 2) | 1 + rand() % 2); if (rl > 1) rb[1] = (uint8_t)((rand() % 3) << 6 | (rand() % 4)); if (kind == 1 && rl > 12) rb[2 + ((rb[1] >> 6) + 1) * (rb[1] & 63)] = 0; }
+        m9logAdd(1794580320UL, sim_millis, 3, -90, rb, rl);
+      }
+      keys({ M9K_HOME, M9K_F3, M9K_DOWN, M9K_ENTER });
+      for (int f = 0; f < 4; f++) { keys({ M9K_ENTER }); for (int k = 0; k < 205; k++) keys({ M9K_RIGHT }); keys({ M9K_BACK, M9K_RIGHT }); }
+    }
+    printf("logfuzz ok, pakietow %lu\n", (unsigned long)m9logTotal());
     return 0;
   }
   mkdir("/tmp/symfs", 0777); remove("/tmp/symfs/m9ui.cfg"); remove("/tmp/symfs/m9ui.msg"); remove("/tmp/symfs/m9ui.pw"); remove("/tmp/symfs/m9ui.mut");

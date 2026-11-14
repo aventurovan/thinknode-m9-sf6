@@ -223,6 +223,7 @@ void UITask::loadAll() {
   if (f) {
     uint8_t n = 0;
     if (f.read(&n, 1) == 1 && n <= UI_PW_MAX && f.read((uint8_t*)_pw, sizeof(Pw) * n) == sizeof(Pw) * n) _pw_n = n;
+    for (int i = 0; i < _pw_n; i++) _pw[i].pw[sizeof(_pw[0].pw) - 1] = 0;
     f.close();
   }
 
@@ -232,7 +233,16 @@ void UITask::loadAll() {
     int n = readMsgFile(MSG_FILES[k]);
     if (n >= 0) { _msg_n = n; _msg_src = k; break; }
   }
-  for (int i = 0; i < _msg_n; i++) _msgs[i].sent_id = 0;       // numery wysyłek nie przeżywają restartu
+  for (int i = 0; i < _msg_n; i++) {                           // plik mógł zostać uszkodzony: pola w bezpiecznych granicach
+    UiMsg& m = _msgs[i];
+    m.sent_id = 0;                                              // numery wysyłek nie przeżywają restartu
+    m.thread[sizeof(m.thread) - 1] = 0; m.who[sizeof(m.who) - 1] = 0; m.text[sizeof(m.text) - 1] = 0;
+    if (m.hash_size > 3) m.hash_size = 0;
+    if (m.path_bytes > sizeof(m.path)) m.path_bytes = 0;
+    if (m.rep_n > 6) m.rep_n = 0;
+    if (m.rep_hs > 3) m.rep_hs = 0;
+    m.chan = m.chan ? 1 : 0; m.out = m.out ? 1 : 0;
+  }
   _msg_loaded = _msg_n;
 
   f = SPIFFS.open(FILE_WIFI, "r");
@@ -419,12 +429,9 @@ UiMsg* UITask::addMsg(const char* thread, const char* who, const char* text, boo
 
 void UITask::newMsg(uint8_t path_len, const char* from_name, const char* text, int msgcount) {
   _msgcount = msgcount;
-  bool chan = false;
-  ChannelDetails cd;
-  for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
-    if (!the_mesh.getChannel(i, cd)) break;
-    if (cd.name[0] && strcmp(cd.name, from_name) == 0) { chan = true; break; }
-  }
+  // Kanał czy kontakt mówi MyMesh. Nie zgadujemy po nazwie: kontakt nazwany tak jak kanał
+  // mógłby wtedy podrzucać wiadomości do rozmowy kanału (także prywatnego).
+  bool chan = the_mesh.ui_rx_chan;
   char who[24]; who[0] = 0;
   const char* body = text;
   if (chan) {                                       // na kanale tekst ma postać „Nadawca: treść”
@@ -575,7 +582,7 @@ void UITask::sortList(bool by_dist) {
   double lat = 0, lon = 0; int sats;
   bool fix = by_dist && gpsFix(&lat, &lon, &sats);
   for (int i = 0; i < _list_n; i++) {
-    the_mesh.getContactByIdx(_list[i], c);
+    if (!the_mesh.getContactByIdx(_list[i], c)) { keys[i] = 0; continue; }
     uint32_t k;
     if (fix) {                                        // bliższe wyżej; bez pozycji na końcu
       if (c.gps_lat || c.gps_lon) { double d = distKm(lat, lon, c.gps_lat / 1e6, c.gps_lon / 1e6); k = 0x7FFFFFFF - (uint32_t)(d * 100 > 2e9 ? 2e9 : d * 100); }
@@ -2320,7 +2327,13 @@ void UITask::key(uint8_t k) {
       }
       return;
     }
-    if (k == M9K_F3 && _chas_pos) { doAct(A_SHOWMAP); return; }
+    if (k == M9K_F3 && _chas_pos) {
+      _map_lat = _clat; _map_lon = _clon; _map_follow = false;
+      if (_map_zoom < 12) _map_zoom = 13;
+      while (!_map.hasZoom(_map_zoom) && _map_zoom > _map.minZoom()) _map_zoom--;
+      openMap();
+      return;
+    }
   }
   if (s == S_KV) {
     int16_t& top = _nav[_depth - 1].top;
@@ -2778,7 +2791,10 @@ void UITask::loop() {
   // zegar z serwera mapy (nagłówek Date): poprawka, gdy różni się o więcej niż 3 s
   if (uint32_t st = m9dlServerTime()) {
     uint32_t mine = the_mesh.getRTCClock()->getCurrentTime();
-    if (st > mine + 3 || mine > st + 3) the_mesh.getRTCClock()->setCurrentTime(st);
+    // Połączenie nie potwierdza tożsamości serwera, więc poprawiamy najwyżej o 6 godzin;
+    // większą różnicę przyjmujemy tylko wtedy, gdy zegar urządzenia w ogóle nie jest ustawiony (przed 2025 r.).
+    uint32_t diff = st > mine ? st - mine : mine - st;
+    if (diff > 3 && (diff <= 6 * 3600UL || mine < 1735689600UL)) the_mesh.getRTCClock()->setCurrentTime(st);
   }
   if (m9otaState() == 5 && !_ota_reboot_at) { _ota_reboot_at = now + 3000; wake(); popup("Aktualizacja zainstalowana", "restart za 3 s", false, 5000); }
   if (_ota_reboot_at && (long)(now - _ota_reboot_at) >= 0) { _ota_reboot_at = 0; saveMsgs(); the_mesh.uiReboot(); }
@@ -3079,6 +3095,24 @@ void UITask::keySpec(uint8_t k) {
 
 // ======================= log pakietów =======================
 
+// Dane advertu z pakietu (klucz 32 B, czas 4 B, podpis 64 B, potem: flagi, pozycja, nazwa). Każdy odczyt w granicach pakietu.
+static bool advParse(const M9PktInfo& in, char* name, int name_n, int32_t* lat, int32_t* lon, uint8_t* kind) {
+  name[0] = 0; *lat = *lon = 0; *kind = 0;
+  int i = 100, n = in.payload_len;
+  if (n <= i) return false;
+  uint8_t fl = in.payload[i++];
+  *kind = fl & 15;
+  if (fl & 0x10) { if (i + 8 > n) return false; memcpy(lat, &in.payload[i], 4); memcpy(lon, &in.payload[i + 4], 4); i += 8; }
+  if (fl & 0x20) i += 2;
+  if (fl & 0x40) i += 2;
+  if ((fl & 0x80) && i < n) {
+    int nl = n - i; if (nl > name_n - 1) nl = name_n - 1;
+    memcpy(name, &in.payload[i], nl); name[nl] = 0;
+    for (char* c = name; *c; c++) if ((uint8_t)*c < 32) *c = ' ';       // znaki sterujące z sieci nie trafiają na ekran
+  }
+  return true;
+}
+
 static bool logMatch(uint8_t filter, uint8_t type) {
   switch (filter) {
     case 1: return type == 4;
@@ -3140,12 +3174,9 @@ void UITask::fillLog() {
     if (direct) strcpy(w.hop, "D"); else snprintf(w.hop, sizeof(w.hop), "%dh", in.hops);
     char path[40]; m9logPath(in, path, sizeof(path), 3);
     char who[40]; who[0] = 0;
-    if (in.type == 4 && in.payload_len > 101) {                    // advert: nazwa z danych aplikacji
-      int i = 100; uint8_t fl = in.payload[i++];
-      if (fl & 0x10) i += 8; if (fl & 0x20) i += 2; if (fl & 0x40) i += 2;
-      int nl = in.payload_len - i; if (nl > 30) nl = 30;
-      if ((fl & 0x80) && nl > 0) { memcpy(who, &in.payload[i], nl); who[nl] = 0; }
-      else snprintf(who, sizeof(who), "%02X%02X", in.payload[0], in.payload[1]);
+    int32_t alat, alon; uint8_t akind;
+    if (in.type == 4 && advParse(in, who, 31, &alat, &alon, &akind)) {     // advert: nazwa z danych aplikacji
+      if (!who[0]) snprintf(who, sizeof(who), "%02X%02X", in.payload[0], in.payload[1]);
     } else if ((in.type == 5 || in.type == 6) && in.payload_len > 3) {
       char ch[32], nm[24];
       if (the_mesh.uiDecodeGroup(in.payload, in.payload_len, ch, sizeof(ch), nm, sizeof(nm))) snprintf(who, sizeof(who), nm[0] ? "%s · %s" : "%s", ch, nm);
@@ -3193,15 +3224,10 @@ void UITask::detailPkt(uint32_t seq) {
   if (!m9logParse(*p, in)) { kvAdd("Typ", "nieczytelny"); snprintf(t, sizeof(t), "%d B", p->len); kvAdd("Długość", t); }
   else {
     kvAdd("Typ", m9logTypeLong(in.type));
-    if (in.type == 4 && in.payload_len > 101) {
-      int i = 100; uint8_t fl = in.payload[i++];
+    char nm[32]; int32_t lat, lon; uint8_t akind;
+    if (in.type == 4 && advParse(in, nm, sizeof(nm), &lat, &lon, &akind)) {
       static const char* const KIND[5] = { "?", "osoba", "repeater", "pokój", "czujnik" };
-      int32_t lat = 0, lon = 0;
-      if (fl & 0x10) { memcpy(&lat, &in.payload[i], 4); memcpy(&lon, &in.payload[i + 4], 4); i += 8; }
-      if (fl & 0x20) i += 2; if (fl & 0x40) i += 2;
-      char nm[32] = ""; int nl = in.payload_len - i; if (nl > 30) nl = 30;
-      if ((fl & 0x80) && nl > 0) { memcpy(nm, &in.payload[i], nl); nm[nl] = 0; }
-      snprintf(t, sizeof(t), "%s (%s)", nm[0] ? nm : "bez nazwy", KIND[(fl & 15) < 5 ? (fl & 15) : 0]); kvAdd("Nadawca", t);
+      snprintf(t, sizeof(t), "%s (%s)", nm[0] ? nm : "bez nazwy", KIND[akind < 5 ? akind : 0]); kvAdd("Nadawca", t);
       snprintf(t, sizeof(t), "%02x%02x %02x%02x …", in.payload[0], in.payload[1], in.payload[2], in.payload[3]); kvAdd("Klucz", t);
       if (lat || lon) {
         _clat = lat / 1e6; _clon = lon / 1e6; _chas_pos = true;
