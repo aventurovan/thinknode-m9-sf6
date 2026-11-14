@@ -1,80 +1,193 @@
-# MC SF6 — ThinkNode M9
+# MeshSpeed — firmware dla ThinkNode M9
 
-Firmware **companion MeshCore** dla **Elecrow ThinkNode M9** (ESP32-S3, LR1110, ekran 320×240, klawiatura QWERTY)
-z polskim interfejsem „MC SF6” sieci **MeshCore Południe**.
+**MeshSpeed** to firmware **companion MeshCore** dla **Elecrow ThinkNode M9** (ESP32-S3, radio LR1110, kolorowy ekran 320×240, klawiatura QWERTY)
+z polskim interfejsem, przygotowany dla sieci **MeshCore Południe**. Urządzenie działa samodzielnie: piszesz, czytasz, zarządzasz repeaterami
+i oglądasz mapę bez telefonu. Przez Bluetooth łączy się z aplikacjami **MeshSpeed** i **MeshCore**.
 
-Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
+Domyślny preset radia: **SF6 — 869,618 MHz · BW 62,5 kHz · SF6 · CR 4/8**. Do wyboru jest też **EU/UK Narrow (SF8)**.
 
-## Stan prac
+Aktualna wersja: **0.19.1** (numer jest też na ekranie startowym i w Ustawieniach).
 
-**Wersja 0.18.2.** Companion Bluetooth dla aplikacji MeshCore i MeshSpeed (PIN losowany przy każdym uruchomieniu i pokazywany na ekranie przy parowaniu; stały można ustawić w Ustawieniach) i własny kolorowy interfejs po polsku:
+---
 
-- **Start** — zegar i sześć kafelków (Wiadomości, Kontakty, Repeatery, Pozycja, Radio, Urządzenie); po kafelkach chodzi się strzałkami, Enter wchodzi.
-- **Dolny pasek** — ikony: Start, Wiadomości, Kontakty, Repeatery, Ustawienia.
-- **Wiadomości** — kanały i rozmowy prywatne (nieprzeczytane na górze), dodawanie i usuwanie kanałów z hasztagiem,
-  rozmowa z dymkami, szybkie odpowiedzi, pozycja. Pod wysłaną wiadomością licznik powtórzeń (kanał) albo „dostarczono” (prywatna),
-  pod odebraną liczba skoków i trasa z identyfikatorami repeaterów. Menu wiadomości: szczegóły (trasa z nazwami repeaterów, SNR, RSSI,
-  kto powtórzył), odpowiedz, wyślij ponownie, kopiuj, usuń.
-- **Kontakty** — wiersz filtrów, po którym chodzi się strzałkami (wszyscy / osoby / RPT / pokoje / czujniki / ulubione / słyszane), szukanie po nazwie,
-  menu kontaktu: napisz, ulubiony, szczegóły, zarządzaj, usuń.
-- **Repeatery** — lista wg ostatniego kontaktu albo odległości, „Co tu słychać?” (ping do sąsiadów z SNR w obie strony; wykryty repeater można otworzyć i dodać do kontaktów),
-  zarządzanie: logowanie (hasła zapamiętywane), stan, sąsiedzi, akcje (advert, zegar, preset SF6, restart), konsola.
-- **Ustawienia** — siatka ośmiu działów: Radio, Bluetooth, Pozycja i prywatność, Advert, Kontakty, Wiadomości, Ekran i dźwięk, System.
-- **Zapis** — wiadomości (do 300), ustawienia ekranu, wyciszenia i hasła repeaterów zostają po restarcie. Kontaktów do 500.
-- **Ustawienia** — każdą wartość wybiera się z listy (Enter otwiera listę); presety radia są pod pozycją „Preset”.
-- **Dolny pasek** — ▼ z ostatniego wiersza lub dolnego rzędu kafelków schodzi na pasek, ◄ ► wybiera ikonę, Enter wchodzi, ▲ wraca.
-- **Blokada klawiszy** (Ustawienia › Ekran i dźwięk) — włącza się z wygaszeniem ekranu; odblokowanie: Wstecz, potem Enter.
-- **Wyciszanie rozmów** — Pinezka na liście Wiadomości otwiera opcje rozmowy (wycisz, oznacz jako przeczytane, usuń).
-- **Bluetooth** — w ustawieniach liczniki połączeń, parowań i ramek do diagnozy (łatka `tools/patch_ble.py`).
+## Szybki start
 
-### Klawisze
+### 1. Pobierz plik
+
+Wejdź w zakładkę **Releases** i otwórz wydanie **„Najnowszy build”**:
+
+| Plik | Do czego |
+|---|---|
+| `MC-SF6-ThinkNode-M9-<wersja>-pelny.bin` | pierwsze wgranie kablem USB (pełny obraz) |
+| `MC-SF6-ThinkNode-M9-<wersja>-aktualizacja.bin` | sama aplikacja (aktualizacje kablem) |
+| `wersja.txt` | z tego pliku urządzenie sprawdza aktualizacje przez WiFi |
+| `mapa-testowa.zip` | mała mapa testowa (siatka i miasta) |
+
+### 2. Pierwsze wgranie (kabel USB)
+
+1. Podłącz M9 kablem USB do komputera.
+2. Otwórz flasher ESP32 w przeglądarce (Chrome lub Edge), np. <https://espressif.github.io/esptool-js/>, i połącz się z urządzeniem.
+3. Wgraj plik **`…-pelny.bin` od adresu `0x0`**.
+4. **Nie** używaj „Erase all / Erase flash” przy aktualizacji, bo skasujesz wiadomości, kontakty i ustawienia. Kasowanie ma sens tylko przy pierwszym wgraniu na urządzenie z innym firmware.
+
+### 3. Pierwsze uruchomienie
+
+- Ustaw nazwę urządzenia: **Ustawienia › System › Nazwa urządzenia**.
+- Ustaw datę i godzinę: **Ustawienia › System › Data i godzina**. Zegar ustawi się też sam z GPS, z aplikacji albo przy aktualizacji przez WiFi.
+- Sprawdź preset radia: **Ustawienia › Radio › Preset**.
+- Wyślij advert: **Ustawienia › Advert**.
+
+### 4. Połączenie z telefonem (Bluetooth)
+
+1. W aplikacji **MeshSpeed** (albo MeshCore) wybierz urządzenie z listy Bluetooth.
+2. Na ekranie M9 pojawi się **PIN** (losowy, inny przy każdym uruchomieniu). Wpisz go w telefonie.
+3. Gdy parowanie nie działa: **Ustawienia › Bluetooth › Zapomnij wszystkie telefony**, a w telefonie usuń M9 z listy urządzeń Bluetooth i sparuj od nowa.
+
+Stały PIN można ustawić w **Ustawieniach › Bluetooth**.
+
+### 5. Kolejne aktualizacje (przez WiFi, bez komputera)
+
+**Ustawienia › System › Aktualizacja przez WiFi**:
+
+1. Wpisz sieć WiFi i hasło (domową albo hotspot z telefonu).
+2. Urządzenie sprawdzi wersję w wydaniu „Najnowszy build”. Gdy jest nowsza, pobierze ją, sprawdzi sumę MD5 i samo się zrestartuje.
+
+Na czas WiFi Bluetooth jest wyłączony (oba naraz nie mieszczą się w pamięci). Wraca po restarcie.
+
+### 6. Mapa
+
+Mapa całej Polski (zoom 6–13, ok. 330 MB) leży na wbudowanej karcie SD. Pobiera ją samo urządzenie:
+klawisz **Mapa**, potem **Menu**, potem **„Pobierz z internetu”**. Szczegóły i wgrywanie z telefonu opisuje [`mapa/README.md`](mapa/README.md).
+
+---
+
+## Co potrafi
+
+### Ekran Start
+
+Duży zegar i sześć kafelków. Po kafelkach chodzi się strzałkami, a Enter otwiera wybrany:
+
+| Kafelek | Pokazuje | Enter |
+|---|---|---|
+| Wiadomości | nowe wiadomości, ostatnia rozmowa | lista rozmów |
+| Kontakty | liczba kontaktów, ilu słychać | lista kontaktów |
+| Radio | preset (SF6 / SF8) i częstotliwość | ustawienia radia |
+| Sieć | Bluetooth (nazwa połączonej aplikacji) i WiFi (dBm) | ustawienia Bluetooth |
+| Widmo | szum na naszym kanale z wykresem, zajętość kanału | ekran Widmo |
+| Bateria | procent, wykres napięcia z ostatnich godzin, czas pracy | szczegóły baterii |
+
+Menu (mała wiadomość pod Home) na ekranie Start otwiera **Widmo** i **Log pakietów**.
+
+### Wiadomości
+
+- **Lista:** kanały i rozmowy prywatne, nieprzeczytane są na górze. Menu na liście: otwórz, info o kanale, wycisz, oznacz jako przeczytane, usuń, **dodaj kanał** (z hasztagiem, np. `#beskidy`).
+- **Rozmowa:**
+  - dymki, płynne przewijanie ▲▼ z suwakiem; po wejściu widok staje na pierwszej nieprzeczytanej;
+  - pod wysłaną wiadomością na kanale licznik powtórzeń i identyfikator pierwszego repeatera, przy prywatnej „Doręczono”;
+  - pod odebraną liczba hopów i trasa z identyfikatorami repeaterów (4 znaki).
+- **Opcje wiadomości** (Menu albo ►): Odpowiedz @, Odpowiedz ack (z liczbą hopów), Szczegóły (trasa, SNR, RSSI, bajty), Trasa na mapie, Wyślij ponownie, Kopiuj, Usuń.
+- **Info o kanale:** rodzaj kanału, hash, liczba wiadomości, średnia liczba hopów i najaktywniejsi z 24 h. Enter pokazuje **kod QR**, którym kolega doda kanał w aplikacji.
+- **Szybkie odpowiedzi:** Enter na pustym polu, m.in. „Test” i pozycja.
+- **Wyciszanie:** pojedyncze kanały i rozmowy.
+- **Pamięć:** do 300 wiadomości, zostają po restarcie.
+
+### Kontakty i repeatery
+
+- **Kontakty** (do 500):
+  - filtry w wierszu: wszyscy, osoby, RPT, pokoje, ulubione, słyszane; szukanie przez pisanie liter;
+  - menu kontaktu: napisz, ulubiony, szczegóły, pokaż na mapie, zarządzaj, usuń;
+  - czujniki nie są dodawane.
+- **Repeatery** (klawisz Pinezka): lista według ostatniego kontaktu albo odległości.
+  - **„Co tu słychać?”** wysyła ping do sąsiadów z SNR w obie strony. Wykryty repeater można otworzyć i dodać do kontaktów.
+  - **Zarządzanie:** logowanie zawsze przez flood z resetem ścieżki, hasła są zapamiętywane. Do tego stan, sąsiedzi (kolejne porcje), akcje (advert, zegar, preset SF6, restart) i konsola.
+- **Dodawanie z advertów:** wybór, jakie typy dodawać i z jak daleka (**Ustawienia › Kontakty**).
+
+### Widmo i log pakietów
+
+- **Widmo › Pasmo:** słupki poziomu w paśmie LoRa **867–870 MHz** (▲▼ przełącza na zbliżenie 869,3–869,9 MHz), szczyty i wodospad.
+  - Nasza częstotliwość jest zaznaczona jako „SF6”. Enter wstrzymuje pomiar.
+  - Na czas pomiaru odbiór pakietów MeshCore jest na chwilę przerywany, dlatego pomiar działa tylko przy otwartej karcie.
+- **Widmo › Nasz kanał** (◄► przełącza karty):
+  - szum, siła ostatniego pakietu i zajętość kanału z ostatniej minuty;
+  - wykres z 10 minut: linia szumu i kropki odebranych pakietów;
+  - nie przerywa odbioru.
+- **Log pakietów:** wszystko, co odebrało radio: czas, typ (ADV, KANAŁ, PRYW, ACK, TRASA…), hopy, nadawca lub ścieżka, SNR, dBm.
+  - Filtry ◄►: wszystkie, adverty, wiadomości, inne.
+  - Enter otwiera szczegóły pakietu (◄► poprzedni / następny, Menu pokazuje nadawcę advertu na mapie).
+
+### Mapa
+
+Klawisz **Mapa** pokazuje mapę z karty SD z Twoją pozycją (GPS), repeaterami (pomarańczowe punkty z 4-znakowym identyfikatorem) i kontaktami.
+
+- Strzałki przesuwają mapę, **I / O** zmieniają zoom, Enter wraca do pozycji GPS.
+- „Trasa na mapie” z menu wiadomości rysuje drogę wiadomości przez repeatery.
+
+### Oszczędzanie baterii
+
+| Ustawienie | Gdzie | Domyślnie |
+|---|---|---|
+| Przyciemnianie ekranu (pierwszy klawisz tylko rozjaśnia) | Ekran i dźwięk › Przyciemnianie | po 10 s |
+| Wygaszanie ekranu | Ekran i dźwięk › Wygaszanie | 1 min |
+| Procesor 80 MHz po wygaszeniu ekranu | Ekran i dźwięk › Procesor po wygaszeniu | oszczędny |
+| GPS szuka pozycji co 5 / 15 / 30 / 60 min | Pozycja › Oszczędzanie GPS | włączony stale |
+| Bluetooth wyłącza się, gdy telefon się nie łączy | Bluetooth › Wyłącz bez połączenia | nigdy |
+
+Kafelek Bateria pokazuje, jak spada napięcie i ile czasu zostało. Pierwsze oszacowanie pojawia się ok. 30 minut po włączeniu (pomiar co 7,5 min).
+
+### Pozostałe
+
+- **Ustawienia** w ośmiu działach: Radio, Bluetooth, Pozycja i prywatność, Advert, Kontakty, Wiadomości, Ekran i dźwięk, System. Każdą wartość wybiera się z listy.
+- **Radio:** presety SF6 i EU/UK Narrow, własne parametry, moc nadawania, bajty trasy (1 / 2 / 3), limit nadawania.
+- **Blokada klawiszy:** włącza się z wygaszeniem ekranu. Odblokowanie: Wstecz, potem Enter.
+- **Dźwięki:** wiadomości, adverty repeaterów (wszystkie albo tylko ulubione), wyciszenie całego urządzenia.
+- **Jasność ekranu** i podświetlenie klawiatury.
+- **Pasek stanu:** godzina, nieprzeczytane, GPS, Bluetooth, WiFi z zasięgiem, bateria.
+
+---
+
+## Klawisze
 
 | Klawisz | Działanie |
 |---|---|
-| ◄ ► | poprzedni / następny ekran; w ustawieniach zmiana wartości |
-| ▲ ▼ | lista; w rozmowie wybór wiadomości |
-| Enter, środek krzyżaka | wybór; w rozmowie wysłanie (puste pole: szybkie odpowiedzi) |
-| ► w rozmowie | menu zaznaczonej wiadomości |
+| ▲ ▼ ◄ ► | chodzenie po kafelkach i listach; w rozmowie ▲▼ przewija |
+| Enter / środek krzyżaka | wybór; w rozmowie wysłanie (puste pole: szybkie odpowiedzi) |
 | Wstecz | krok wstecz |
-| Home / Dymki / Pinezka / Mapa | Start / Wiadomości / Repeatery / Mapa |
-| Mała wiadomość pod Home („Menu”) | dodatkowe opcje na bieżącym ekranie: opcje rozmowy, menu kontaktu, sortowanie repeaterów, opcje wiadomości, zegar z GPS |
-| litery na liście Kontakty | szukanie po nazwie (Del kasuje) |
-| Del na kanale | usunięcie kanału |
+| Home | ekran Start |
+| Dymki | Wiadomości |
+| Pinezka | Repeatery |
+| Mapa | Mapa |
+| Mała wiadomość pod Home („Menu”) | opcje na bieżącym ekranie (rozmowy, wiadomości, kontaktu, mapy, Startu) |
+| ▼ z dolnego rzędu | zejście na dolny pasek ikon (◄ ► wybór, ▲ powrót) |
 | ctrl, potem litera | ą ć ę ł ń ó ś ż (ź pod X) |
+| litery na liście Kontakty | szukanie po nazwie (Del kasuje) |
 
-- **Mapa** (klawisz Mapa) — mapa z karty SD z Twoją pozycją, repeaterami i kontaktami; strzałki przesuwają, I / O zmieniają zoom, Enter wraca do pozycji GPS,
-  Menu otwiera pobieranie mapy z internetu, wgrywanie z telefonu i ustawienia WiFi. „Pokaż na mapie” jest w menu kontaktu.
+---
 
-- **Trasa wiadomości na mapie** — w menu wiadomości „Trasa na mapie”: odebrana — nadawca, kolejne repeatery i Ty; wysłana na kanale — repeatery, które ją powtórzyły.
-- **Aktualizacja przez WiFi** — Ustawienia › System › „Aktualizacja przez WiFi”: urządzenie sprawdza wersję w wydaniu „Najnowszy build” i instaluje ją samo (plik `wersja.txt` z sumą MD5).
-- **Mapa** — cała Polska w zoomach 6–13 (ok. 330 MB).
+## Znane ograniczenia
 
-Jeszcze nie ma: SOS.
+- WiFi i Bluetooth nie działają jednocześnie. Po użyciu WiFi (mapa, aktualizacja) Bluetooth wraca dopiero po restarcie.
+- Pomiar pasma w Widmie na chwilę przerywa odbiór pakietów, dlatego działa tylko przy otwartym ekranie.
+- Nazwy telefonu przez Bluetooth nie da się odczytać. Kafelek Sieć pokazuje nazwę aplikacji (np. „MeshSpeed”).
+- Jeszcze nie ma: SOS.
 
-Symulator interfejsu na komputerze (ten sam kod ekranów, atrapy sieci i sprzętu): `tools/sym`.
+Błędy i pomysły zgłaszaj w zakładce **Issues** (najlepiej ze zdjęciem ekranu i numerem wersji).
 
-Klawiatura (protokół opisany i potwierdzony na sprzęcie w projekcie Launcher, `boards/elecrow-thinknode-m9/connections.md`):
-kontroler pod adresem 0x6C (płytka v1.0) albo 0x6D (v1.1) na magistrali SDA 20 / SCL 21; rejestr 0x01 trzyma oczekujący klawisz
-do odczytu, po odczycie zwraca 0x88; numer rejestru trzeba wysłać osobną transmisją (STOP) przed odczytem; linia KB_INT (pin 12)
-pojawia się tylko dla niektórych klawiszy, więc rejestr jest odpytywany.
+---
 
-Czcionka ekranowa: Inter (SIL Open Font License 1.1), generowana skryptem `tools/gen_font.py`; logo na ekranie startowym z ikony aplikacji MeshSpeed (`tools/gen_logo.py`).
+## Dla programistów
 
-Mapa: narzędzia i instrukcja są w folderze [`mapa`](mapa/README.md).
+- **Budowanie:** GitHub Actions (`.github/workflows/build.yml`) pobiera MeshCore w przypiętej wersji (`MESHCORE_REF`), dokłada folder `m9_sf6` jako przykład
+  i dopisuje `platformio-m9.ini` do wariantu `thinknode_m9`. Każdy push do `main` publikuje wydanie „Najnowszy build”.
+- **Kod:** `m9_sf6/ui` zawiera interfejs. `UITask` obsługuje dane i klawisze, `UiView` rysuje (przenośny), `M9Radio` odpowiada za widmo i procesor, `M9PktLog` za log pakietów, a `M9Download` za mapę i aktualizacje.
+  W `m9_sf6/companion` jest MyMesh z funkcjami dla ekranu.
+- **Symulator:** `tools/sym` uruchamia ten sam kod ekranów na komputerze z atrapami sieci i sprzętu, robi zrzuty ekranu i test losowych klawiszy.
+- **Makiety:** `tools/makieta` rysuje projekty nowych ekranów kodem urządzenia.
+- **Klawiatura:** kontroler pod adresem 0x6C (płytka v1.0) albo 0x6D (v1.1) na SDA 20 / SCL 21. Rejestr 0x01 trzyma oczekujący klawisz, a po odczycie zwraca 0x88.
+  Numer rejestru trzeba wysłać osobną transmisją (STOP) przed odczytem. Protokół opisano w projekcie Launcher (`boards/elecrow-thinknode-m9/connections.md`).
 
-## Pobieranie i wgrywanie
+## Licencje
 
-Pliki są w wydaniu **„Najnowszy build”** (zakładka *Releases*):
-
-- `…-pelny.bin` — pełny obraz, do pierwszego wgrania (od adresu `0x0`), np. flasherem w przeglądarce,
-- `…-aktualizacja.bin` — sama aplikacja, do późniejszych aktualizacji,
-- `mapa-testowa.zip` — mapa testowa (siatka i miasta) do późniejszego etapu z mapą.
-
-## Budowanie
-
-GitHub Actions pobiera MeshCore w przypiętej wersji (`MESHCORE_REF` w `.github/workflows/build.yml`),
-dokłada folder `m9_sf6` jako przykład i dopisuje `platformio-m9.ini` do wariantu `thinknode_m9`.
-
-## Licencja
-
-Kod w tym repozytorium: MIT (jak MeshCore). Sterownik klawiatury jest napisany od zera.
+- Kod w tym repozytorium: MIT (jak MeshCore). Sterownik klawiatury jest napisany od zera.
+- Czcionka Inter: SIL Open Font License 1.1.
+- Generator kodów QR: Project Nayuki, licencja MIT.
+- Mapa: dane © autorzy OpenStreetMap (ODbL).
