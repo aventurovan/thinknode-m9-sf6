@@ -3014,9 +3014,8 @@ void UITask::detailBattery() {
 
 void UITask::sweepRange(float& f0, float& step) {
   switch (_sp_range) {
-    case 1: f0 = 868.0f; step = 2.0f / UI_SPEC_BINS; break;
-    case 2: f0 = 869.3f; step = 0.6f / UI_SPEC_BINS; break;
-    default: f0 = 863.0f; step = 0.125f; break;
+    case 1: f0 = 869.3f; step = 0.6f / UI_SPEC_BINS; break;      // okolica naszego kanału
+    default: f0 = 867.0f; step = 3.0f / UI_SPEC_BINS; break;     // kanały LoRa w Europie (867,1–869,65 MHz)
   }
 }
 
@@ -3028,8 +3027,7 @@ void UITask::fillSpec() {
   float f0, step; sweepRange(f0, step);
   v.spec_f0 = f0; v.spec_step = step; v.spec_mark = _prefs->freq;
   if (_sp_tab == 0) {
-    if (_sp_range == 0) strcpy(v.title_right, "863–870 MHz · co 125 kHz");
-    else if (_sp_range == 1) strcpy(v.title_right, "868–870 MHz · co 36 kHz");
+    if (_sp_range == 0) strcpy(v.title_right, "LoRa 867–870 MHz · co 54 kHz");
     else strcpy(v.title_right, "869,3–869,9 MHz · co 11 kHz");
     v.spec_have = _sp_have;
     memcpy(v.spec_cur, _sp_cur, sizeof(_sp_cur)); memcpy(v.spec_peak, _sp_peak, sizeof(_sp_peak));
@@ -3072,7 +3070,7 @@ void UITask::keySpec(uint8_t k) {
   if (k == M9K_F3) { push(S_LOG); return; }
   if (_sp_tab != 0) return;
   if (k == M9K_UP || k == M9K_DOWN) {
-    _sp_range = (uint8_t)((_sp_range + (k == M9K_DOWN ? 1 : 2)) % 3);
+    _sp_range ^= 1;
     _sp_have = false; _sp_wf_n = 0; memset(_sp_peak, -128, sizeof(_sp_peak)); _sp_next = 0;
     return;
   }

@@ -491,13 +491,14 @@ static void drawSpecBand(Gfx& g, const UiView& v) {
     g.textRight(xm - 3, yt - 2, "SF6", F_SMALL, C_ACC);
   }
   // podpisy częstotliwości: brzegi i środek
-  // szerokie pasmo: pełne megaherce co 2 MHz i koniec zakresu; wąskie: podział na cztery części
+  // szerokie pasmo: pełne megaherce i koniec zakresu; wąskie: podział na cztery części
   for (int k = 0; k <= 4; k++) {
     float f;
-    if (v.spec_step >= 0.1f) { f = (float)(int)(v.spec_f0 + 0.999f) + 2 * k; if (f > f1 - 0.6f) f = f1; }
+    bool wide = f1 - v.spec_f0 >= 2.5f;              // szerokie pasmo: pełne megaherce
+    if (wide) { f = (float)(int)(v.spec_f0 + 0.999f) + k; if (f > f1 - 0.3f) f = f1; }
     else f = v.spec_f0 + (f1 - v.spec_f0) * k / 4;
     int x = x0 + (int)((f - v.spec_f0) / v.spec_step * bw + 0.5f);
-    char t[12]; if (v.spec_step >= 0.1f) snprintf(t, sizeof(t), "%.0f", f); else snprintf(t, sizeof(t), "%.2f", f);
+    char t[12]; if (wide) snprintf(t, sizeof(t), "%.0f", f); else snprintf(t, sizeof(t), "%.2f", f);
     for (char* p = t; *p; p++) if (*p == '.') *p = ',';
     g.fillRect(x, yb, 1, 3, C_DIM);
     if (x >= x0 + nb * bw - 12) { g.textRight(x + 1, yb + 3, t, F_SMALL, C_DIM); break; }
