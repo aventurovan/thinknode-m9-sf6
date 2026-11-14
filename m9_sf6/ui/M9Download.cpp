@@ -34,7 +34,8 @@ static uint8_t st = ST_IDLE;
 static char base[160], status[64] = "", detail[96] = "";
 static char w_ssid[33] = "", w_pass[64] = "";
 static struct { char name[40]; uint32_t size; uint8_t zoom; } files[MAX_FILES];
-static int n_files = 0, cur = -1, done_files = 0, retries = 0, max_zoom = 99, w_tries = 0;
+static int n_files = 0, cur = -1, done_files = 0, retries = 0, max_zoom = 99, w_tries = 0, wifi_fails = 0;
+static unsigned long t_wifi_wait = 0;          // przerwa przed kolejną próbą połączenia z WiFi
 static unsigned long t0 = 0, t_retry = 0, t_fetch = 0;
 static uint32_t on_card = 0, total = 0, chunk_off = 0, w_pos = 0, speed_kbs = 0;
 static bool changed = false, failed_flag = false, done_flag = false, list_asked = false, after_wifi_list = false;
@@ -162,6 +163,7 @@ static void stopTask() { session = session + 1; net = N_IDLE; }
 static void wifiOff() { WiFi.disconnect(true); WiFi.mode(WIFI_OFF); }
 
 static void wifiOn() {
+  WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.begin(w_ssid, w_pass);
   t0 = millis();
@@ -199,6 +201,7 @@ void m9dlStart(const char* ssid, const char* pass, const char* base_url, int max
   strncpy(w_ssid, ssid, sizeof(w_ssid) - 1); w_ssid[sizeof(w_ssid) - 1] = 0;
   strncpy(w_pass, pass, sizeof(w_pass) - 1); w_pass[sizeof(w_pass) - 1] = 0;
   n_files = 0; cur = -1; done_files = 0; retries = 0; t_retry = 0; last_code = 0; list_asked = false; after_wifi_list = true;
+  wifi_fails = 0; t_wifi_wait = 0;
   max_zoom = max_zoom_ > 0 ? max_zoom_ : 99;
   task_alive = true;
   if (xTaskCreatePinnedToCore(netTask, "m9dl", 16384, (void*)(uintptr_t)session, 1, NULL, 0) != pdPASS) { task_alive = false; fail("nie mogę uruchomić pobierania (pamięć)"); return; }
@@ -282,12 +285,29 @@ void m9dlLoop() {
   unsigned long now = millis();
   switch (st) {
     case ST_CONNECT:
+      if (t_wifi_wait) {                               // przerwa po nieudanej próbie połączenia
+        if ((long)(now - t_wifi_wait) < 0) { snprintf(status, sizeof(status), "WiFi: kolejna próba za %lu s (%d)", (t_wifi_wait - now) / 1000 + 1, wifi_fails); break; }
+        t_wifi_wait = 0;
+        wifiOn();
+        break;
+      }
       if (WiFi.status() == WL_CONNECTED) {
+        wifi_fails = 0;
         WiFi.setSleep(false);                          // bez usypiania radia WiFi pobieranie jest szybsze
         if (after_wifi_list) { st = ST_LIST; list_asked = false; t_retry = 0; }
         else { st = ST_NEXT; t_retry = 0; }
       } else if (now - t0 > 25000) {
         int ws = (int)WiFi.status();
+        // W trakcie pobierania (lista już jest) pojedyncza nieudana próba to zwykle chwilowy kłopot routera:
+        // WiFi wyłączamy, czekamy i próbujemy dalej — błąd zgłaszamy dopiero po ok. 30 minutach prób.
+        // Przy pierwszym łączeniu dajemy 3 próby (zła nazwa albo hasło nie powinny kazać czekać pół godziny).
+        int limit = after_wifi_list ? 3 : 40;
+        if (++wifi_fails < limit) {
+          wifiOff();
+          t_wifi_wait = now + (wifi_fails < 5 ? 10000UL : 45000UL);
+          snprintf(detail, sizeof(detail), "WiFi nie odpowiada (stan %d), ponawiam", ws);
+          break;
+        }
         fail(ws == WL_NO_SSID_AVAIL ? "nie widzę takiej sieci WiFi (nazwa? 5 GHz?)" : ws == WL_CONNECT_FAILED ? "sieć odrzuciła połączenie (hasło?)" : "nie połączono z WiFi (nazwa, hasło?)");
       } else snprintf(status, sizeof(status), "%s łączę z WiFi… %lu s", after_wifi_list ? "" : "porcja:", (now - t0) / 1000);
       break;
