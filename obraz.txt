@@ -1,0 +1,52 @@
+Unable to find image 'maptiler/tileserver-gl:latest' locally
+latest: Pulling from maptiler/tileserver-gl
+4f4fb700ef54: Pulling fs layer
+f2b4ef06ff01: Pulling fs layer
+0af20ebef1b8: Pulling fs layer
+482f5c72cb60: Pulling fs layer
+0e2498a52a5a: Pulling fs layer
+eebc5eedee82: Pulling fs layer
+cba4bdfb76d3: Pulling fs layer
+4f4fb700ef54: Already exists
+eebc5eedee82: Download complete
+0e2498a52a5a: Download complete
+f2b4ef06ff01: Download complete
+482f5c72cb60: Download complete
+cba4bdfb76d3: Download complete
+44136fa355b3: Already exists
+f74abb2208f9: Download complete
+0af20ebef1b8: Download complete
+f2b4ef06ff01: Pull complete
+eebc5eedee82: Pull complete
+0af20ebef1b8: Pull complete
+cba4bdfb76d3: Pull complete
+4f4fb700ef54: Pull complete
+0e2498a52a5a: Pull complete
+482f5c72cb60: Pull complete
+Digest: sha256:24d0364e1d40da0ae3fb3269f617c26e36a883ad4b7454e5c4064a8795bfc807
+Status: Downloaded newer image for maptiler/tileserver-gl:latest
+/usr/src/app/node_modules/tileserver-gl-styles/fonts/Noto Sans Regular
+---
+/usr/src/app/node_modules/tileserver-gl-styles
+---
+bin
+boot
+data
+dev
+etc
+home
+lib
+lib.usr-is-merged
+lib64
+media
+mnt
+opt
+proc
+root
+run
+sbin
+srv
+sys
+tmp
+usr
+var

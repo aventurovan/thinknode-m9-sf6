@@ -1,0 +1,43 @@
+zoom 11: kolumny 1065–1066, wiersze 746–746, kafelków 2
+   50.0%  1 kafelków  0 MB  zostało ok. 0 min
+  100.0%  2 kafelków  0 MB  zostało ok. 0 min
+  zapisano ../proba/mapa/z11_x1065.mcm
+zoom 12: kolumny 2131–2132, wiersze 1493–1493, kafelków 2
+   50.0%  1 kafelków  0 MB  zostało ok. 0 min
+  100.0%  2 kafelków  0 MB  zostało ok. 0 min
+  zapisano ../proba/mapa/z12_x2131.mcm
+zoom 13: kolumny 4263–4265, wiersze 2986–2987, kafelków 6
+   33.3%  2 kafelków  0 MB  zostało ok. 0 min
+   66.7%  4 kafelków  0 MB  zostało ok. 0 min
+  100.0%  6 kafelków  0 MB  zostało ok. 0 min
+  zapisano ../proba/mapa/z13_x4263.mcm
+zoom 14: kolumny 8527–8531, wiersze 5972–5975, kafelków 20
+   20.0%  4 kafelków  0 MB  zostało ok. 0 min
+   40.0%  8 kafelków  0 MB  zostało ok. 0 min
+   60.0%  12 kafelków  0 MB  zostało ok. 0 min
+   80.0%  16 kafelków  0 MB  zostało ok. 0 min
+  100.0%  20 kafelków  0 MB  zostało ok. 0 min
+  zapisano ../proba/mapa/z14_x8527.mcm
+zoom 15: kolumny 17055–17063, wiersze 11945–11951, kafelków 63
+   11.1%  7 kafelków  0 MB  zostało ok. 0 min
+   22.2%  14 kafelków  0 MB  zostało ok. 0 min
+   33.3%  21 kafelków  0 MB  zostało ok. 0 min
+   44.4%  28 kafelków  0 MB  zostało ok. 0 min
+   55.6%  35 kafelków  0 MB  zostało ok. 0 min
+   66.7%  42 kafelków  0 MB  zostało ok. 0 min
+   77.8%  49 kafelków  0 MB  zostało ok. 0 min
+   88.9%  56 kafelków  0 MB  zostało ok. 0 min
+  100.0%  63 kafelków  0 MB  zostało ok. 0 min
+  zapisano ../proba/mapa/z15_x17055.mcm
+total 196
+drwxr-xr-x 2 runner runner   4096 Nov 14 06:52 .
+drwxr-xr-x 3 runner runner   4096 Nov 14 06:52 ..
+-rw-r--r-- 1 runner runner   2529 Nov 14 06:52 z11_x1065.mcm
+-rw-r--r-- 1 runner runner   5055 Nov 14 06:52 z12_x2131.mcm
+-rw-r--r-- 1 runner runner  13532 Nov 14 06:52 z13_x4263.mcm
+-rw-r--r-- 1 runner runner  37586 Nov 14 06:52 z14_x8527.mcm
+-rw-r--r-- 1 runner runner 122441 Nov 14 06:52 z15_x17055.mcm
+z 12 kafelek 2132 1493 bajtow 5001
+z 13 kafelek 4264 2987 bajtow 6677
+z 14 kafelek 8529 5974 bajtow 17434
+z 15 kafelek 17059 11948 bajtow 24290

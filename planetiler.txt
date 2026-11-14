@@ -1,0 +1,30 @@
+[m[0m0:00:10 INF - 	water_polygons   1s cpu:2s avg:1.6
+[m[0m0:00:10 INF - 	  fetch    1x(0% 0s)
+[m[0m0:00:10 INF - 	  process  4x(8% 0.1s)
+[m[0m0:00:10 INF - 	  write    1x(0% 0s)
+[m[0m0:00:10 INF - 	natural_earth    1s cpu:4s avg:2.5
+[m[0m0:00:10 INF - 	  read     1x(28% 0.4s)
+[m[0m0:00:10 INF - 	  process  4x(8% 0.1s)
+[m[0m0:00:10 INF - 	  write    1x(0% 0s)
+[m[0m0:00:10 INF - 	osm_pass1        0.2s cpu:0.7s avg:3.8
+[m[0m0:00:10 INF - 	osm_pass2        0.8s cpu:3s avg:3.6
+[m[0m0:00:10 INF - 	ne_lakes         0s cpu:0s avg:0
+[m[0m0:00:10 INF - 	boundaries       0s cpu:0.1s avg:3.5
+[m[0m0:00:10 INF - 	agg_stop         0s cpu:0s avg:0
+[m[0m0:00:10 INF - 	sort             0s cpu:0.1s avg:3.7
+[m[0m0:00:10 INF - 	archive          2s cpu:5s avg:2.9
+[m[0m0:00:10 INF - 	  read    1x(1% 0s done:2s)
+[m[0m0:00:10 INF - 	  encode  4x(13% 0.2s done:1s)
+[m[0m0:00:10 INF - 	  write   1x(1% 0s)
+[m[0m0:00:10 INF - ----------------------------------------
+[m[0m0:00:10 INF - 	archive	458kB
+[m[0m0:00:10 INF - 	features	1.7MB
+[m[0m0:00:10 INF - Acknowledgments
+Generated vector tiles are produced work of OpenStreetMap data.
+Such tiles are reusable under CC-BY license granted by OpenMapTiles team:
+- https://github.com/openmaptiles/openmaptiles/#license
+Maps made with these vector tiles must display a visible credit:
+- © OpenMapTiles © OpenStreetMap contributors
+Thanks to all free, open source software developers and Open Data Contributors!
+
+[m

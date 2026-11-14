@@ -1,0 +1,9 @@
+Starting tileserver-gl v5.7.0
+Using specified config file from /data/config.json
+[SECURITY WARNING] Host header poisoning mitigation is NOT enabled.
+  Response URLs may be built from untrusted Host/X-Forwarded-* headers.
+  For production, set --public_url or allowedHosts in config/options or TILESERVER_GL_ALLOWED_HOSTS env.
+Starting server
+Listening at http://[::]:8080/
+Startup complete
+GET /styles.json 200 107 - 1.969 ms
