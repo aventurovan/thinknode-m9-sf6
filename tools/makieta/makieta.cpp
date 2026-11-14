@@ -237,7 +237,90 @@ static void screenChannelQR() {
   savePPM("6-kanal-qr.ppm");
 }
 
+
+// ---------- Start (Home): 9 kafelków 3×3, zegar w jednym wierszu ----------
+static const char* const IC_WIFI[12] = { "", "...######...", ".##......##.", "#..........#", "....####....", "..##....##..", "............", "....####....", "...#....#...", "............", ".....##.....", ".....##....." };
+static const char* const IC_SPEC[12] = { "", "", "..#.........", "..#.....#...", "..#.....#...", "..#..#..#...", "#.#..#..#.#.", "#.#..#..#.#.", "#.#.##.##.##", "#.#.##.##.##", "############", "" };
+static const char* const IC_BATT[12] = { "", "", "", "##########..", "#........#..", "#.######.###", "#.######.###", "#........#..", "##########..", "", "", "" };
+
+struct HomeTile { const char* const* ic; const char* label; const char* val; const char* sub; uint16_t vc; int spark; int bar; };
+
+static void sparkline(int x, int y, int w, int h) {   // mały wykres szumu z ostatnich minut
+  int prev = -1;
+  for (int i = 0; i < w; i++) {
+    float n = 0.5f + 0.25f * sinf(i * 0.35f) + rnd() * 0.25f + (i > w - 8 ? 0.3f : 0);
+    int yy = y + h - 1 - (int)(n * (h - 1)); if (yy < y) yy = y;
+    if (prev >= 0) { int a = prev < yy ? prev : yy, b = prev < yy ? yy : prev; g.fillRect(x + i, a, 1, b - a + 1, C_BLUE); }
+    prev = yy;
+  }
+}
+
+static void screenHome(const char* file, const HomeTile* T, int selIdx, const UiView& st) {
+  memset(&v, 0, sizeof(v));
+  v = st;
+  g.clear(C_BG);
+  drawStatus(g, v);
+  // zegar, nazwa i data w jednym pasku (mniejszy zegar, żeby zmieściły się 3 rzędy kafelków)
+  int y0 = STATUS_H + 2;
+  int cw = g.text(8, y0, v.time, F_BIG, C_TXT);
+  g.text(8 + cw + 10, y0 + 1, "SP9 Paweł M9", F_BOLD, C_TXT, 150);
+  g.textRight(GFX_W - 8, y0 + 4, "sobota, 14.11.2026", F_SMALL, C_DIM);
+  const int top = STATUS_H + 28, cols = 3, gap = 4;
+  const int tw = (GFX_W - 12 - (cols - 1) * gap) / cols;
+  const int th = (GFX_H - BOTTOM_H - top - 4 - 2 * gap) / 3;
+  for (int i = 0; i < 9; i++) {
+    const HomeTile& t = T[i];
+    int x = 6 + (i % cols) * (tw + gap), y = top + (i / cols) * (th + gap);
+    bool sel = i == selIdx;
+    if (sel) { g.fillRound(x - 1, y - 1, tw + 2, th + 2, 7, C_ACC); g.fillRound(x + 1, y + 1, tw - 2, th - 2, 5, C_SELT); }
+    else g.fillRound(x, y, tw, th, 6, C_TILE);
+    g.icon(x + 6, y + 4, t.ic, sel ? C_ACC : C_DIM);
+    g.text(x + 21, y + 3, t.label, F_SMALL, sel ? C_ACC : C_DIM, tw - 26);
+    int vw = g.text(x + 6, y + 17, t.val, F_BOLD, t.vc, tw - 12);
+    if (t.spark) sparkline(x + vw + 12, y + 20, tw - vw - 18, 13);
+    if (t.bar >= 0) {                               // poziom baterii jako pasek obok napięcia
+      int bx = x + vw + 12, bw = tw - vw - 20;
+      g.fillRound(bx, y + 22, bw, 9, 3, C_LINE);
+      g.fillRound(bx, y + 22, bw * t.bar / 100, 9, 3, t.bar <= 15 ? C_RED : C_GRN);
+    }
+    g.text(x + 6, y + th - 16, t.sub, F_SMALL, C_DIM, tw - 12);
+  }
+  drawTabs(g, 0, v.unread, false);
+  savePPM(file);
+}
+
+static void screensHome() {
+  UiView st; memset(&st, 0, sizeof(st));
+  strcpy(st.time, "12:14"); st.batt = 78; st.bt = 2; st.gps_on = true; st.sats = 7; st.unread = 2; st.tab = 0;
+  const HomeTile A[9] = {
+    { IC_MAIL, "Wiadomości", "2 nowe", "#bot · BBot", C_ACC, 0, -1 },
+    { IC_USER, "Kontakty", "38", "usłyszane: 12", C_TXT, 0, -1 },
+    { IC_TOWER, "Repeatery", "21", "Skrzyczne, 2 min", C_TXT, 0, -1 },
+    { IC_SPEC, "Widmo", "-114", "zajęte 7 %", C_TXT, 1, -1 },
+    { IC_SIGNAL, "Radio", "SF6", "869,618 · 62,5", C_TXT, 0, -1 },
+    { IC_GPS, "Pozycja", "49,8214", "19,0461 · sat. 7", C_TXT, 0, -1 },
+    { IC_BT, "Bluetooth", "połączony", "PIN 482913", C_BLUE, 0, -1 },
+    { IC_WIFI, "WiFi", "wyłączone", "Enter: włącz", C_DIM, 0, -1 },
+    { IC_BATT, "Bateria", "3,92 V", "zostało ok. 14 h", C_TXT, 0, 78 },
+  };
+  screenHome("7-home.ppm", A, 0, st);
+  st.bt = 0; st.wifi = 4; st.charging = true; st.batt = 64; st.unread = 0;
+  const HomeTile B[9] = {
+    { IC_MAIL, "Wiadomości", "brak nowych", "rozmów: 6", C_TXT, 0, -1 },
+    { IC_USER, "Kontakty", "38", "usłyszane: 12", C_TXT, 0, -1 },
+    { IC_TOWER, "Repeatery", "21", "Ustroń, 5 min", C_TXT, 0, -1 },
+    { IC_SPEC, "Widmo", "-109", "zajęte 12 %", C_TXT, 1, -1 },
+    { IC_SIGNAL, "Radio", "SF8", "EU/UK Narrow", C_TXT, 0, -1 },
+    { IC_GPS, "Pozycja", "GPS wył.", "Enter: włącz", C_DIM, 0, -1 },
+    { IC_BT, "Bluetooth", "wyłączony", "Enter: włącz", C_DIM, 0, -1 },
+    { IC_WIFI, "WiFi", "-62 dBm", "Dom_5G", C_TXT, 0, -1 },
+    { IC_BATT, "Bateria", "4,05 V", "pełna za 1 h", C_ACC, 0, 64 },
+  };
+  screenHome("8-home-inne-stany.ppm", B, 8, st);
+}
+
 int main() {
+  screensHome();
   screenSpectrumBand();
   screenSpectrumChannel();
   screenLog();
