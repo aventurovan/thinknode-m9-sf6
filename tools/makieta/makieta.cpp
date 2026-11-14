@@ -344,11 +344,11 @@ static void home6(const char* file, const Tile6* T, int selIdx, const UiView& st
     if (t.kind == K_LINK) {                          // dwa wiersze: Bluetooth i WiFi
       uint16_t bc = btOn ? (btConn ? C_BLUE : C_TXT) : C_DIM;
       g.icon(x + 7, y + 26, IC_BT, bc);
-      g.text(x + 22, y + 24, btOn ? "BT ON" : "BT OFF", F_NORMAL, bc, tw - 26);
+      g.text(x + 22, y + 25, btOn ? "BT ON" : "BT OFF", F_SMALL, bc, tw - 26);
       char w[24]; if (wifiDbm) snprintf(w, sizeof(w), "WIFI %d", wifiDbm); else strcpy(w, "WIFI OFF");
       g.icon(x + 7, y + 46, IC_WIFI, wifiDbm ? C_TXT : C_DIM);
-      int ww = g.text(x + 22, y + 44, w, F_NORMAL, wifiDbm ? C_TXT : C_DIM, tw - 26);
-      if (wifiDbm) g.text(x + 25 + ww, y + 47, "dBm", F_SMALL, C_DIM);
+      int ww = g.text(x + 22, y + 45, w, F_SMALL, wifiDbm ? C_TXT : C_DIM, tw - 26);
+      if (wifiDbm) g.text(x + 25 + ww, y + 45, "dBm", F_SMALL, C_DIM);
       continue;
     }
     bool fits = Gfx::textWidth(t.val, F_BIG) <= tw - 14;
