@@ -155,6 +155,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   _lg_filter = 0; _lg_n = 0; _kv_pkt = 0;
   _dimmed = false; _gps_off_phase = false; _gps_next = _gps_on_at = _gps_fix_at = 0; _gps_cache = false; _gps_lat = _gps_lon = 0;
   _bt_idle_since = 0; _bt_auto_off = false;
+  _sel_mode = false; _selk = NULL; _sel_n = 0;
   _input[0] = 0; _input_chars = 0; _polish = false; _input_mode = IN_MSG;
   memset(_ck, 0, sizeof(_ck)); _cname[0] = 0; _ctype = 0; _cfav = false;
   _msg_idx = -1; _menu_n = 0; _menu_title[0] = 0; _menu_msg = false; _search[0] = 0;
@@ -195,6 +196,7 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   _list = (uint16_t*)ps_calloc(UI_LIST_MAX, sizeof(uint16_t));
   _kv = (UiKV*)ps_calloc(UI_KVS_MAX, sizeof(UiKV));
   _snap = (UiMsg*)ps_calloc(UI_MSG_MAX, sizeof(UiMsg));
+  _selk = (uint8_t (*)[6])ps_calloc(UI_LIST_MAX, 6);
   _th_idx = (int16_t*)ps_calloc(UI_MSG_MAX, sizeof(int16_t));
   _th_h = (uint16_t*)ps_calloc(UI_MSG_MAX, sizeof(uint16_t));
 
@@ -825,7 +827,7 @@ void UITask::prepare(uint8_t s) {
 
 void UITask::tab(uint8_t s) {
   if (_depth >= 1 && _nav[0].scr < 5) _tabsel[_nav[0].scr] = _nav[0].sel;
-  if (s != S_CONTACTS) _search[0] = 0;
+  if (s != S_CONTACTS) { _search[0] = 0; _sel_mode = false; }     // zaznaczanie kończy się po wyjściu z Kontaktów
   _depth = 1;
   _bar = false;
   _nav[0].scr = s; _nav[0].sel = _tabsel[s]; _nav[0].top = 0;
@@ -849,7 +851,23 @@ void UITask::pop() {
   } else if (scr() != S_START) tab(S_START);
 }
 
+// ---------------- Kontakty: zaznaczanie wielu ----------------
+bool UITask::selHas(const uint8_t* key) const {
+  for (int i = 0; i < _sel_n; i++) if (memcmp(_selk[i], key, 6) == 0) return true;
+  return false;
+}
+void UITask::selAdd(const uint8_t* key) {
+  if (_selk == NULL || _sel_n >= UI_LIST_MAX || selHas(key)) return;
+  memcpy(_selk[_sel_n++], key, 6);
+}
+void UITask::selToggle(const uint8_t* key) {
+  if (_selk == NULL) return;
+  for (int i = 0; i < _sel_n; i++) if (memcmp(_selk[i], key, 6) == 0) { memmove(_selk[i], _selk[i + 1], (_sel_n - i - 1) * 6); _sel_n--; return; }
+  selAdd(key);
+}
+
 void UITask::back() {
+  if (scr() == S_CONTACTS && _sel_mode) { _sel_mode = false; _sel_n = 0; return; }     // Wstecz kończy zaznaczanie bez kasowania
   if (scr() == S_THREAD && _input_mode != IN_MSG) _input_mode = IN_MSG;   // anulowane pole do wpisania
   if (scr() == S_ADMIN) the_mesh.uiAdminLogout();
   if (scr() == S_MAP_NET && m9dlActive()) { m9dlStop(); _map.scan(); }
@@ -1033,6 +1051,7 @@ void UITask::openMenuContact() {
   _menu_act[_menu_n++] = A_DETAIL;
   if (_chas_pos) _menu_act[_menu_n++] = A_SHOWMAP;
   _menu_act[_menu_n++] = A_DELETE;
+  if (scr() == S_CONTACTS) _menu_act[_menu_n++] = A_MULTI;      // tylko z listy Kontakty
   push(S_MENU);
 }
 
@@ -1071,6 +1090,22 @@ void UITask::openMenuMsg(int idx) {
 void UITask::doAct(uint8_t act) {
   if (act == A_SPEC) { pop(); push(S_SPEC); return; }
   if (act == A_LOG) { pop(); push(S_LOG); return; }
+  if (act == A_MULTI) { pop(); _sel_mode = true; _sel_n = 0; selAdd(_ck); return; }
+  if (act == A_SELNONE) { _sel_n = 0; pop(); return; }
+  if (act == A_SELALL) {                              // wszystko z bieżącego filtra oprócz ulubionych
+    ContactInfo q; int added = 0;
+    for (int i = 0; i < _list_n; i++) if (the_mesh.getContactByIdx(_list[i], q) && !(q.flags & 1) && !selHas(q.id.pub_key)) { selAdd(q.id.pub_key); added++; }
+    pop();
+    char t[40]; snprintf(t, sizeof(t), "dodano: %d · ulubione pominięte", added); popup("Zaznaczono", t);
+    return;
+  }
+  if (act == A_SELOLD) {
+    pop();
+    if (the_mesh.getRTCClock()->getCurrentTime() < 1735689600UL) { popup("Najpierw ustaw zegar", "bez daty nie wiem, co jest stare", true); return; }
+    pickBegin(P_SELOLD, "Niewidziane przez urządzenie od"); pickAdd("7 dni"); pickAdd("30 dni"); pickAdd("90 dni"); pickOpen(-1);
+    return;
+  }
+  if (act == A_SELDEL) { char t[32]; snprintf(t, sizeof(t), "kontaktów: %d", _sel_n); ask(C_DEL_MULTI, "Usunąć zaznaczone kontakty?", t); return; }
   if (_menu_thread) {
     switch (act) {
       case A_OPEN: pop(); openThread(_tname, _tchan); break;
@@ -1146,6 +1181,20 @@ void UITask::doConfirm(uint8_t what) {
       if (scr() == S_MENU) pop();
       popup("Rozmowa usunięta", _confirm_name);
       break;
+    case C_DEL_MULTI: {                               // usuń zaznaczone kontakty razem z zapamiętanymi hasłami repeaterów
+      int done = 0;
+      for (int i = 0; i < _sel_n; i++) {
+        ContactInfo q;
+        if (!ctByPrefix(_selk[i], q)) continue;
+        if (the_mesh.uiRemoveContact(q.id.pub_key)) { done++; pwSet(q.id.pub_key, ""); }
+      }
+      _sel_n = 0; _sel_mode = false;
+      if (scr() == S_MENU) pop();
+      buildContacts();
+      if (sel() > _list_n) sel() = _list_n > 0 ? 1 : 0;
+      char t[32]; snprintf(t, sizeof(t), "kontaktów: %d", done); popup("Usunięto", t);
+      break;
+    }
     case C_DEL_CONTACT: {
       bool ok = the_mesh.uiRemoveContact(_ck);
       pwSet(_ck, "");
@@ -1507,7 +1556,8 @@ void UITask::listHead(uint8_t s) {
       break;
     case S_CONTACTS: {
       strcpy(v.title, "Kontakty");
-      if (_search[0]) snprintf(v.title_right, sizeof(v.title_right), "szukam: %s · %d", _search, _list_n);
+      if (_sel_mode) snprintf(v.title_right, sizeof(v.title_right), "zaznaczone: %d · Menu: usuń, zaznacz", _sel_n);
+      else if (_search[0]) snprintf(v.title_right, sizeof(v.title_right), "szukam: %s · %d", _search, _list_n);
       else if (_cfg.ct_filter == FILTER_HEARD) strcpy(v.title_right, "Enter: dodaj do kontaktów");
       else snprintf(v.title_right, sizeof(v.title_right), "%d · pisz, aby szukać", _list_n);
       static const char* const C[6] = { "Wszyscy", "Osoby", "RPT", "Pokoje", "Ulubione", "Usłyszane" };
@@ -1584,7 +1634,8 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       if (_cfg.ct_filter == FILTER_HEARD) { listRow(S_HEARD, i - 1, r); return; }
       if (!the_mesh.getContactByIdx(_list[i - 1], c)) return;
       fmtAgo(t, sizeof(t), c.lastmod);
-      setRow(r, c.name, t, typeIcon(c.type, c.flags & 1), c.flags & 1);
+      if (_sel_mode && selHas(c.id.pub_key)) setRow(r, c.name, t, UII_CHECK, true);          // zaznaczony do usunięcia
+      else setRow(r, c.name, t, typeIcon(c.type, c.flags & 1), c.flags & 1);
       if (_cfg.ct_filter == 0 || _cfg.ct_filter == 4) scopy(r.sub, sizeof(r.sub), typeName(c.type));
       return;
     case S_RPTS: {
@@ -1616,6 +1667,11 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
         case A_SHOWMAP: setRow(r, "Pokaż na mapie", "", UII_GPS); break;
         case A_ROUTE: setRow(r, "Trasa na mapie", _menu_msg && _msg_idx >= 0 && _msgs[_msg_idx].out ? "kto powtórzył" : "skąd przyszła", UII_GPS); break;
         case A_DELETE: setRow(r, "Usuń kontakt"); break;
+        case A_MULTI: setRow(r, "Zaznacz kilka…", "do usunięcia naraz", UII_CHECK); break;
+        case A_SELDEL: { char q[40]; snprintf(q, sizeof(q), "kontaktów: %d", _sel_n); setRow(r, "Usuń zaznaczone", q, UII_CHECK, true); break; }
+        case A_SELALL: setRow(r, "Zaznacz wszystkie z tej listy", "bez ulubionych"); break;
+        case A_SELOLD: setRow(r, "Zaznacz niewidziane od…", "z tej listy, bez ulubionych"); break;
+        case A_SELNONE: setRow(r, "Odznacz wszystko"); break;
         case A_REPLY: setRow(r, "Odpowiedz @", "wstawia @[nadawca]", UII_MAIL); break;
         case A_REPLY_ACK: setRow(r, "Odpowiedz ack", "@[nadawca] ack, ile hopów", UII_CHECK); break;
         case A_RESEND: setRow(r, "Wyślij ponownie"); break;
@@ -1826,6 +1882,7 @@ void UITask::listEnter(uint8_t s, int i) {
     case S_CONTACTS:
       if (i == 0) { sel() = 1; return; }              // Enter na filtrach: przejdź do listy
       if (_cfg.ct_filter == FILTER_HEARD) { listEnter(S_HEARD, i - 1); return; }
+      if (_sel_mode) { if (the_mesh.getContactByIdx(_list[i - 1], c)) selToggle(c.id.pub_key); return; }      // zaznacz / odznacz
       if (the_mesh.getContactByIdx(_list[i - 1], c)) { setCur(c); openMenuContact(); }
       return;
     case S_RPTS:
@@ -2073,6 +2130,15 @@ void UITask::applyPick(uint8_t id, int i) {
     case P_DIM: _cfg.dim_idx = i; saveCfg(); break;
     case P_CPU: _cfg.cpu_full = i == 1; saveCfg(); break;
     case P_BTAUTO: _cfg.bt_auto = i; saveCfg(); _bt_idle_since = 0; break;
+    case P_SELOLD: {                                  // kontakty z bieżącej listy, których urządzenie nie słyszało od N dni (bez ulubionych)
+      static const uint16_t DAYS[3] = { 7, 30, 90 };
+      uint32_t now = the_mesh.getRTCClock()->getCurrentTime(), lim = now - (uint32_t)DAYS[i % 3] * 86400UL;
+      ContactInfo q; int added = 0;
+      buildContacts();
+      for (int k = 0; k < _list_n; k++) if (the_mesh.getContactByIdx(_list[k], q) && !(q.flags & 1) && q.lastmod < lim && !selHas(q.id.pub_key)) { selAdd(q.id.pub_key); added++; }
+      char t[40]; snprintf(t, sizeof(t), "dodano: %d · ulubione pominięte", added); popup("Zaznaczono", t);
+      break;
+    }
     case P_ADVLOC: _prefs->advert_loc_policy = i == 0 ? 1 : 0; the_mesh.savePrefs(); break;
     case P_TEL0: _prefs->telemetry_mode_base = i; the_mesh.savePrefs(); break;
     case P_TEL1: _prefs->telemetry_mode_loc = i; the_mesh.savePrefs(); break;
@@ -2132,6 +2198,14 @@ bool UITask::listKey(uint8_t s, int i, uint8_t k) {
         int f = (int)_cfg.ct_filter + dir;
         if (f < 0 || f > FILTER_HEARD) return false;
         _cfg.ct_filter = (uint8_t)f; saveCfg(); buildContacts(); return true;
+      }
+      if (k == M9K_F3 && _sel_mode) {                 // Menu w trybie zaznaczania
+        _menu_n = 0; _menu_msg = _menu_thread = false; snprintf(_menu_title, sizeof(_menu_title), "Zaznaczone: %d", _sel_n);
+        if (_sel_n > 0) _menu_act[_menu_n++] = A_SELDEL;
+        if (_cfg.ct_filter != FILTER_HEARD) { _menu_act[_menu_n++] = A_SELALL; _menu_act[_menu_n++] = A_SELOLD; }
+        if (_sel_n > 0) _menu_act[_menu_n++] = A_SELNONE;
+        push(S_MENU);
+        return true;
       }
       if (k == M9K_F3) { if (i > 0) listEnter(s, i); return true; }
       if (k == M9K_BKSP) { int n = strlen(_search); if (n > 0) { _search[n - 1] = 0; buildContacts(); } return true; }
@@ -2671,18 +2745,20 @@ void UITask::fillStart() {
   if (_thread_n > 0 && _threads[0].unread) scopy(a.sub, sizeof(a.sub), _threads[0].name);
   else snprintf(a.sub, sizeof(a.sub), "rozmów: %d", _thread_n);
 
-  // policz kontakty wg roli (bez repeaterów)
-  int people = 0;
+  // wszystkie kontakty (bez czujników), osobno policzone repeatery
+  int people = 0, rpts = 0;
   ContactInfo c;
   int total = the_mesh.getTotalContactSlots();
   for (int i = MAX_ANON_CONTACTS; i < total; i++) {
     if (!the_mesh.getContactByIdx(i, c) || c.type == ADV_TYPE_NONE) continue;
-    if (c.type != ADV_TYPE_REPEATER) people++;
+    if (c.type == ADV_TYPE_SENSOR) continue;
+    people++;
+    if (c.type == ADV_TYPE_REPEATER) rpts++;
   }
   UiTile& b = v.tile[1];
   strcpy(b.label, "Kontakty"); b.icon = UII_USER;
   snprintf(b.value, sizeof(b.value), "%d", people);
-  snprintf(b.sub, sizeof(b.sub), "usłyszane: %d", the_mesh.ui_heard_n);
+  snprintf(b.sub, sizeof(b.sub), "w tym RPT: %d", rpts);
 
   UiTile& d = v.tile[2];
   strcpy(d.label, "Radio"); d.icon = UII_SIGNAL;

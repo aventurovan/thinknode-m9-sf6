@@ -6,7 +6,7 @@ i oglądasz mapę bez telefonu. Przez Bluetooth łączy się z aplikacjami **Mes
 
 Domyślny preset radia: **SF6 — 869,618 MHz · BW 62,5 kHz · SF6 · CR 4/8**. Do wyboru jest też **EU/UK Narrow (SF8)**.
 
-Aktualna wersja: **0.20.2** (numer jest też na ekranie startowym i w Ustawieniach).
+Aktualna wersja: **0.20.3** (numer jest też na ekranie startowym i w Ustawieniach).
 
 ---
 
@@ -72,7 +72,7 @@ Duży zegar i sześć kafelków. Po kafelkach chodzi się strzałkami, a Enter o
 | Kafelek | Pokazuje | Enter |
 |---|---|---|
 | Wiadomości | nowe wiadomości, ostatnia rozmowa | lista rozmów |
-| Kontakty | liczba kontaktów, ilu słychać | lista kontaktów |
+| Kontakty | liczba wszystkich kontaktów, w tym repeaterów | lista kontaktów |
 | Radio | preset (SF6 / SF8) i częstotliwość | ustawienia radia |
 | Sieć | Bluetooth (nazwa połączonej aplikacji) i WiFi (dBm) | ustawienia Bluetooth |
 | Widmo | szum na naszym kanale z wykresem, zajętość kanału | ekran Widmo |
@@ -99,6 +99,7 @@ Menu (mała wiadomość pod Home) na ekranie Start otwiera **Widmo** i **Log pak
   - filtry w wierszu: wszyscy, osoby, RPT, pokoje, ulubione, słyszane; szukanie przez pisanie liter;
   - menu kontaktu: napisz, ulubiony, szczegóły, pokaż na mapie, zarządzaj, usuń;
   - czujniki nie są dodawane.
+  - **kasowanie wielu naraz:** w menu kontaktu „Zaznacz kilka…”, Enter zaznacza kolejne, Menu usuwa zaznaczone. Menu potrafi też zaznaczyć całą bieżącą listę albo kontakty niesłyszane przez urządzenie od 7, 30 lub 90 dni (ulubione są pomijane).
 - **Repeatery** (klawisz Pinezka): lista według ostatniego kontaktu albo odległości.
   - **„Co tu słychać?”** wysyła ping do sąsiadów z SNR w obie strony. Wykryty repeater można otworzyć i dodać do kontaktów.
   - **Zarządzanie:** logowanie zawsze przez flood z resetem ścieżki, hasła są zapamiętywane. Do tego stan, sąsiedzi (kolejne porcje), akcje (advert, zegar, preset SF6, restart) i konsola.

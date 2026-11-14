@@ -203,6 +203,14 @@ int main(int argc, char** argv) {
     keys({ M9K_HOME, M9K_MSG }); save("p-dwie-rozmowy");
     keys({ M9K_ENTER }); save("p-rozmowa-z-id");
   }
+  // zaznaczanie wielu kontaktów
+  keys({ M9K_HOME }); save("z-start");
+  keys({ M9K_HOME, M9K_RIGHT, M9K_ENTER }); keys({ M9K_ENTER }); save("z-menu-kontaktu");
+  for (int i = 0; i < 8; i++) keys({ M9K_DOWN }); keys({ M9K_ENTER }); save("z-tryb");
+  keys({ M9K_DOWN, M9K_ENTER, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("z-zaznaczone");
+  keys({ M9K_F3 }); save("z-menu");
+  keys({ M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("z-niewidziane"); keys({ M9K_DOWN, M9K_ENTER }); save("z-po-niewidzianych");
+  keys({ M9K_ENTER, M9K_F3, M9K_ENTER }); save("z-pytanie"); keys({ M9K_ENTER }); save("z-usuniete");
   for (int i = 0; i < 3; i++) rx("Public", i == 1 ? "Ania: druga nowa, trochę dłuższa wiadomość na kanale" : "Ania: nowa po przerwie", 2);
   keys({ M9K_HOME, M9K_MSG }); for (int i = 0; i < 8; i++) keys({ M9K_UP }); keys({ M9K_ENTER }); save("s-nowe-wiadomosci"); keys({ M9K_UP }); save("s-nowe-przewiniete");
   keys({ M9K_HOME, M9K_LEFT, M9K_UP, M9K_UP, M9K_UP, M9K_LEFT, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("p-ekran-i-dzwiek");
