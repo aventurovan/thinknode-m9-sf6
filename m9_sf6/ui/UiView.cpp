@@ -282,6 +282,7 @@ static void drawGrid(Gfx& g, const UiView& v) {
       if (t.kind == UIT_NET) { drawNetTile(g, v, x, y, tw); continue; }
       bool fits = Gfx::textWidth(t.value, F_BIG) <= tw - 14;
       int vw = g.text(x + 7, y + (fits ? 23 : 26), t.value, fits ? F_BIG : F_BOLD, t.accent ? C_ACC : C_TXT, tw - 14);
+      if (t.side[0]) g.textRight(x + tw - 7, y + 30, t.side, F_SMALL, C_DIM);
       if (t.kind == UIT_NOISE) drawSpark(g, x + vw + 13, y + 26, tw - vw - 20, 15, v.spark, v.nspark, C_BLUE, 6);
       if (t.kind == UIT_BATT) {
         int8_t tmp[UI_SPARK_N]; int n = v.nbhist; uint16_t lo = 65535, hi = 0;

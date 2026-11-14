@@ -2758,7 +2758,10 @@ void UITask::fillStart() {
   UiTile& b = v.tile[1];
   strcpy(b.label, "Kontakty"); b.icon = UII_USER;
   snprintf(b.value, sizeof(b.value), "%d", people);
-  snprintf(b.sub, sizeof(b.sub), "w tym RPT: %d", rpts);
+  // ostatnio usłyszany węzeł: nazwa pod liczbą, a obok liczby — jak dawno
+  (void)rpts;
+  if (the_mesh.ui_heard_n > 0) { fmtAgo(b.side, sizeof(b.side), the_mesh.ui_heard_at[0]); scopy(b.sub, sizeof(b.sub), the_mesh.ui_heard[0].name); }
+  else strcpy(b.sub, "nikogo nie słychać");
 
   UiTile& d = v.tile[2];
   strcpy(d.label, "Radio"); d.icon = UII_SIGNAL;

@@ -6,7 +6,7 @@ i oglądasz mapę bez telefonu. Przez Bluetooth łączy się z aplikacjami **Mes
 
 Domyślny preset radia: **SF6 — 869,618 MHz · BW 62,5 kHz · SF6 · CR 4/8**. Do wyboru jest też **EU/UK Narrow (SF8)**.
 
-Aktualna wersja: **0.20.3** (numer jest też na ekranie startowym i w Ustawieniach).
+Aktualna wersja: **0.20.4** (numer jest też na ekranie startowym i w Ustawieniach).
 
 ---
 
@@ -72,7 +72,7 @@ Duży zegar i sześć kafelków. Po kafelkach chodzi się strzałkami, a Enter o
 | Kafelek | Pokazuje | Enter |
 |---|---|---|
 | Wiadomości | nowe wiadomości, ostatnia rozmowa | lista rozmów |
-| Kontakty | liczba wszystkich kontaktów, w tym repeaterów | lista kontaktów |
+| Kontakty | liczba wszystkich kontaktów (z repeaterami), ostatnio słyszany węzeł | lista kontaktów |
 | Radio | preset (SF6 / SF8) i częstotliwość | ustawienia radia |
 | Sieć | Bluetooth (nazwa połączonej aplikacji) i WiFi (dBm) | ustawienia Bluetooth |
 | Widmo | szum na naszym kanale z wykresem, zajętość kanału | ekran Widmo |

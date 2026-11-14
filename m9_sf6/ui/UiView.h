@@ -16,7 +16,7 @@ struct UiRow { char text[44]; char sub[80]; char right[64]; uint8_t icon; uint8_
 struct UiBubble { char who[24]; char meta[32]; char text[168]; char path[72]; bool out; bool sel; bool sep; };   // sep: nad dymkiem kreska „nowe wiadomości”
 struct UiKV { char k[64]; char v[52]; };
 struct UiHint { char key[14]; char txt[32]; };
-struct UiTile { char label[24]; char value[36]; char sub[72]; uint8_t icon; bool accent; uint8_t kind; };   // kind: UIT_*
+struct UiTile { char label[24]; char value[36]; char sub[72]; uint8_t icon; bool accent; uint8_t kind; char side[16]; };   // side: drobny dopisek z prawej strony wartości   // kind: UIT_*
 enum UiTileKind { UIT_PLAIN, UIT_NOISE, UIT_BATT, UIT_NET };
 
 #define UI_SPARK_N    48        // punkty małych wykresów na kafelkach
