@@ -6,7 +6,7 @@ i oglądasz mapę bez telefonu. Przez Bluetooth łączy się z aplikacjami **Mes
 
 Domyślny preset radia: **SF6 — 869,618 MHz · BW 62,5 kHz · SF6 · CR 4/8**. Do wyboru jest też **EU/UK Narrow (SF8)**.
 
-Aktualna wersja: **0.24.0** (numer jest też na ekranie startowym i w Ustawieniach).
+Aktualna wersja: **0.25.0** (numer jest też na ekranie startowym i w Ustawieniach).
 
 ---
 
@@ -47,7 +47,7 @@ Stały PIN można ustawić w **Ustawieniach › Bluetooth**.
 
 ### 5. Kolejne aktualizacje (przez WiFi, bez komputera)
 
-**Ustawienia › karta Narzędzia › Aktualizacja** (albo Ustawienia › System › Aktualizacja przez WiFi):
+**Narzędzia › Aktualizacja** (albo Ustawienia › System › Aktualizacja przez WiFi):
 
 1. Wejdź w **Sieci WiFi**, wybierz **Szukaj sieci**, wskaż swoją sieć na liście (domową albo hotspot z telefonu) i wpisz hasło. Można zapisać do 4 sieci; urządzenie samo łączy się z tą, która jest w zasięgu.
 2. Urządzenie sprawdzi wersję w wydaniu „Najnowszy build”. Gdy jest nowsza, sprawdzi **podpis cyfrowy**, pobierze plik, porówna go z podpisem i samo się zrestartuje.
@@ -151,8 +151,8 @@ Kafelek Bateria pokazuje, jak spada napięcie i ile czasu zostało. Pierwsze osz
 
 ### Pozostałe
 
-- **Ustawienia** mają dwie karty (przełącza je klawisz Menu albo strzałki na pasku kart). Karta **Ustawienia** – osiem działów: Radio, Bluetooth, Pozycja i prywatność, Advert, Kontakty, Wiadomości, Ekran i dźwięk, System. Każdą wartość wybiera się z listy.
-- Karta **Narzędzia**: Widmo, Log pakietów, Discovery, Mapa z internetu, Aktualizacja, Bateria.
+- **Narzędzia** (klucz na dolnym pasku, przed Ustawieniami): sześć kafelków z wartościami na żywo – Widmo, Log pakietów, Discovery, Mapa, Aktualizacja, Bateria.
+- **Ustawienia** w ośmiu działach: Radio, Bluetooth, Pozycja i prywatność, Advert, Kontakty, Wiadomości, Ekran i dźwięk, System. Każdą wartość wybiera się z listy.
 - **Radio:** presety SF6 i EU/UK Narrow, własne parametry, moc nadawania, bajty trasy (1 / 2 / 3), limit nadawania.
 - **Blokada ekranu:** włącza się z wygaszeniem ekranu. Do wyboru zwykła (Wstecz, potem Enter) albo z **kodem** (opis niżej).
 - **Dźwięki:** wiadomości, adverty repeaterów (wszystkie albo tylko ulubione), wyciszenie całego urządzenia.

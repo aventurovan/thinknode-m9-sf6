@@ -42,7 +42,7 @@ struct UiMsg {
 };
 
 class UITask : public AbstractUITask {
-  enum Scr { S_START = 0, S_MSGS = 1, S_CONTACTS = 2, S_RPTS = 3, S_SETTINGS = 4,
+  enum Scr { S_START = 0, S_MSGS = 1, S_CONTACTS = 2, S_RPTS = 3, S_TOOLS = 4, S_SETTINGS = 5,
              S_THREAD, S_KV, S_BOOT, S_MENU, S_HEARD, S_QUICK, S_DISC, S_LOGIN, S_ADMIN, S_ADMIN_ACT, S_ADMIN_CLI,
              S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS, S_PICK, S_MAP, S_MAP_NET, S_TIME, S_OTA, S_SPEC, S_LOG, S_CHINFO, S_QR, S_WIFI };
   enum InputMode { IN_MSG = 0, IN_CHANNEL, IN_FREQ, IN_NAME, IN_TIME, IN_PASS, IN_CLI, IN_LAT, IN_LON, IN_PIN, IN_WIFI_SSID, IN_WIFI_PASS, IN_MAP_URL, IN_LOCKPIN };
@@ -69,7 +69,7 @@ class UITask : public AbstractUITask {
   uint16_t* _list; int _list_n;          // indeksy kontaktów dla bieżącej listy
   UiKV* _kv; int _kv_n; char _kv_title[48], _kv_right[80];
 
-  Nav _nav[12]; int _depth; int16_t _tabsel[5];
+  Nav _nav[12]; int _depth; int16_t _tabsel[6];
   Cfg _cfg;
   Pw _pw[UI_PW_MAX]; int _pw_n;
 
@@ -220,7 +220,6 @@ class UITask : public AbstractUITask {
   // pasek stanu: radio słucha, mignięcia strzałek nadawania i odbioru; wymuszany stan podświetlenia klawiatury
   unsigned long _radio_ok_at, _tx_until, _rx_until, _kb_next; uint32_t _tx_seen, _rx_seen;
   void kbLight();
-  uint8_t _set_page; bool _set_chip;      // Ustawienia: karta (0 ustawienia, 1 narzędzia) i czy kursor jest na wierszu kart   // kiedy ostatnio wysłaliśmy advert z ekranu; miejsce, w którym zmieniamy kafelek
   void fillSpec(); void keySpec(uint8_t k); void sweepRange(float& f0, float& step);
   void buildLog(); void fillLog(); void keyLog(uint8_t k); void detailPkt(uint32_t seq);
   void fillChInfo(); void fillQR();
@@ -229,6 +228,8 @@ class UITask : public AbstractUITask {
   void openMap();
   void drawMap();
   void keyMap(uint8_t k);
+  void fillTools();
+  void pushMap();
   void saveWifi();
   int  wifiSaved(const char* ssid);      // numer zapisanej sieci o tej nazwie albo -1
   int  wifiScanRow(int k);               // k-ta sieć ze skanu, której nie ma wśród zapisanych (numer w wynikach) albo -1

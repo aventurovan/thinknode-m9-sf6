@@ -157,7 +157,8 @@ int main(int argc, char** argv) {
   keys({ M9K_RIGHT, 'i' }); save("mapa-przesunieta");
   keys({ M9K_F3 }); save("mapa-menu");
   keys({ M9K_BACK, M9K_F4, M9K_DOWN, M9K_ENTER }); save("menu-repeatera-mapa");
-  keys({ M9K_HOME, M9K_LEFT, M9K_RIGHT, M9K_ENTER, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("zegar");
+  keys({ M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("rpt-mapa"); keys({ M9K_BACK }); save("rpt-mapa-wstecz");
+  keys({ M9K_HOME, M9K_LEFT, M9K_RIGHT, M9K_ENTER, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("zegar");
   keys({ M9K_RIGHT, M9K_UP, M9K_RIGHT, M9K_RIGHT, M9K_DOWN }); save("zegar-zmiana");
   keys({ M9K_BACK, M9K_HOME, M9K_DOWN, M9K_DOWN, M9K_RIGHT, M9K_RIGHT }); save("pasek-podglad");
   // trasa wiadomości na mapie: odebrana (nadawca → repeatery → ja) i wysłana (kto powtórzył)
@@ -215,10 +216,9 @@ int main(int argc, char** argv) {
   keys({ M9K_HOME }); save("k-z-powrotem");
   // Ustawienia: karty Ustawienia / Narzędzia
   keys({ M9K_HOME, M9K_LEFT }); save("u-ustawienia");
-  keys({ M9K_UP, M9K_UP, M9K_UP, M9K_UP, M9K_UP }); save("u-kursor-na-kartach");
-  keys({ M9K_RIGHT }); save("u-narzedzia-karty"); keys({ M9K_DOWN, M9K_RIGHT }); save("u-narzedzia");
+  keys({ M9K_F4, M9K_RIGHT }); save("u-narzedzia"); keys({ M9K_DOWN, M9K_DOWN }); save("u-narzedzia-pasek"); keys({ M9K_UP, M9K_UP });
   keys({ M9K_DOWN, M9K_ENTER }); save("u-mapa-z-internetu"); keys({ M9K_BACK });
-  keys({ M9K_DOWN, M9K_LEFT, M9K_ENTER }); save("u-aktualizacja"); keys({ M9K_BACK });
+  keys({ M9K_RIGHT, M9K_ENTER }); save("u-aktualizacja"); keys({ M9K_BACK });
   // sieci WiFi: lista ze skanu, zapis sieci otwartej, hasło do zabezpieczonej, menu zapisanej
   keys({ M9K_ENTER, M9K_DOWN, M9K_ENTER }); save("w-sieci-puste");
   keys({ M9K_ENTER }); save("w-pytanie-bt"); keys({ M9K_ENTER }); save("w-szukam");
@@ -228,7 +228,6 @@ int main(int argc, char** argv) {
   run(3000); keys({ M9K_ENTER }); save("w-menu-sieci"); keys({ M9K_BACK, M9K_BACK });
   { extern const char* sim_wifi_ap; sim_wifi_ap = "Furgon \xC2\xB7 kanał 6 \xC2\xB7 -47 dBm \xC2\xB7 3 AP"; run(6000); save("w-podglad"); sim_wifi_ap = ""; }
   keys({ M9K_BACK, M9K_BACK });
-  keys({ M9K_F3 }); save("u-menu-wraca");
   // zaznaczanie wielu kontaktów
   keys({ M9K_HOME }); save("z-start");
   keys({ M9K_HOME, M9K_RIGHT, M9K_ENTER }); keys({ M9K_ENTER }); save("z-menu-kontaktu");

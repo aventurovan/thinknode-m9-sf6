@@ -44,6 +44,7 @@ static const char* const IC_ROOM[12] = { "", ".##########.", ".#........#.", ".#
 
 static const char* const IC_HOME[12] = { ".....##.....", "....####....", "...######...", "..########..", ".##########.", "############", "..########..", "..###..###..", "..###..###..", "..###..###..", "..###..###..", "" };
 static const char* const IC_GEAR[12] = { ".....##.....", "..#.####.#..", ".##########.", "..###..###..", ".###....###.", "###......###", "###......###", ".###....###.", "..###..###..", ".##########.", "..#.####.#..", ".....##....." };
+static const char* const IC_TOOL[12] = { "........###.", ".......##...", "......###..#", "......######", ".....######.", "....####....", "...####.....", "..####......", ".####.......", "####........", "###.........", ".#.........." };
 static const char* const IC_SCREEN[12] = { "", "############", "#..........#", "#..........#", "#..........#", "#..........#", "#..........#", "############", ".....##.....", "...######...", "", "" };
 static const char* const IC_SHIELD[12] = { ".....##.....", "..########..", ".##########.", ".##########.", ".##########.", ".##########.", "..########..", "..########..", "...######...", "....####....", ".....##.....", "" };
 
@@ -122,13 +123,13 @@ static void drawStatus(Gfx& g, const UiView& v) {
   }
 }
 
-// dolny pasek: ikony Start, Wiadomości, Kontakty, Repeatery, Ustawienia; aktywna na bursztynowym tle
+// dolny pasek: ikony Start, Wiadomości, Kontakty, Repeatery, Narzędzia, Ustawienia; aktywna na bursztynowym tle
 static void drawTabs(Gfx& g, int active, int unread, bool focus) {
-  static const char* const* const IC[5] = { IC_HOME, IC_MAIL, IC_USER, IC_TOWER, IC_GEAR };
+  static const char* const* const IC[6] = { IC_HOME, IC_MAIL, IC_USER, IC_TOWER, IC_TOOL, IC_GEAR };
   int y = GFX_H - BOTTOM_H;
   g.fillRect(0, y, GFX_W, BOTTOM_H, C_BAR);
-  for (int i = 0; i < 5; i++) {
-    int cx = i * 64 + 32;
+  for (int i = 0; i < 6; i++) {
+    int cx = i * 53 + 27;
     if (i == active && focus) { g.fillRound(cx - 25, y + 1, 50, 22, 11, C_TXT); g.fillRound(cx - 22, y + 3, 44, 18, 9, C_ACC); g.icon(cx - 6, y + 6, IC[i], C_INK); }   // chodzimy po pasku: biała ramka
     else if (i == active) { g.fillRound(cx - 22, y + 3, 44, 18, 9, C_ACC); g.icon(cx - 6, y + 6, IC[i], C_INK); }
     else g.icon(cx - 6, y + 6, IC[i], C_DIM);

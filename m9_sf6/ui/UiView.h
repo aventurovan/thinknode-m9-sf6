@@ -37,7 +37,7 @@ struct UiView {
   char radio[6]; bool radio_ok; bool tx_now, rx_now;      // pasek: preset radia (np. SF6), czy radio słucha, mignięcie przy nadaniu / odbiorze
   // ekran
   uint8_t screen;
-  int8_t tab;                       // 0..4 = zakładka na dolnym pasku, -1 = podpowiedzi klawiszy
+  int8_t tab;                       // 0..5 = zakładka na dolnym pasku, -1 = podpowiedzi klawiszy
   bool bar_focus;                   // chodzimy po dolnym pasku (ikona w ramce)
   char title[48]; char title_right[80];
   // lista

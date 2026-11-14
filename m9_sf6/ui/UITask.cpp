@@ -19,6 +19,7 @@
 #define FILE_PW          "/m9ui.pw"
 #define FILE_MSGS        "/m9ui.msg"
 #define FILE_MUTED       "/m9ui.mut"
+#define NTABS            6                                      // ekrany na dolnym pasku: Start, Wiadomości, Kontakty, Repeatery, Narzędzia, Ustawienia
 #define FILE_WIFI        "/m9ui.wifi"
 #define FILE_LOCK        "/m9ui.lck"
 #define MAP_URL_DEFAULT  "https://github.com/aventurovan/thinknode-m9-sf6/releases/download/mapa/"
@@ -154,7 +155,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   for (int i = 0; i < 6; i++) _cfg.tiles[i] = (uint8_t)i;
   _adv_sent_at = 0; _tile_slot = 0;
   _radio_ok_at = _tx_until = _rx_until = _kb_next = 0; _tx_seen = _rx_seen = 0;
-  _set_page = 0; _set_chip = false;
+
   _pw_n = 0;
   _cur[0] = 0; _cur_chan = false; memset(_cur_key, 0, sizeof(_cur_key)); _msgs_old_format = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_new = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1; _wifi_sel = -1; _wifi_new[0] = 0; _wifi_scan_st = 0;
   _nh_n = 0; _nh_next = _nh_slot_end = 0; _nh_min = 1; _bh_n = _bh_seg = 0; _bh_next = 30000; _bh_chg = false;
@@ -677,6 +678,27 @@ void UITask::pollSent() {
   }
 }
 
+static int cmpNoCase(const char* a, const char* b) {
+  while (*a == '#') a++;
+  while (*b == '#') b++;
+  for (;; a++, b++) {
+    int x = tolower((unsigned char)*a), y = tolower((unsigned char)*b);
+    if (x != y) return x - y;
+    if (!x) return 0;
+  }
+}
+
+template <class T> static bool threadBefore(const T& a, const T& b) {
+  if ((a.chan != 0) != (b.chan != 0)) return a.chan != 0;      // kanały nad rozmowami prywatnymi
+  if (a.chan) {
+    bool pa = strcasecmp(a.name, "Public") == 0, pb = strcasecmp(b.name, "Public") == 0;
+    if (pa != pb) return pa;
+    return cmpNoCase(a.name, b.name) < 0;
+  }
+  if ((a.unread > 0) != (b.unread > 0)) return a.unread > 0;
+  return a.last > b.last;
+}
+
 void UITask::buildThreads() {
   _thread_n = 0;
   ChannelDetails cd;
@@ -698,11 +720,12 @@ void UITask::buildThreads() {
     _threads[k].last = m.ts; _threads[k].last_msg = i;
     if (m.unread && _threads[k].unread < 99) _threads[k].unread++;
   }
-  // nieprzeczytane na górze, potem najnowsze
+  // Stała kolejność: kanał Public, potem pozostałe kanały alfabetycznie (nie przeskakują po nowej wiadomości),
+  // pod nimi rozmowy prywatne — nieprzeczytane wyżej, potem najnowsze.
   for (int i = 1; i < _thread_n; i++) {
     Thread t = _threads[i];
     int j = i - 1;
-    while (j >= 0 && ((_threads[j].unread > 0) < (t.unread > 0) || ((_threads[j].unread > 0) == (t.unread > 0) && _threads[j].last < t.last))) { _threads[j + 1] = _threads[j]; j--; }
+    while (j >= 0 && threadBefore(t, _threads[j])) { _threads[j + 1] = _threads[j]; j--; }
     _threads[j + 1] = t;
   }
 }
@@ -908,9 +931,8 @@ void UITask::prepare(uint8_t s) {
 }
 
 void UITask::tab(uint8_t s) {
-  if (_depth >= 1 && _nav[0].scr < 5) _tabsel[_nav[0].scr] = _nav[0].sel;
+  if (_depth >= 1 && _nav[0].scr < NTABS) _tabsel[_nav[0].scr] = _nav[0].sel;
   if (s != S_CONTACTS) { _search[0] = 0; _sel_mode = false; }
-  _set_chip = false;     // zaznaczanie kończy się po wyjściu z Kontaktów
   _depth = 1;
   _bar = false;
   _nav[0].scr = s; _nav[0].sel = _tabsel[s]; _nav[0].top = 0;
@@ -1237,7 +1259,7 @@ void UITask::doAct(uint8_t act) {
       break;
     }
     case A_DETAIL: detailContact(); break;
-    case A_SHOWMAP: _map_lat = _clat; _map_lon = _clon; _map_follow = false; if (_map_zoom < 12) _map_zoom = 13; while (!_map.hasZoom(_map_zoom) && _map_zoom > _map.minZoom()) _map_zoom--; openMap(); break;
+    case A_SHOWMAP: _map_lat = _clat; _map_lon = _clon; _map_follow = false; pop(); pushMap(); break;
     case A_MANAGE: if (ctByKey(_ck, c)) push(S_LOGIN); break;
     case A_DELETE: { char t[40]; snprintf(t, sizeof(t), "Usunąć kontakt?"); ask(C_DEL_CONTACT, t, _cname); break; }
   }
@@ -1651,7 +1673,7 @@ int UITask::listCount(uint8_t s) {
 void UITask::listHead(uint8_t s) {
   UiView& v = *_v;
   auto hint = [&](const char* k, const char* t) { if (v.nhints < 4) { scopy(v.hint[v.nhints].key, sizeof(v.hint[0].key), k); scopy(v.hint[v.nhints].txt, sizeof(v.hint[0].txt), t); v.nhints++; } };
-  v.tab = s < 5 ? (int8_t)s : -1;
+  v.tab = s < NTABS ? (int8_t)s : -1;
   switch (s) {
     case S_MSGS:
       strcpy(v.title, "Wiadomości");
@@ -2609,11 +2631,19 @@ void UITask::fitRoute() {
 // ---------------- mapa ----------------
 
 void UITask::openMap() {
-  if (_depth >= 1 && _nav[0].scr < 5) _tabsel[_nav[0].scr] = _nav[0].sel;
+  if (_depth >= 1 && _nav[0].scr < NTABS) _tabsel[_nav[0].scr] = _nav[0].sel;
   _depth = 1; _bar = false;
   _nav[0].scr = S_MAP; _nav[0].sel = 0; _nav[0].top = 0;
   if (!_map.hasZoom(_map_zoom) && _map.numPacks() > 0) { _map_zoom = 12; while (!_map.hasZoom(_map_zoom) && _map_zoom > _map.minZoom()) _map_zoom--; }
   _dirty = true;
+}
+
+// mapa otwarta z konkretnego miejsca (lokalizacja repeatera, kontaktu, pakietu): Wstecz wraca tam, skąd przyszliśmy
+void UITask::pushMap() {
+  if (_map_zoom < 12) _map_zoom = 13;
+  while (!_map.hasZoom(_map_zoom) && _map_zoom > _map.minZoom()) _map_zoom--;
+  _bar = false;
+  push(S_MAP);
 }
 
 void UITask::keyMap(uint8_t k) {
@@ -2748,7 +2778,7 @@ void UITask::key(uint8_t k) {
 
   if (_bar) {                                         // chodzenie po dolnym pasku
     if (k == M9K_LEFT || k == M9K_RIGHT) {            // przejście po pasku od razu pokazuje wybrany ekran
-      uint8_t t = (uint8_t)((_bar_sel + (k == M9K_LEFT ? 4 : 1)) % 5);
+      uint8_t t = (uint8_t)((_bar_sel + (k == M9K_LEFT ? NTABS - 1 : 1)) % NTABS);
       tab(t);
       _bar = true; _bar_sel = (int8_t)t;
     } else if (k == M9K_UP || k == M9K_ENTER) _bar = false;       // wejście w zawartość ekranu
@@ -2778,9 +2808,7 @@ void UITask::key(uint8_t k) {
     }
     if (k == M9K_F3 && _chas_pos) {
       _map_lat = _clat; _map_lon = _clon; _map_follow = false;
-      if (_map_zoom < 12) _map_zoom = 13;
-      while (!_map.hasZoom(_map_zoom) && _map_zoom > _map.minZoom()) _map_zoom--;
-      openMap();
+      pushMap();
       return;
     }
   }
@@ -2815,25 +2843,12 @@ void UITask::key(uint8_t k) {
     if (k == M9K_ENTER && sel() >= 0 && sel() < 6) tileEnter(_cfg.tiles[sel()]);
     return;
   }
-  if (s == S_SETTINGS) {
-    int n = _set_page ? 6 : 8;
-    if (k == M9K_F3) { _set_page ^= 1; sel() = 0; _set_chip = false; return; }      // Menu: druga karta
-    if (_set_chip) {                                   // chodzenie po kartach „Ustawienia / Narzędzia”
-      if (k == M9K_LEFT) { if (_set_page == 1) { _set_page = 0; sel() = 0; } else { _set_chip = false; tab(S_RPTS); } }
-      else if (k == M9K_RIGHT) { if (_set_page == 0) { _set_page = 1; sel() = 0; } else { _set_chip = false; tab(S_START); } }
-      else if (k == M9K_DOWN || k == M9K_ENTER) _set_chip = false;
-      return;
-    }
-    if (k == M9K_UP && sel() < 2) { _set_chip = true; return; }      // z górnego rzędu ▲ wchodzi na karty
-    if (gridKey(k, n, 2)) return;
-    if (k == M9K_DOWN) { _bar = true; _bar_sel = S_SETTINGS; return; }
+  if (s == S_TOOLS) {                                  // 6 kafelków jak na ekranie startowym
+    if (gridKey(k, 6, 3)) return;
+    if (k == M9K_DOWN) { _bar = true; _bar_sel = S_TOOLS; return; }
     if (k == M9K_LEFT) { tab(S_RPTS); return; }
-    if (k == M9K_RIGHT) { tab(S_START); return; }
-    if (k == M9K_ENTER && _set_page == 0) {
-      static const uint8_t TO[8] = { S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS };
-      if (sel() == 0) radioLoad();
-      push(TO[sel() < 8 ? sel() : 0]);
-    } else if (k == M9K_ENTER) {
+    if (k == M9K_RIGHT) { tab(S_SETTINGS); return; }
+    if (k == M9K_ENTER) {
       switch (sel()) {
         case 0: push(S_SPEC); break;
         case 1: push(S_LOG); break;
@@ -2845,6 +2860,18 @@ void UITask::key(uint8_t k) {
     }
     return;
   }
+  if (s == S_SETTINGS) {
+    if (gridKey(k, 8, 2)) return;
+    if (k == M9K_DOWN) { _bar = true; _bar_sel = S_SETTINGS; return; }
+    if (k == M9K_LEFT) { tab(S_TOOLS); return; }
+    if (k == M9K_RIGHT) { tab(S_START); return; }
+    if (k == M9K_ENTER) {
+      static const uint8_t TO[8] = { S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS };
+      if (sel() == 0) radioLoad();
+      push(TO[sel() >= 0 && sel() < 8 ? sel() : 0]);
+    }
+    return;
+  }
 
   int count = listCount(s);
   int16_t& i = sel();
@@ -2852,13 +2879,13 @@ void UITask::key(uint8_t k) {
   if (k == M9K_UP) { if (i > 0) i--; return; }
   if (k == M9K_DOWN) {
     if (i < count - 1) i++;
-    else if (s < 5 && _depth == 1) { _bar = true; _bar_sel = (int8_t)s; }      // z ostatniego wiersza ▼ schodzi na pasek
+    else if (s < NTABS && _depth == 1) { _bar = true; _bar_sel = (int8_t)s; }      // z ostatniego wiersza ▼ schodzi na pasek
     return;
   }
   if (listKey(s, i, k)) return;
-  if (s < 5 && _depth == 1) {                         // ekrany z zakładkami: ◄ ► zmieniają ekran
-    if (k == M9K_LEFT) { tab((s + 4) % 5); return; }
-    if (k == M9K_RIGHT) { tab((s + 1) % 5); return; }
+  if (s < NTABS && _depth == 1) {                     // ekrany z zakładkami: ◄ ► zmieniają ekran
+    if (k == M9K_LEFT) { tab((s + NTABS - 1) % NTABS); return; }
+    if (k == M9K_RIGHT) { tab((s + 1) % NTABS); return; }
   }
   if (k == M9K_ENTER && count > 0) listEnter(s, i);
 }
@@ -2950,8 +2977,13 @@ void UITask::fillTile(UiTile& t, uint8_t id) {
       int unread = v.unread;
       t.icon = UII_MAIL; t.accent = unread > 0;
       if (unread > 0) snprintf(t.value, sizeof(t.value), unread == 1 ? "1 nowa" : "%d nowe", unread); else strcpy(t.value, "brak nowych");
-      if (_thread_n > 0 && _threads[0].unread) scopy(t.sub, sizeof(t.sub), _threads[0].name);
-      else if (_thread_n > 0 && _threads[0].last) { fmtAgo(ago, sizeof(ago), _threads[0].last); snprintf(t.sub, sizeof(t.sub), "ostatnia: %s", ago); }
+      int nw = -1, un = -1;                            // lista ma stałą kolejność, więc najnowszy wątek trzeba znaleźć
+      for (int q = 0; q < _thread_n; q++) {
+        if (_threads[q].last && (nw < 0 || _threads[q].last > _threads[nw].last)) nw = q;
+        if (_threads[q].unread && (un < 0 || _threads[q].last > _threads[un].last)) un = q;
+      }
+      if (un >= 0) scopy(t.sub, sizeof(t.sub), _threads[un].name);
+      else if (nw >= 0) { fmtAgo(ago, sizeof(ago), _threads[nw].last); snprintf(t.sub, sizeof(t.sub), "ostatnia: %s", ago); }
       snprintf(t.sub2, sizeof(t.sub2), "rozmów: %d", _thread_n);
       break;
     }
@@ -3052,7 +3084,7 @@ void UITask::fillTile(UiTile& t, uint8_t id) {
       break;
     case T_DISC:                                     // ping do sąsiadów: ilu odpowiedziało ostatnio
       t.icon = UII_PING;
-      if (the_mesh.ui_disc_tag == 0) { strcpy(t.value, "ping"); strcpy(t.sub, "kto mnie słyszy?"); strcpy(t.sub2, "Enter: zapytaj"); }
+      if (the_mesh.ui_disc_tag == 0) { strcpy(t.value, "ping"); strcpy(t.sub, "kto słyszy?"); strcpy(t.sub2, "Enter: zapytaj"); }
       else {
         snprintf(t.value, sizeof(t.value), "%d", the_mesh.ui_disc_n);
         int best = -128; for (int i = 0; i < the_mesh.ui_disc_n; i++) if (the_mesh.ui_disc[i].snr_rx > best) best = the_mesh.ui_disc[i].snr_rx;
@@ -3091,42 +3123,44 @@ void UITask::tileEnter(uint8_t id) {
   }
 }
 
+// Narzędzia: sześć kafelków w układzie ekranu startowego (wartość na żywo i opis)
+void UITask::fillTools() {
+  UiView& v = *_v;
+  v.screen = UIS_START; v.tab = S_TOOLS;
+  v.grid_cols = 3; v.ntiles = 6;
+  if (sel() >= 6 || sel() < 0) sel() = 0;
+  v.sel = sel();
+  strcpy(v.title, "Narzędzia"); snprintf(v.title_right, sizeof(v.title_right), "wersja %s", M9_FW_VERSION);
+  fillTile(v.tile[0], T_SPEC);
+  fillTile(v.tile[1], T_LOG);
+  fillTile(v.tile[2], T_DISC);
+  {
+    UiTile& t = v.tile[3];
+    strcpy(t.label, "Mapa"); t.icon = UII_SD; t.icol = UIC_GREEN;
+    if (m9dlActive()) { strcpy(t.value, "pobieram"); scopy(t.sub, sizeof(t.sub), m9dlStatus()); }
+    else if (!_map.sdOk()) { strcpy(t.value, "brak karty"); strcpy(t.sub, _sd_pending ? "sprawdzam…" : "karta SD"); }
+    else if (_map.numPacks() == 0) { strcpy(t.value, "brak mapy"); strcpy(t.sub, "pobierz z internetu"); }
+    else { snprintf(t.value, sizeof(t.value), "z%d–%d", _map.minZoom(), _map.maxZoom()); snprintf(t.sub, sizeof(t.sub), "plików: %d", _map.numPacks()); snprintf(t.sub2, sizeof(t.sub2), "karta %lu GB", (unsigned long)(_map.sdSizeMB() / 1024)); }
+  }
+  {
+    UiTile& t = v.tile[4];
+    strcpy(t.label, "Aktualizacja"); t.icon = UII_BOLT; t.icol = UIC_AMBER;
+    int os = m9otaState();
+    if (os == 2) { scopy(t.value, sizeof(t.value), m9otaVersion()); strcpy(t.sub, "jest nowsza wersja"); t.accent = true; }
+    else if (os == 4) { snprintf(t.value, sizeof(t.value), "%d%%", m9otaPercent()); strcpy(t.sub, "instaluję"); }
+    else { scopy(t.value, sizeof(t.value), M9_FW_VERSION); strcpy(t.sub, os == 1 ? "sprawdzam…" : os == 3 ? "masz aktualną" : "przez WiFi"); }
+    if (_wifi.n == 0) strcpy(t.sub2, "ustaw sieć WiFi"); else wifiNames(t.sub2, sizeof(t.sub2));
+  }
+  fillTile(v.tile[5], T_BATT);
+}
+
 void UITask::fillSettings() {
   UiView& v = *_v;
-  v.screen = UIS_GRID; v.tab = 4;
-  v.grid_cols = 2; v.ntiles = _set_page ? 6 : 8;
+  v.screen = UIS_GRID; v.tab = S_SETTINGS;
+  v.grid_cols = 2; v.ntiles = 8;
   if (sel() >= v.ntiles) sel() = v.ntiles - 1;
   v.sel = sel();
   strcpy(v.title, "Ustawienia"); snprintf(v.title_right, sizeof(v.title_right), "wersja %s", M9_FW_VERSION);
-  strcpy(v.chips[0], "Ustawienia"); strcpy(v.chips[1], "Narzędzia");      // dwie karty, przełączane jak filtry w Kontaktach
-  v.nchips = 2; v.chip_active = _set_page; v.chip_focus = _set_chip;
-  if (_set_page == 1) {                                // Narzędzia
-    static const char* const N[6] = { "Widmo", "Log pakietów", "Discovery", "Mapa z internetu", "Aktualizacja", "Bateria" };
-    static const uint8_t IC[6] = { UII_SPEC, UII_CHECK, UII_PING, UII_SD, UII_BOLT, UII_BATT };
-    static const uint8_t COL[6] = { UIC_VIOLET, UIC_BLUE, UIC_VIOLET, UIC_GREEN, UIC_AMBER, UIC_GREEN };
-    for (int i = 0; i < 6; i++) {
-      UiTile& t = v.tile[i];
-      strcpy(t.label, N[i]); t.icon = IC[i]; t.icol = COL[i];
-      switch (i) {
-        case 0: snprintf(t.sub, sizeof(t.sub), "szum %d dBm", m9radioNoiseFloor()); break;
-        case 1: {
-          unsigned long now = millis(); int perMin = 0;
-          for (int k = 0; k < m9logCount(); k++) { if (now - m9logGet(k)->ms > 60000UL) break; perMin++; }
-          snprintf(t.sub, sizeof(t.sub), "%d/min · razem %lu", perMin, (unsigned long)m9logTotal());
-          break;
-        }
-        case 2: if (the_mesh.ui_disc_tag) snprintf(t.sub, sizeof(t.sub), "odpowiedzi: %d", the_mesh.ui_disc_n); else strcpy(t.sub, "kto mnie słyszy?"); break;
-        case 3:
-          if (!_map.sdOk()) strcpy(t.sub, _sd_pending ? "sprawdzam kartę…" : "brak karty SD");
-          else if (_map.numPacks() == 0) strcpy(t.sub, "brak mapy · pobierz");
-          else snprintf(t.sub, sizeof(t.sub), "z%d–%d · plików: %d", _map.minZoom(), _map.maxZoom(), _map.numPacks());
-          break;
-        case 4: snprintf(t.sub, sizeof(t.sub), "masz %s", M9_FW_VERSION); break;
-        case 5: { char e[40]; battEstimate(e, sizeof(e)); snprintf(t.sub, sizeof(t.sub), "%d %% · %s", battPercent(getBattMilliVolts()), e); break; }
-      }
-    }
-    return;
-  }
   static const char* const N[8] = { "Radio", "Bluetooth", "Pozycja", "Advert", "Kontakty", "Wiadomości", "Ekran i dźwięk", "System" };
   static const uint8_t IC[8] = { UII_SIGNAL, UII_BT, UII_GPS, UII_TOWER, UII_USER, UII_MAIL, UII_SCREEN, UII_GEAR };
   for (int i = 0; i < 8; i++) {
@@ -3323,6 +3357,7 @@ void UITask::fill() {
   if (s == S_START) fillStart();
   else if (s == S_TIME) fillTime();
   else if (s == S_SETTINGS) fillSettings();
+  else if (s == S_TOOLS) fillTools();
   else if (s == S_THREAD) fillThread();
   else if (s == S_KV) fillKv();
   else if (s == S_SPEC) fillSpec();
