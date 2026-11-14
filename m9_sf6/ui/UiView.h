@@ -20,7 +20,7 @@ struct UiTile { char label[24]; char value[36]; char sub[72]; uint8_t icon; bool
 
 struct UiView {
   // pasek stanu
-  char time[6]; int unread; int sats; bool gps_on; uint8_t bt; int batt; bool charging; bool status;
+  char time[6]; int unread; int sats; bool gps_on; uint8_t bt; uint8_t wifi; int batt; bool charging; bool status;
   // ekran
   uint8_t screen;
   int8_t tab;                       // 0..4 = zakładka na dolnym pasku, -1 = podpowiedzi klawiszy

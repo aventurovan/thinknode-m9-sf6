@@ -17,6 +17,8 @@ int m9otaState() { return 0; }
 bool m9otaActive() { return false; }
 const char* m9otaVersion() { return ""; }
 int m9otaPercent() { return 0; }
+int sim_wifi = -1;
+int m9wifiBars() { return sim_wifi; }
 int m9bleBondCount() { return 1; }
 int m9bleClearBonds() { return 0; }
 void m9bleShutdown() { }

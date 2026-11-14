@@ -82,6 +82,20 @@ static void drawStatus(Gfx& g, const UiView& v) {
   int fill = v.batt * 16 / 100; if (fill < 1) fill = 1; if (fill > 16) fill = 16;
   g.fillRect(xr + 2, 7, fill, 6, v.batt <= 15 ? C_RED : C_GRN);
   xr -= 8;
+  if (v.wifi) {                                   // WiFi: 1 = łączy (szare), 2..5 = 1..4 kreski, 6 = własna sieć do wgrywania
+    static const char* const W3[12] = { "...######...", ".##......##.", "#..........#", "", "", "", "", "", "", "", "", "" };
+    static const char* const W2[12] = { "", "", "....####....", "..##....##..", "", "", "", "", "", "", "", "" };
+    static const char* const W1[12] = { "", "", "", "", "....####....", "...#....#...", "", "", "", "", "", "" };
+    static const char* const W0[12] = { "", "", "", "", "", "", "", ".....##.....", ".....##.....", "", "", "" };
+    int lvl = v.wifi == 6 ? 4 : v.wifi - 1;
+    uint16_t on = v.wifi == 6 ? C_ACC : C_TXT;
+    xr -= 13;
+    g.icon(xr, 5, W0, lvl >= 1 ? on : C_DIM);
+    g.icon(xr, 5, W1, lvl >= 2 ? on : C_LINE);
+    g.icon(xr, 5, W2, lvl >= 3 ? on : C_LINE);
+    g.icon(xr, 5, W3, lvl >= 4 ? on : C_LINE);
+    xr -= 6;
+  }
   if (v.bt) { xr -= 12; g.icon(xr, 4, IC_BT, v.bt == 2 ? C_BLUE : C_DIM); xr -= 6; }
   if (v.gps_on) {
     snprintf(t, sizeof(t), "%d", v.sats);

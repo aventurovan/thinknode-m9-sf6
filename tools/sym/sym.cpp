@@ -119,6 +119,8 @@ int main(int argc, char** argv) {
   save("przewijanie-2");
   for (int i = 0; i < 40; i++) keys({ M9K_UP }); save("przewijanie-gora");
   keys({ M9K_F3 }); save("przewijanie-menu");
+  extern int sim_wifi; sim_wifi = 3; keys({ M9K_BACK, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_F3 }); save("menu-odebranej-wifi");
+  sim_wifi = 1; save("wifi-slabe"); sim_wifi = 0; save("wifi-laczy"); sim_wifi = 5; save("wifi-ap");
   printf("zrzutow: %d\n", shot);
   return 0;
 }

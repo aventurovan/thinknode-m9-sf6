@@ -50,7 +50,7 @@ class UITask : public AbstractUITask {
   enum Confirm { C_NONE = 0, C_DEL_CHANNEL, C_DEL_CONTACT, C_REBOOT, C_FACTORY, C_RPT_REBOOT, C_RPT_SF6, C_CLEAR_MSGS, C_CLEAR_PW, C_CLEAR_BONDS, C_DEL_THREAD, C_WIFI_DL, C_WIFI_AP, C_BT_RESTART, C_WIFI_OTA, C_OTA_INSTALL };
   struct Thread { char name[32]; uint8_t chan; uint8_t unread; uint32_t last; int16_t last_msg; };
   struct Nav { uint8_t scr; int16_t sel, top; };
-  struct Cfg { uint32_t magic; uint8_t show_path, sleep_idx, kb_light, adv_idx, ct_filter, rpt_sort, no_wake, lock, bright, no_msg_snd, adv_snd, map_range; };   // map_range: 0 = cała mapa, 1 = bez zoomu 15, 2 = do zoomu 13;   // bright: 0 = nie ustawiono (pełna jasność), 1..5 = poziom
+  struct Cfg { uint32_t magic; uint8_t show_path, sleep_idx, kb_light, adv_idx, ct_filter, rpt_sort, no_wake, lock, bright, no_msg_snd, adv_snd, map_range, bt_off; };   // map_range: 0 = cała mapa, 1 = bez zoomu 15, 2 = do zoomu 13;   // bright: 0 = nie ustawiono (pełna jasność), 1..5 = poziom
   struct Pw { uint8_t key[6]; char pw[16]; };
   struct WifiCfg { char ssid[33]; char pass[64]; char url[128]; };
 
@@ -90,6 +90,7 @@ class UITask : public AbstractUITask {
   RoutePt _route[16]; int _route_n; bool _route_star; int _route_unknown; char _route_title[40];
   unsigned long _ota_reboot_at;
   unsigned long _sd_test_at;             // zaplanowany test karty SD (po narysowaniu okienka)
+  bool _bt_boot_done; int _wifi_bars;
   bool _bt_killed;                       // Bluetooth wyłączony na czas WiFi (do restartu)
   uint32_t _adv_seen;                    // ostatni advert, dla którego zagrał dźwięk
   int _tf[5]; int _tf_sel;               // ustawianie daty i godziny: rok, miesiąc, dzień, godzina, minuta

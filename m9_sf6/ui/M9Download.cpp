@@ -603,3 +603,12 @@ const char* m9dlDetail() { return ""; }
 const char* m9dlDiag() { return ""; }
 uint32_t m9dlServerTime() { return 0; }
 #endif
+
+int m9wifiBars() {
+  wifi_mode_t m = WiFi.getMode();
+  if (m == WIFI_MODE_NULL) return -1;
+  if (m == WIFI_MODE_AP) return 5;
+  if (WiFi.status() != WL_CONNECTED) return 0;
+  int r = (int)WiFi.RSSI();
+  return r > -55 ? 4 : r > -67 ? 3 : r > -78 ? 2 : 1;
+}

@@ -127,7 +127,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   memset(&_cfg, 0, sizeof(_cfg));
   _cfg.magic = CFG_MAGIC; _cfg.show_path = 1; _cfg.sleep_idx = 1; _cfg.kb_light = 1;
   _pw_n = 0;
-  _cur[0] = 0; _cur_chan = false; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_idx = NULL; _th_h = NULL;
+  _cur[0] = 0; _cur_chan = false; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1;
   _input[0] = 0; _input_chars = 0; _polish = false; _input_mode = IN_MSG;
   memset(_ck, 0, sizeof(_ck)); _cname[0] = 0; _ctype = 0; _cfav = false;
   _msg_idx = -1; _menu_n = 0; _menu_title[0] = 0; _menu_msg = false; _search[0] = 0;
@@ -188,8 +188,9 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
 void UITask::loadAll() {
   File f = SPIFFS.open(FILE_CFG, "r");
   if (f) {
-    Cfg c;
-    if (f.read((uint8_t*)&c, sizeof(c)) == sizeof(c) && c.magic == CFG_MAGIC) _cfg = c;
+    Cfg c = _cfg;                                    // starszy (krótszy) plik: nowe pola zostają domyślne
+    int n = f.read((uint8_t*)&c, sizeof(c));
+    if (n >= 8 && c.magic == CFG_MAGIC) _cfg = c;
     f.close();
   }
   if (_cfg.sleep_idx > 3) _cfg.sleep_idx = 1;
@@ -847,9 +848,10 @@ void UITask::openMenuMsg(int idx) {
   _menu_n = 0; _menu_msg = true; _menu_thread = false;
   UiMsg& m = _msgs[idx];
   scopy(_menu_title, sizeof(_menu_title), m.out ? "Moja wiadomość" : (m.who[0] ? m.who : m.thread));
-  _menu_act[_menu_n++] = A_DETAIL;
+  // kolejność: Odpowiedz @, Odpowiedz ack, Szczegóły, Trasa na mapie, reszta
   if (!m.out && m.chan && m.who[0]) _menu_act[_menu_n++] = A_REPLY;
   if (!m.out) _menu_act[_menu_n++] = A_REPLY_ACK;
+  _menu_act[_menu_n++] = A_DETAIL;
   if ((!m.out && !m.direct && m.path_bytes > 0) || (m.out && m.chan && m.rep_n > 0)) _menu_act[_menu_n++] = A_ROUTE;
   if (m.out) _menu_act[_menu_n++] = A_RESEND;
   _menu_act[_menu_n++] = A_COPY;
@@ -1393,8 +1395,8 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
         case A_SHOWMAP: setRow(r, "Pokaż na mapie", "", UII_GPS); break;
         case A_ROUTE: setRow(r, "Trasa na mapie", _menu_msg && _msg_idx >= 0 && _msgs[_msg_idx].out ? "kto powtórzył" : "skąd przyszła", UII_GPS); break;
         case A_DELETE: setRow(r, "Usuń kontakt"); break;
-        case A_REPLY: setRow(r, "Odpowiedz", "wstawia @[nadawca]", UII_MAIL); break;
-        case A_REPLY_ACK: setRow(r, "Odpowiedz: ack + hopy", "@[nadawca] ack, ile hopów", UII_CHECK); break;
+        case A_REPLY: setRow(r, "Odpowiedz @", "wstawia @[nadawca]", UII_MAIL); break;
+        case A_REPLY_ACK: setRow(r, "Odpowiedz ack", "@[nadawca] ack, ile hopów", UII_CHECK); break;
         case A_RESEND: setRow(r, "Wyślij ponownie"); break;
         case A_COPY: setRow(r, "Kopiuj treść do pola pisania"); break;
         case A_DELMSG: setRow(r, "Usuń wiadomość", "tylko z tego urządzenia"); break;
@@ -1825,6 +1827,7 @@ void UITask::applyPick(uint8_t id, int i) {
     case P_AIR: _prefs->airtime_factor = AIRTIME_STEPS[i]; the_mesh.savePrefs(); break;
     case P_BT:
       if (_bt_killed) { popup("Bluetooth wróci po restarcie", "był wyłączony na czas WiFi"); break; }
+      _cfg.bt_off = i == 1; saveCfg();               // stan Bluetooth przeżywa restart
       if (i == 0 && !isBluetoothEnabled()) { char t[40]; snprintf(t, sizeof(t), "PIN do parowania: %06lu", (unsigned long)the_mesh.getBLEPin()); enableBluetooth(); popup("Bluetooth włączony", t, false, 5000); }
       if (i == 1 && isBluetoothEnabled()) { disableBluetooth(); popup("Bluetooth wyłączony"); }
       break;
@@ -2342,6 +2345,7 @@ void UITask::fillStatus() {
   v.sats = sats;
   v.gps_on = _prefs->gps_enabled != 0;
   v.bt = isBluetoothEnabled() ? (hasConnection() ? 2 : 1) : 0;
+  v.wifi = (uint8_t)(m9wifiBars() + 1);
   v.batt = battPercent(getBattMilliVolts());
   v.charging = digitalRead(M9_PIN_EXT_PWR) == LOW;
 }
@@ -2733,6 +2737,14 @@ void UITask::loop() {
 
   // zapis wiadomości: w kawałkach, kilka minut po zmianie (albo zaraz po wygaszeniu ekranu) i nie w trakcie pisania
   if (sv_active || (_msgs_dirty && (long)(now - _save_at) >= 0 && now - _last_key > 5000)) saveStep();
+
+  // Bluetooth wyłączony w ustawieniach: po starcie (gdy MeshCore już go włączył) wyłącz
+  if (!_bt_boot_done && now > 2000) {
+    _bt_boot_done = true;
+    if (_cfg.bt_off && isBluetoothEnabled()) { disableBluetooth(); _dirty = true; }
+  }
+  // ikona WiFi na pasku stanu: odświeżaj, gdy zmieni się stan albo zasięg
+  { int w = m9wifiBars(); if (w != _wifi_bars) { _wifi_bars = w; _dirty = true; } }
 
   // płynne przewijanie rozmowy: kilka klatek do celu
   if (_scroll_px != _scroll_tgt && (long)(now - _scroll_next) >= 0) {
