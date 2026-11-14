@@ -104,6 +104,9 @@ public:
   int  uiAddHashtagChannel(const char* name);      // indeks kanału, -1 = brak miejsca, -2 = już jest
   bool uiRemoveChannel(const char* name);
   void uiSetGps(bool on);
+  char ui_app_name[24] = "";              // nazwa aplikacji połączonej przez Bluetooth (z CMD_APP_START)
+  bool uiDecodeGroup(const uint8_t* payload, int len, char* chan, int chan_n, char* who, int who_n);
+  bool uiNameByHash(uint8_t h, char* dest, int n);
   void uiSetRadioSF6();
   void uiSetRadio(float freq, float bw, uint8_t sf, uint8_t cr);
   void uiSetTxPower(int8_t dbm);

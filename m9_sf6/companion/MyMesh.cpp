@@ -1,4 +1,5 @@
 #include "MyMesh.h"
+#include "M9PktLog.h"
 #if defined(QSPIFLASH)
   #include <CustomLFS_QSPIFlash.h>
 #endif
@@ -287,6 +288,7 @@ uint8_t MyMesh::getExtraAckTransmitCount() const {
 }
 
 void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+  m9logAdd(getRTCClock()->getCurrentTime(), millis(), snr, rssi, raw, len);   // ekran: log pakietów i widmo kanału
   {                                                   // ekran: liczymy powtórzenia naszych wiadomości kanałowych przez repeatery
     mesh::Packet p;
     if (len > 0 && len < 256 && p.readFrom(raw, (uint8_t)len) && p.getPayloadType() == PAYLOAD_TYPE_GRP_TXT) {
@@ -1127,6 +1129,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     char *app_name = (char *)&cmd_frame[8];
     cmd_frame[len] = 0; // make app_name null terminated
     MESH_DEBUG_PRINTLN("App %s connected", app_name);
+    strncpy(ui_app_name, app_name, sizeof(ui_app_name) - 1); ui_app_name[sizeof(ui_app_name) - 1] = 0;   // ekran: nazwa połączonej aplikacji
 
     _iter_started = false; // stop any left-over ContactsIterator
     int i = 0;
@@ -2580,4 +2583,33 @@ bool MyMesh::advert() {
 // To check if there is pending work
 bool MyMesh::hasPendingWork() const {
   return _mgr->getOutboundTotal() > 0 || dirty_contacts_expiry != 0;
+}
+
+// log pakietów: kto napisał na kanale (odszyfrowanie kluczem kanału o pasującym hashu)
+bool MyMesh::uiDecodeGroup(const uint8_t* payload, int len, char* chan, int chan_n, char* who, int who_n) {
+  chan[0] = who[0] = 0;
+  if (len < 4) return false;
+  ChannelDetails cd;
+  for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+    if (!getChannel(i, cd) || cd.name[0] == 0 || cd.channel.hash[0] != payload[0]) continue;
+    snprintf(chan, chan_n, "%s", cd.name);
+    uint8_t data[MAX_PACKET_PAYLOAD + 16];
+    int n = mesh::Utils::MACThenDecrypt(cd.channel.secret, data, &payload[1], len - 1);
+    if (n <= 5) continue;
+    data[n < (int)sizeof(data) ? n : (int)sizeof(data) - 1] = 0;
+    const char* txt = (const char*)&data[5];          // znacznik czasu (4) + typ (1), potem „nadawca: treść”
+    const char* c = strstr(txt, ": ");
+    int wl = c ? (int)(c - txt) : 0;
+    if (wl > 0) { if (wl >= who_n) wl = who_n - 1; memcpy(who, txt, wl); who[wl] = 0; }
+    return true;
+  }
+  return chan[0] != 0;
+}
+
+// nazwa kontaktu po pierwszym bajcie klucza (nadawca wiadomości prywatnej, żądania itp.)
+bool MyMesh::uiNameByHash(uint8_t h, char* dest, int n) {
+  ContactInfo c;
+  int total = getTotalContactSlots();
+  for (int i = MAX_ANON_CONTACTS; i < total; i++) if (getContactByIdx(i, c) && c.type != ADV_TYPE_NONE && c.id.pub_key[0] == h) { snprintf(dest, n, "%s", c.name); return true; }
+  return false;
 }

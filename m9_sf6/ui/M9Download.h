@@ -24,4 +24,5 @@ int  m9otaState();                      // 0 nic, 1 sprawdzam, 2 jest nowsza, 3 
 bool m9otaActive();
 const char* m9otaVersion();             // wersja na serwerze
 int  m9otaPercent();
+int  m9wifiRssi();                     // siła sygnału WiFi (dBm), 0 = brak połączenia
 int  m9wifiBars();                     // -1 WiFi wyłączone, 0 łączy, 1..4 kreski zasięgu, 5 własna sieć (wgrywanie z telefonu)       // czas UTC z ostatniej odpowiedzi serwera (nagłówek Date), poprawiony o czas od odczytu; 0 = brak. Zwraca raz.          // po błędzie: szczegóły w kilku wierszach (etap, kod, błąd szyfrowania, pamięć, WiFi)        // szczegóły, np. nazwa pliku i postęp

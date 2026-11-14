@@ -52,6 +52,29 @@ static void rx(const char* thread, const char* text, int hops) {
   ui.newMsg(0, thread, text, 0);
 }
 
+#include "M9PktLog.h"
+// przykładowe surowe pakiety do logu (advert repeatera, kanał, prywatna, ACK, trasa)
+static void pkt(int kind, int n) {
+  uint8_t b[200]; int i = 0;
+  switch (kind % 5) {
+    case 0: {                                        // advert repeatera z pozycją i nazwą
+      b[i++] = (4 << 2) | 1; b[i++] = (1 << 6) | 2; b[i++] = 0x18; b[i++] = 0x29; b[i++] = 0x79; b[i++] = 0x15;
+      for (int k = 0; k < 100; k++) b[i++] = (uint8_t)(k == 0 ? 0x18 : k * 7);
+      b[i++] = 0x80 | 0x10 | 0x02; int32_t la = 49685000, lo = 19031000; memcpy(&b[i], &la, 4); i += 4; memcpy(&b[i], &lo, 4); i += 4;
+      const char* nm = "RPT Skrzyczne"; memcpy(&b[i], nm, strlen(nm)); i += strlen(nm); break; }
+    case 1:                                          // wiadomość na kanale (hash 0 = kanał z atrapy)
+      b[i++] = (5 << 2) | 1; b[i++] = (1 << 6) | 3; for (int k = 0; k < 6; k++) b[i++] = (uint8_t)(0x18 + k * 0x31);
+      b[i++] = 0x00; for (int k = 0; k < 40; k++) b[i++] = (uint8_t)k; break;
+    case 2:                                          // prywatna, bezpośrednio
+      b[i++] = (2 << 2) | 2; b[i++] = 0; b[i++] = 0x11; b[i++] = the_mesh.cts.empty() ? 0x22 : the_mesh.cts[0].id.pub_key[0]; for (int k = 0; k < 30; k++) b[i++] = (uint8_t)k; break;
+    case 3:                                          // ACK
+      b[i++] = (3 << 2) | 1; b[i++] = (1 << 6) | 1; b[i++] = 0x77; b[i++] = 0xc1; for (int k = 0; k < 4; k++) b[i++] = (uint8_t)k; break;
+    default:                                         // nieznany typ 0x0E
+      b[i++] = (14 << 2) | 1; b[i++] = 2; b[i++] = 0xaa; b[i++] = 0xbb; for (int k = 0; k < 20; k++) b[i++] = (uint8_t)k; break;
+  }
+  m9logAdd(the_mesh.getRTCClock()->getCurrentTime(), sim_millis, 9.5f - (n % 7) * 2, -71 - (n % 9) * 5, b, i);
+}
+
 int main(int argc, char** argv) {
   if (argc > 1 && strcmp(argv[1], "fuzz") == 0) {      // losowe klawisze: szukanie błędów pamięci i zawieszeń
     mkdir("/tmp/symfs", 0777);
@@ -64,6 +87,7 @@ int main(int argc, char** argv) {
       sim_keys.push_back(K[rand() % sizeof(K)]);
       if (i % 37 == 0) rx(i % 2 ? "Public" : "Marek SP9", i % 2 ? "Ania: test wiadomości z polskimi znakami żółć" : "prywatna wiadomość testowa", i % 5);
       if (i % 501 == 0) the_mesh.ui_sent_changed = true;
+      if (i % 23 == 0) pkt(i / 23, i);
       sim_millis += 40; ui.loop();
       if (i % 997 == 0) { sim_millis += 40000; ui.loop(); }
     }
@@ -123,6 +147,22 @@ int main(int argc, char** argv) {
   keys({ M9K_BACK, M9K_BACK, M9K_HOME, M9K_MSG, M9K_F3 }); save("menu-rozmow");
   keys({ M9K_BACK, M9K_BACK, M9K_HOME, M9K_MSG }); for (int i = 0; i < 6; i++) rx("Public", "Ania: nowa wiadomość po przerwie, nieprzeczytana", 2); keys({ M9K_UP, M9K_UP, M9K_UP, M9K_UP, M9K_UP, M9K_UP, M9K_UP, M9K_UP, M9K_ENTER }); save("wejscie-nieprzeczytane");
   sim_wifi = 1; save("wifi-slabe"); sim_wifi = 0; save("wifi-laczy"); sim_wifi = 5; save("wifi-ap");
+  // nowe ekrany: Start, widmo, log pakietów, szczegóły, info o kanale, kod QR, bateria, ustawienia oszczędzania
+  for (int i = 0; i < 30; i++) { pkt(i, i); sim_millis += 9000; ui.loop(); }
+  keys({ M9K_ENTER, M9K_BACK, M9K_ENTER }); keys({ M9K_BACK, M9K_BACK, M9K_BACK, M9K_HOME }); save("n-start");
+  keys({ M9K_DOWN, M9K_RIGHT, M9K_ENTER }); run(2000); save("n-widmo-pasmo");
+  keys({ M9K_DOWN }); run(2000); save("n-widmo-zakres2");
+  keys({ M9K_RIGHT }); save("n-widmo-kanal");
+  keys({ M9K_F3 }); save("n-log");
+  keys({ M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("n-log-szczegoly");
+  keys({ M9K_LEFT }); save("n-log-szczegoly-advert");
+  keys({ M9K_BACK, M9K_RIGHT }); save("n-log-adverty");
+  keys({ M9K_ENTER }); save("n-advert-szczegoly"); keys({ M9K_BACK });
+  keys({ M9K_HOME, M9K_MSG, M9K_F3 }); save("n-menu-kanalu");
+  keys({ M9K_DOWN, M9K_ENTER }); save("n-info-kanalu");
+  keys({ M9K_ENTER }); save("n-kod-qr");
+  keys({ M9K_HOME, M9K_RIGHT, M9K_RIGHT }); keys({ M9K_HOME, M9K_DOWN, M9K_RIGHT, M9K_RIGHT, M9K_ENTER }); save("n-bateria");
+  keys({ M9K_HOME, M9K_F3 }); save("n-menu-start");
   printf("zrzutow: %d\n", shot);
   return 0;
 }

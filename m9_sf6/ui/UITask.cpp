@@ -3,6 +3,9 @@
 #include "M9Ble.h"
 #include "M9Upload.h"
 #include "M9Download.h"
+#include "M9Radio.h"
+#include "M9PktLog.h"
+#include "qrcodegen.h"
 #include "../Version.h"
 #include <MyMesh.h>
 #include <helpers/sensors/LocationProvider.h>
@@ -33,6 +36,15 @@ static const float BW_STEPS[] = { 31.25f, 41.7f, 62.5f, 125.0f, 250.0f, 500.0f }
 static const uint32_t SLEEP_STEPS[] = { 30000UL, 60000UL, 300000UL, 0 };            // 0 = nigdy
 static const char* const SLEEP_NAMES[] = { "30 s", "1 min", "5 min", "nigdy" };
 static const uint8_t ADV_HOURS[] = { 0, 1, 3, 6, 12, 24 };
+// oszczędzanie energii
+static const uint32_t DIM_STEPS[] = { 10000UL, 20000UL, 30000UL, 0 };
+static const char* const DIM_NAMES[] = { "po 10 s", "po 20 s", "po 30 s", "wyłączone" };
+static const uint16_t GPS_MIN[] = { 0, 5, 15, 30, 60 };
+static const char* const GPS_NAMES[] = { "włączony stale", "co 5 min", "co 15 min", "co 30 min", "co 60 min" };
+static const uint16_t BTA_MIN[] = { 0, 5, 15, 30, 60 };
+static const char* const BTA_NAMES[] = { "nigdy", "po 5 min", "po 15 min", "po 30 min", "po 60 min" };
+#define NOISE_SLOT_MS    2143UL         // 10 minut szumu w 280 punktach
+#define BATT_SAMPLE_MS   450000UL       // napięcie baterii co 7,5 min
 static const char* const FILTER_NAMES[] = { "wszystkie", "osoby", "repeatery", "pokoje", "czujniki", "ulubione" };
 static const char* const QUICK[] = { "Test", "OK", "Tak", "Nie", "Zaraz będę", "Oddzwonię później", "Moja pozycja", "Moja pozycja + link do mapy" };
 #define N_QUICK_TEXT 6      // pierwsze pozycje to gotowy tekst, dwie ostatnie to pozycja
@@ -128,6 +140,12 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   _cfg.magic = CFG_MAGIC; _cfg.show_path = 1; _cfg.sleep_idx = 1; _cfg.kb_light = 1;
   _pw_n = 0;
   _cur[0] = 0; _cur_chan = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1;
+  _nh_n = 0; _nh_next = _nh_slot_end = 0; _nh_min = 1; _bh_n = _bh_seg = 0; _bh_next = 30000; _bh_chg = false;
+  _sp_tab = _sp_range = 0; _sp_pause = _sp_have = false; _sp_next = 0; _sp_ms = 0; _sp_wf_n = 0;
+  memset(_sp_cur, -128, sizeof(_sp_cur)); memset(_sp_peak, -128, sizeof(_sp_peak)); memset(_sp_wf, -128, sizeof(_sp_wf));
+  _lg_filter = 0; _lg_n = 0; _kv_pkt = 0;
+  _dimmed = false; _gps_off_phase = false; _gps_next = _gps_on_at = _gps_fix_at = 0; _gps_cache = false; _gps_lat = _gps_lon = 0;
+  _bt_idle_since = 0; _bt_auto_off = false;
   _input[0] = 0; _input_chars = 0; _polish = false; _input_mode = IN_MSG;
   memset(_ck, 0, sizeof(_ck)); _cname[0] = 0; _ctype = 0; _cfav = false;
   _msg_idx = -1; _menu_n = 0; _menu_title[0] = 0; _menu_msg = false; _search[0] = 0;
@@ -197,6 +215,9 @@ void UITask::loadAll() {
   if (_cfg.adv_idx >= sizeof(ADV_HOURS)) _cfg.adv_idx = 0;
   if (_cfg.ct_filter > 5) _cfg.ct_filter = 0;
   if (_cfg.map_range > 2) _cfg.map_range = 0;
+  if (_cfg.gps_mode > 4) _cfg.gps_mode = 0;
+  if (_cfg.dim_idx > 3) _cfg.dim_idx = 0;
+  if (_cfg.bt_auto > 4) _cfg.bt_auto = 0;
 
   f = SPIFFS.open(FILE_PW, "r");
   if (f) {
@@ -678,11 +699,14 @@ int UITask::brightPercent() { return (_cfg.bright >= 1 && _cfg.bright <= 5) ? BR
 void UITask::wake() {
   uint32_t ms = SLEEP_STEPS[_cfg.sleep_idx];
   _sleep_at = ms ? millis() + ms : 0;
+  _last_key = millis();                            // od teraz liczy się czas do przyciemnienia
   if (!_awake) {
     _awake = true;
+    m9cpuSave(false);                                // pełna moc procesora przy włączonym ekranie
     if (_display) _display->turnOn();
     m9lcdBacklight(brightPercent());
-  }
+  } else if (_dimmed) m9lcdBacklight(brightPercent());
+  _dimmed = false;
   _kb.setBacklight(_cfg.kb_light != 0 && !_locked);
   _dirty = true;
 }
@@ -691,7 +715,7 @@ void UITask::wake() {
 
 void UITask::kvOpen(const char* title, const char* right) {
   _kv_n = 0;
-  _kv_more = false;
+  _kv_more = false; _kv_pkt = 0;
   scopy(_kv_title, sizeof(_kv_title), title);
   scopy(_kv_right, sizeof(_kv_right), right);
 }
@@ -838,6 +862,7 @@ void UITask::openMenuThread(int idx) {
     scopy(_tname, sizeof(_tname), _threads[idx].name); _tchan = _threads[idx].chan;
     snprintf(_menu_title, sizeof(_menu_title), "%s%s", _tchan ? "# " : "", _tname);
     _menu_act[_menu_n++] = A_OPEN;
+    if (_tchan) _menu_act[_menu_n++] = A_CHINFO;
     _menu_act[_menu_n++] = A_MUTE;
     _menu_act[_menu_n++] = A_MARKREAD;
     _menu_act[_menu_n++] = _tchan ? A_DELCHAN : A_DELTHREAD;
@@ -864,10 +889,13 @@ void UITask::openMenuMsg(int idx) {
 }
 
 void UITask::doAct(uint8_t act) {
+  if (act == A_SPEC) { pop(); push(S_SPEC); return; }
+  if (act == A_LOG) { pop(); push(S_LOG); return; }
   if (_menu_thread) {
     switch (act) {
       case A_OPEN: pop(); openThread(_tname, _tchan); break;
       case A_ADDCHAN: pop(); openInput(IN_CHANNEL, "#"); break;
+      case A_CHINFO: pop(); if (scr() != S_CHINFO) push(S_CHINFO); break;
       case A_MUTE: toggleMute(_tname); popup(isMuted(_tname) ? "Wyciszono" : "Dźwięk włączony", _tname); break;
       case A_MARKREAD: markRead(_tname, _tchan); pop(); break;
       case A_DELCHAN: ask(C_DEL_CHANNEL, "Usunąć kanał?", _tname); break;
@@ -1265,15 +1293,15 @@ int UITask::listCount(uint8_t s) {
     case S_ADMIN_ACT: return 4;
     case S_ADMIN_CLI: return N_CLI + 1;
     case S_RADIO: return 9;
-    case S_SET_BT: return 6;
+    case S_SET_BT: return 7;
     case S_PICK: return _pick_n;
     case S_MAP_NET: return 7;
     case S_OTA: return 3;
-    case S_SET_POS: return 9;
+    case S_SET_POS: return 10;
     case S_SET_ADV: return 3;
     case S_SET_CT: return 6;
     case S_SET_MSG: return 3;
-    case S_SET_SCR: return 8;
+    case S_SET_SCR: return 10;
     case S_SET_SYS: return 7;
   }
   return 0;
@@ -1412,6 +1440,9 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
         case A_DELCHAN: setRow(r, "Usuń kanał", "z wiadomościami"); break;
         case A_DELTHREAD: setRow(r, "Usuń rozmowę", "wiadomości z tego urządzenia"); break;
         case A_ADDCHAN: setRow(r, "Dodaj kanał", "z hasztagiem, np. #beskidy", UII_HASH); break;
+        case A_CHINFO: setRow(r, "Info o kanale", "statystyki, kod QR", UII_HASH); break;
+        case A_SPEC: setRow(r, "Widmo", "pasmo i szum na naszym kanale", UII_SPEC); break;
+        case A_LOG: setRow(r, "Log pakietów", "wszystko, co odebrało radio", UII_SIGNAL); break;
       }
       return;
     case S_QUICK: setRow(r, QUICK[i], "", i >= N_QUICK_TEXT ? UII_GPS : UII_NONE); return;
@@ -1518,7 +1549,11 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       return;
     }
     case S_SET_BT: {
-      if (i == 0) setRow(r, "Bluetooth", _bt_killed ? "wyłączony do restartu (WiFi)" : isBluetoothEnabled() ? (hasConnection() ? "włączony · połączony z aplikacją" : "włączony · czeka na telefon") : "wyłączony", UII_BT);
+      if (i == 0) {
+        if (isBluetoothEnabled() && hasConnection()) snprintf(t, sizeof(t), "połączony z %s", the_mesh.ui_app_name[0] ? the_mesh.ui_app_name : "aplikacją");
+        setRow(r, "Bluetooth", _bt_killed ? "wyłączony do restartu (WiFi)" : isBluetoothEnabled() ? (hasConnection() ? t : "włączony · czeka na telefon") : _bt_auto_off ? "wyłączony (brak połączenia)" : "wyłączony", UII_BT);
+      }
+      else if (i == 6) setRow(r, "Wyłącz bez połączenia", BTA_NAMES[_cfg.bt_auto]);
       else if (i == 1) { snprintf(t, sizeof(t), "%06lu", (unsigned long)the_mesh.getBLEPin()); setRow(r, "PIN do parowania", t, UII_LOCK); }
       else if (i == 2) { int n = m9bleBondCount(); if (n < 0) strcpy(t, "—"); else snprintf(t, sizeof(t), "%d", n); setRow(r, "Zapamiętane telefony", t); }
       else if (i == 3) setRow(r, "Zapomnij wszystkie telefony", "gdy parowanie nie działa");
@@ -1526,12 +1561,12 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
         if (m9ble_auth_fail) snprintf(t, sizeof(t), "%lu / %lu / %lu (kod %02X)", (unsigned long)m9ble_connects, (unsigned long)m9ble_auth_ok, (unsigned long)m9ble_auth_fail, m9ble_fail_reason);
         else snprintf(t, sizeof(t), "%lu / %lu / 0", (unsigned long)m9ble_connects, (unsigned long)m9ble_auth_ok);
         setRow(r, "Połączenia / parowania / błędy", t);
-      } else { snprintf(t, sizeof(t), "%lu / %lu", (unsigned long)m9ble_rx, (unsigned long)m9ble_tx); setRow(r, "Ramki odebrane / wysłane", t); }
+      } else if (i == 5) { snprintf(t, sizeof(t), "%lu / %lu", (unsigned long)m9ble_rx, (unsigned long)m9ble_tx); setRow(r, "Ramki odebrane / wysłane", t); }
       return;
     }
     case S_SET_POS: {
-      static const char* const N[9] = { "GPS", "Pozycja w advercie", "Szerokość (ręcznie)", "Długość (ręcznie)", "Zapisz pozycję z GPS", "Teraz z GPS",
-                                        "Stan baterii udostępniaj", "Pozycję udostępniaj", "Dane czujników udostępniaj" };
+      static const char* const N[10] = { "GPS", "Pozycja w advercie", "Szerokość (ręcznie)", "Długość (ręcznie)", "Zapisz pozycję z GPS", "Teraz z GPS",
+                                        "Stan baterii udostępniaj", "Pozycję udostępniaj", "Dane czujników udostępniaj", "Oszczędzanie GPS" };
       double lat, lon; int sats; bool fix = gpsFix(&lat, &lon, &sats);
       t[0] = 0;
       switch (i) {
@@ -1544,8 +1579,9 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
         case 6: strcpy(t, TELEM_NAMES[_prefs->telemetry_mode_base % 3]); break;
         case 7: strcpy(t, TELEM_NAMES[_prefs->telemetry_mode_loc % 3]); break;
         case 8: strcpy(t, TELEM_NAMES[_prefs->telemetry_mode_env % 3]); break;
+        case 9: strcpy(t, GPS_NAMES[_cfg.gps_mode]); if (_gps_off_phase) strcat(t, " · teraz wył."); break;
       }
-      setRow(r, N[i], t, i == 0 ? UII_GPS : (i >= 6 ? UII_SHIELD : UII_NONE));
+      setRow(r, N[i], t, i == 0 ? UII_GPS : i == 9 ? UII_BATT : (i >= 6 ? UII_SHIELD : UII_NONE));
       return;
     }
     case S_SET_ADV:
@@ -1579,7 +1615,9 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       else if (i == 4) { snprintf(t, sizeof(t), "%d%%", brightPercent()); setRow(r, "Jasność ekranu", t, UII_SCREEN); }
       else if (i == 5) setRow(r, "Dźwięki urządzenia", _prefs->buzzer_quiet ? "wyciszone (wszystkie)" : "włączone", UII_MUTE, _prefs->buzzer_quiet);
       else if (i == 6) setRow(r, "Dźwięk wiadomości", _cfg.no_msg_snd ? "wyłączony" : "włączony");
-      else setRow(r, "Dźwięk advertu repeatera", _cfg.adv_snd == 0 ? "wyłączony" : _cfg.adv_snd == 1 ? "każdy repeater" : "tylko ulubione");
+      else if (i == 7) setRow(r, "Dźwięk advertu repeatera", _cfg.adv_snd == 0 ? "wyłączony" : _cfg.adv_snd == 1 ? "każdy repeater" : "tylko ulubione");
+      else if (i == 8) setRow(r, "Przyciemnianie", DIM_NAMES[_cfg.dim_idx], UII_BATT);
+      else setRow(r, "Procesor po wygaszeniu", _cfg.cpu_full ? "pełna moc (240 MHz)" : "oszczędny (80 MHz)", UII_BATT);
       return;
     case S_SET_SYS: {
       if (i == 0) setRow(r, "Informacje", "wersja, pamięć, klucz");
@@ -1773,6 +1811,7 @@ bool UITask::settingPick(uint8_t s, int i) {
       return true;
     case S_SET_BT:
       if (i == 0) { two(P_BT, "Bluetooth", "włączony", "wyłączony", isBluetoothEnabled() ? 0 : 1); return true; }
+      if (i == 6) { pickBegin(P_BTAUTO, "Wyłącz Bluetooth bez połączenia"); for (int q = 0; q < 5; q++) pickAdd(BTA_NAMES[q]); pickOpen(_cfg.bt_auto); return true; }
       return false;
     case S_SET_POS:
       if (i == 0) two(P_GPS, "GPS", "włączony", "wyłączony", _prefs->gps_enabled ? 0 : 1);
@@ -1780,6 +1819,7 @@ bool UITask::settingPick(uint8_t s, int i) {
       else if (i == 6) telem(P_TEL0, "Stan baterii udostępniaj", _prefs->telemetry_mode_base);
       else if (i == 7) telem(P_TEL1, "Pozycję udostępniaj", _prefs->telemetry_mode_loc);
       else if (i == 8) telem(P_TEL2, "Dane czujników udostępniaj", _prefs->telemetry_mode_env);
+      else if (i == 9) { pickBegin(P_GPSMODE, "GPS: kiedy szukać pozycji"); for (int q = 0; q < 5; q++) pickAdd(GPS_NAMES[q]); pickOpen(_cfg.gps_mode); }
       else return false;
       return true;
     case S_SET_ADV:
@@ -1813,7 +1853,9 @@ bool UITask::settingPick(uint8_t s, int i) {
       else if (i == 4) { pickBegin(P_BRIGHT, "Jasność ekranu"); for (int q = 0; q < 5; q++) { snprintf(t, sizeof(t), "%d%%", BRIGHT_STEPS[q]); pickAdd(t); } pickOpen((_cfg.bright >= 1 && _cfg.bright <= 5) ? _cfg.bright - 1 : 4); }
       else if (i == 5) two(P_SOUND, "Dźwięki urządzenia", "włączone", "wyciszone (wszystkie)", _prefs->buzzer_quiet ? 1 : 0);
       else if (i == 6) two(P_MSGSND, "Dźwięk wiadomości", "włączony", "wyłączony", _cfg.no_msg_snd ? 1 : 0);
-      else { pickBegin(P_ADVSND, "Dźwięk advertu repeatera"); pickAdd("wyłączony"); pickAdd("każdy repeater"); pickAdd("tylko ulubione"); pickOpen(_cfg.adv_snd < 3 ? _cfg.adv_snd : 0); }
+      else if (i == 7) { pickBegin(P_ADVSND, "Dźwięk advertu repeatera"); pickAdd("wyłączony"); pickAdd("każdy repeater"); pickAdd("tylko ulubione"); pickOpen(_cfg.adv_snd < 3 ? _cfg.adv_snd : 0); }
+      else if (i == 8) { pickBegin(P_DIM, "Przyciemnianie ekranu"); for (int q = 0; q < 4; q++) pickAdd(DIM_NAMES[q]); pickOpen(_cfg.dim_idx); }
+      else two(P_CPU, "Procesor po wygaszeniu ekranu", "oszczędny (80 MHz)", "pełna moc (240 MHz)", _cfg.cpu_full ? 1 : 0);
       return true;
   }
   return false;
@@ -1835,10 +1877,15 @@ void UITask::applyPick(uint8_t id, int i) {
     case P_BT:
       if (_bt_killed) { popup("Bluetooth wróci po restarcie", "był wyłączony na czas WiFi"); break; }
       _cfg.bt_off = i == 1; saveCfg();               // stan Bluetooth przeżywa restart
+      _bt_auto_off = false; _bt_idle_since = 0;
       if (i == 0 && !isBluetoothEnabled()) { char t[40]; snprintf(t, sizeof(t), "PIN do parowania: %06lu", (unsigned long)the_mesh.getBLEPin()); enableBluetooth(); popup("Bluetooth włączony", t, false, 5000); }
       if (i == 1 && isBluetoothEnabled()) { disableBluetooth(); popup("Bluetooth wyłączony"); }
       break;
-    case P_GPS: the_mesh.uiSetGps(i == 0); break;
+    case P_GPS: the_mesh.uiSetGps(i == 0); _gps_off_phase = false; _gps_on_at = millis(); _gps_fix_at = 0; break;
+    case P_GPSMODE: _cfg.gps_mode = i; saveCfg(); if (_gps_off_phase && _sensors && _prefs->gps_enabled) _sensors->setSettingValue("gps", "1"); _gps_off_phase = false; _gps_on_at = millis(); _gps_fix_at = 0; break;
+    case P_DIM: _cfg.dim_idx = i; saveCfg(); break;
+    case P_CPU: _cfg.cpu_full = i == 1; saveCfg(); break;
+    case P_BTAUTO: _cfg.bt_auto = i; saveCfg(); _bt_idle_since = 0; break;
     case P_ADVLOC: _prefs->advert_loc_policy = i == 0 ? 1 : 0; the_mesh.savePrefs(); break;
     case P_TEL0: _prefs->telemetry_mode_base = i; the_mesh.savePrefs(); break;
     case P_TEL1: _prefs->telemetry_mode_loc = i; the_mesh.savePrefs(); break;
@@ -2255,6 +2302,26 @@ void UITask::key(uint8_t k) {
   if (s == S_THREAD) { keyThread(k); return; }
   if (s == S_MAP) { keyMap(k); return; }
   if (s == S_TIME) { keyTime(k); return; }
+  if (s == S_SPEC) { keySpec(k); return; }
+  if (s == S_LOG) { keyLog(k); return; }
+  if (s == S_CHINFO) {
+    if (k == M9K_ENTER) push(S_QR);
+    else if (k == M9K_F3) { buildThreads(); for (int i = 0; i < _thread_n; i++) if (_threads[i].chan && strcmp(_threads[i].name, _tname) == 0) { openMenuThread(i); break; } }
+    return;
+  }
+  if (s == S_QR) return;
+  if (s == S_KV && _kv_pkt) {                          // szczegóły pakietu: ◄► poprzedni / następny, Menu: mapa
+    if (k == M9K_LEFT || k == M9K_RIGHT) {
+      buildLog();
+      for (int i = 0; i < _lg_n; i++) if (m9logGet(_lg_idx[i])->seq == _kv_pkt) {
+        int j = i + (k == M9K_RIGHT ? 1 : -1);
+        if (j >= 0 && j < _lg_n) { detailPkt(m9logGet(_lg_idx[j])->seq); if (_depth >= 2 && _nav[_depth - 2].scr == S_LOG) _nav[_depth - 2].sel = j; }
+        break;
+      }
+      return;
+    }
+    if (k == M9K_F3 && _chas_pos) { doAct(A_SHOWMAP); return; }
+  }
   if (s == S_KV) {
     int16_t& top = _nav[_depth - 1].top;
     if (k == M9K_UP && top > 0) top--;
@@ -2271,14 +2338,19 @@ void UITask::key(uint8_t k) {
     if (k == M9K_DOWN) { _bar = true; _bar_sel = S_START; return; }
     if (k == M9K_LEFT) { tab(S_SETTINGS); return; }
     if (k == M9K_RIGHT) { tab(S_MSGS); return; }
+    if (k == M9K_F3) {                                 // Menu na Start: Widmo i log pakietów
+      _menu_n = 0; _menu_msg = _menu_thread = false; strcpy(_menu_title, "Start");
+      _menu_act[_menu_n++] = A_SPEC; _menu_act[_menu_n++] = A_LOG;
+      push(S_MENU); return;
+    }
     if (k == M9K_ENTER) {
       switch (sel()) {
         case 0: tab(S_MSGS); break;
         case 1: tab(S_CONTACTS); break;
-        case 2: tab(S_RPTS); break;
-        case 3: tab(S_SETTINGS); sel() = 2; push(S_SET_POS); break;
-        case 4: tab(S_SETTINGS); sel() = 0; radioLoad(); push(S_RADIO); break;
-        case 5: tab(S_SETTINGS); sel() = 7; detailInfo(); break;
+        case 2: tab(S_SETTINGS); sel() = 0; radioLoad(); push(S_RADIO); break;
+        case 3: tab(S_SETTINGS); sel() = 1; push(S_SET_BT); break;
+        case 4: push(S_SPEC); break;
+        case 5: detailBattery(); break;
       }
     }
     return;
@@ -2320,9 +2392,13 @@ bool UITask::gpsFix(double* lat, double* lon, int* sats) {
   *sats = 0;
   if (lp == NULL) return false;
   *sats = (int)lp->satellitesCount();
-  if (!lp->isValid()) return false;
+  if (!lp->isValid()) {                              // GPS oszczędny (chwilowo wyłączony): ostatnia znana pozycja
+    if (_gps_off_phase && _gps_cache) { *lat = _gps_lat; *lon = _gps_lon; return true; }
+    return false;
+  }
   *lat = lp->getLatitude() / 1000000.0;
   *lon = lp->getLongitude() / 1000000.0;
+  _gps_lat = *lat; _gps_lon = *lon; _gps_cache = true;
   return true;
 }
 
@@ -2375,43 +2451,55 @@ void UITask::fillStart() {
   if (_thread_n > 0 && _threads[0].unread) scopy(a.sub, sizeof(a.sub), _threads[0].name);
   else snprintf(a.sub, sizeof(a.sub), "rozmów: %d", _thread_n);
 
-  // policz kontakty wg roli (bez repeaterów) i repeatery
-  int people = 0, rpts = 0;
+  // policz kontakty wg roli (bez repeaterów)
+  int people = 0;
   ContactInfo c;
   int total = the_mesh.getTotalContactSlots();
   for (int i = MAX_ANON_CONTACTS; i < total; i++) {
     if (!the_mesh.getContactByIdx(i, c) || c.type == ADV_TYPE_NONE) continue;
-    if (c.type == ADV_TYPE_REPEATER) rpts++; else people++;
+    if (c.type != ADV_TYPE_REPEATER) people++;
   }
   UiTile& b = v.tile[1];
   strcpy(b.label, "Kontakty"); b.icon = UII_USER;
   snprintf(b.value, sizeof(b.value), "%d", people);
   snprintf(b.sub, sizeof(b.sub), "usłyszane: %d", the_mesh.ui_heard_n);
 
-  UiTile& r = v.tile[2];
-  strcpy(r.label, "Repeatery"); r.icon = UII_TOWER;
-  snprintf(r.value, sizeof(r.value), "%d", rpts);
-  if (the_mesh.ui_heard_n > 0) { char ago[16]; fmtAgo(ago, sizeof(ago), the_mesh.ui_heard_at[0]); snprintf(r.sub, sizeof(r.sub), "%s · %s", the_mesh.ui_heard[0].name, ago); }
-  else strcpy(r.sub, "cisza w eterze");
-
-  UiTile& p = v.tile[3];
-  strcpy(p.label, "Pozycja"); p.icon = UII_GPS;
-  double lat, lon; int sats;
-  if (!_prefs->gps_enabled) { strcpy(p.value, "GPS wył."); strcpy(p.sub, "Enter: ustawienia"); }
-  else if (gpsFix(&lat, &lon, &sats)) { snprintf(p.value, sizeof(p.value), "%.4f", lat); snprintf(p.sub, sizeof(p.sub), "%.4f · sat. %d", lon, sats); }
-  else { strcpy(p.value, "szukam…"); snprintf(p.sub, sizeof(p.sub), "satelity: %d", sats); }
-
-  UiTile& d = v.tile[4];
+  UiTile& d = v.tile[2];
   strcpy(d.label, "Radio"); d.icon = UII_SIGNAL;
   bool narrow = fabsf(_prefs->freq - 869.618f) < 0.005f && fabsf(_prefs->bw - 62.5f) < 0.1f && _prefs->sf == 8 && _prefs->cr == 8;
-  if (the_mesh.uiRadioIsSF6()) strcpy(d.value, "SF6"); else if (narrow) strcpy(d.value, "Narrow"); else snprintf(d.value, sizeof(d.value), "SF%d", _prefs->sf);
+  if (the_mesh.uiRadioIsSF6()) strcpy(d.value, "SF6"); else if (narrow) strcpy(d.value, "SF8"); else snprintf(d.value, sizeof(d.value), "SF%d", _prefs->sf);
   snprintf(d.sub, sizeof(d.sub), "%.3f MHz", _prefs->freq); comma(d.sub);
 
+  // Sieć: Bluetooth (nazwa połączonej aplikacji) i WiFi
+  UiTile& n = v.tile[3];
+  strcpy(n.label, "Sieć"); n.icon = UII_NET; n.kind = UIT_NET;
+  if (!isBluetoothEnabled()) { v.bt_state = 0; strcpy(v.bt_txt, "BT OFF"); }
+  else if (hasConnection()) { v.bt_state = 2; scopy(v.bt_txt, sizeof(v.bt_txt), the_mesh.ui_app_name[0] ? the_mesh.ui_app_name : "połączony"); }
+  else { v.bt_state = 1; strcpy(v.bt_txt, "BT ON"); }
+  v.wifi_dbm = m9wifiBars() >= 1 && m9wifiBars() <= 4 ? m9wifiRssi() : 0;
+
+  // Widmo: szum na naszym kanale z ostatnich minut
+  UiTile& w = v.tile[4];
+  strcpy(w.label, "Widmo"); w.icon = UII_SPEC; w.kind = UIT_NOISE;
+  snprintf(w.value, sizeof(w.value), "%d", m9radioNoiseFloor());
+  {
+    unsigned long now = millis(); uint32_t air = 0;
+    for (int i = 0; i < m9logCount(); i++) { const M9Pkt* p = m9logGet(i); if (now - p->ms > 60000UL) break; air += m9radioAirtime(p->len); }
+    int busy = (int)(air * 100 / 60000); if (busy > 100) busy = 100;
+    snprintf(w.sub, sizeof(w.sub), "zajęte %d %%", busy);
+    int from = _nh_n > UI_SPARK_N * 3 ? _nh_n - UI_SPARK_N * 3 : 0;      // ok. 5 ostatnich minut, co trzeci punkt
+    for (int i = from; i < _nh_n && v.nspark < UI_SPARK_N; i += 3) v.spark[v.nspark++] = _nh[i];
+  }
+
+  // Bateria: procent, wykres napięcia z ostatnich godzin i czas pracy
   UiTile& e = v.tile[5];
-  strcpy(e.label, "Bateria"); e.icon = UII_BOLT;
+  strcpy(e.label, "Bateria"); e.icon = UII_BATT; e.kind = UIT_BATT;
   uint16_t mv = getBattMilliVolts();
-  snprintf(e.value, sizeof(e.value), "%d%%", battPercent(mv));
-  snprintf(e.sub, sizeof(e.sub), "%d,%02d V%s", mv / 1000, (mv % 1000) / 10, digitalRead(M9_PIN_EXT_PWR) == LOW ? " · ładowanie" : "");
+  bool chg = digitalRead(M9_PIN_EXT_PWR) == LOW;
+  snprintf(e.value, sizeof(e.value), "%d %%", battPercent(mv));
+  e.accent = chg;
+  battEstimate(e.sub, sizeof(e.sub));
+  memcpy(v.bhist, _bh, _bh_n * sizeof(uint16_t)); v.nbhist = _bh_n; v.bchg = chg;
 }
 
 void UITask::fillSettings() {
@@ -2612,6 +2700,10 @@ void UITask::fill() {
   else if (s == S_SETTINGS) fillSettings();
   else if (s == S_THREAD) fillThread();
   else if (s == S_KV) fillKv();
+  else if (s == S_SPEC) fillSpec();
+  else if (s == S_LOG) fillLog();
+  else if (s == S_CHINFO) fillChInfo();
+  else if (s == S_QR) fillQR();
   else fillList();
   if (_bar && v.tab >= 0) { v.bar_focus = true; v.tab = _bar_sel; }
   if (_popup_until) {
@@ -2652,7 +2744,7 @@ void UITask::loop() {
     uint8_t k = _kb.readKey();
     if (k == 0) break;
     _last_key = now;
-    if (!_awake) { wake(); continue; }             // pierwszy klawisz tylko budzi ekran
+    if (!_awake || _dimmed) { wake(); continue; }  // pierwszy klawisz tylko budzi (albo rozjaśnia) ekran
     uint32_t ms = SLEEP_STEPS[_cfg.sleep_idx];
     _sleep_at = ms ? now + ms : 0;
     key(k);
@@ -2711,7 +2803,10 @@ void UITask::loop() {
     m9lcdBacklight(0);
     if (_display) _display->turnOff();
     _kb.setBacklight(false);
+    _dimmed = false;
+    if (!_cfg.cpu_full && m9wifiBars() < 0) m9cpuSave(true);      // ekran zgasł: procesor 80 MHz (nie przy włączonym WiFi)
   }
+  if (!_awake && m9wifiBars() >= 0) m9cpuSave(false);
 
   // Bluetooth: nowe połączenie, które po 1,5 s nadal nie jest uwierzytelnione, to parowanie — pokaż PIN
   if (m9ble_connects != _ble_conn_seen) { _ble_conn_seen = m9ble_connects; _ble_auth_seen = m9ble_auth_ok; _ble_pin_at = now + 1500; }
@@ -2761,6 +2856,9 @@ void UITask::loop() {
   // ikona WiFi na pasku stanu: odświeżaj, gdy zmieni się stan albo zasięg
   { int w = m9wifiBars(); if (w != _wifi_bars) { _wifi_bars = w; _dirty = true; } }
 
+  sampleLoop(now);
+  powerLoop(now);
+
   // płynne przewijanie rozmowy: kilka klatek do celu
   if (_scroll_px != _scroll_tgt && (long)(now - _scroll_next) >= 0) {
     if (scr() != S_THREAD) _scroll_px = _scroll_tgt;
@@ -2777,4 +2875,438 @@ void UITask::loop() {
     _dirty = false;
     draw();
   }
+}
+
+// ======================= pomiary w tle, oszczędzanie energii =======================
+
+void UITask::sampleLoop(unsigned long now) {
+  // szum na naszym kanale: próbka co 0,5 s, do historii najmniejsza z każdych ~2 s (pakiety nie zawyżają)
+  if ((long)(now - _nh_next) >= 0) {
+    _nh_next = now + 500;
+    int r = m9radioRssi();
+    if (r && r < _nh_min) _nh_min = r;
+    if ((long)(now - _nh_slot_end) >= 0) {
+      _nh_slot_end = now + NOISE_SLOT_MS;
+      if (_nh_min <= 0) {
+        if (_nh_n == UI_NOISE_N) { memmove(_nh, _nh + 1, UI_NOISE_N - 1); _nh_n--; }
+        _nh[_nh_n++] = (int8_t)(_nh_min < -128 ? -128 : _nh_min);
+        if (_awake && (scr() == S_SPEC || scr() == S_START)) _dirty = true;
+      }
+      _nh_min = 1;
+    }
+  }
+  // bateria: napięcie co 7,5 min (6 godzin w 48 punktach); zmiana ładowania zaczyna nowy odcinek do szacowania
+  if ((long)(now - _bh_next) >= 0) {
+    _bh_next = now + BATT_SAMPLE_MS;
+    uint16_t mv = getBattMilliVolts();
+    bool chg = digitalRead(M9_PIN_EXT_PWR) == LOW;
+    if (_bh_n == UI_SPARK_N) { memmove(_bh, _bh + 1, (UI_SPARK_N - 1) * sizeof(uint16_t)); _bh_n--; if (_bh_seg > 0) _bh_seg--; }
+    if (chg != _bh_chg || _bh_n == 0) { _bh_seg = _bh_n; _bh_chg = chg; }
+    _bh[_bh_n++] = mv;
+  }
+  // widmo: przemiatanie pasma, gdy ekran Widmo jest otwarty
+  if (_awake && scr() == S_SPEC && _sp_tab == 0 && !_sp_pause && (long)(now - _sp_next) >= 0) {
+    float f0, step; sweepRange(f0, step);
+    int8_t d[UI_SPEC_BINS];
+    unsigned long t0 = millis();
+    if (m9radioSweep(f0, step, UI_SPEC_BINS, d)) {
+      _sp_ms = millis() - t0;
+      memcpy(_sp_cur, d, sizeof(d));
+      for (int i = 0; i < UI_SPEC_BINS; i++) { if (_sp_peak[i] > -128) _sp_peak[i]--; if (d[i] > _sp_peak[i]) _sp_peak[i] = d[i]; }
+      memmove(_sp_wf[1], _sp_wf[0], (UI_SPEC_WF - 1) * UI_SPEC_BINS);
+      memcpy(_sp_wf[0], d, UI_SPEC_BINS);
+      if (_sp_wf_n < UI_SPEC_WF) _sp_wf_n++;
+      _sp_have = true; _dirty = true;
+      _sp_next = millis() + 600;                      // przerwa na odbiór pakietów MeshCore
+    } else _sp_next = millis() + 150;                 // radio zajęte (odbiera lub nadaje): spróbuj za chwilę
+  }
+}
+
+void UITask::powerLoop(unsigned long now) {
+  // przyciemnienie ekranu po bezczynności (przed wygaszeniem); na ekranie Widmo nie przyciemniamy
+  uint32_t dm = DIM_STEPS[_cfg.dim_idx];
+  bool busyNet = m9uploadActive() || m9dlActive() || m9otaActive();
+  if (_awake && !_dimmed && dm && now - _last_key >= dm && !busyNet && scr() != S_SPEC && !_locked) {
+    _dimmed = true;
+    int b = brightPercent();
+    m9lcdBacklight(b > 10 ? 10 : b);
+    _kb.setBacklight(false);
+  }
+  // GPS oszczędny: włącz co X minut, po ustaleniu pozycji (+20 s) albo po 3 min bez niej wyłącz
+  if (_sensors && _prefs->gps_enabled && _cfg.gps_mode > 0) {
+    if (!_gps_off_phase) {
+      LocationProvider* lp = _sensors->getLocationProvider();
+      bool fix = lp && lp->isValid();
+      if (fix && !_gps_fix_at) _gps_fix_at = now;
+      if ((_gps_fix_at && now - _gps_fix_at > 20000) || now - _gps_on_at > 180000) {
+        double la, lo; int sats; gpsFix(&la, &lo, &sats);   // zapamiętaj ostatnią pozycję
+        _sensors->setSettingValue("gps", "0");
+        _gps_off_phase = true; _gps_fix_at = 0;
+        _gps_next = now + GPS_MIN[_cfg.gps_mode] * 60000UL;
+      }
+    } else if ((long)(now - _gps_next) >= 0) {
+      _sensors->setSettingValue("gps", "1");
+      _gps_off_phase = false; _gps_on_at = now; _gps_fix_at = 0;
+    }
+  } else if (_gps_off_phase) {                        // tryb stały albo GPS wyłączony: koniec oszczędzania
+    _gps_off_phase = false;
+    if (_sensors && _prefs->gps_enabled) _sensors->setSettingValue("gps", "1");
+  }
+  // Bluetooth: wyłącz, gdy przez X minut nie połączył się telefon
+  if (isBluetoothEnabled() && !hasConnection()) { if (!_bt_idle_since) _bt_idle_since = now ? now : 1; }
+  else _bt_idle_since = 0;
+  uint16_t bm = BTA_MIN[_cfg.bt_auto];
+  if (bm && _bt_idle_since && now - _bt_idle_since >= bm * 60000UL && !_bt_killed) {
+    disableBluetooth(); _bt_auto_off = true; _bt_idle_since = 0; _dirty = true;
+  }
+}
+
+// szacowanie czasu pracy z napięć od ostatniej zmiany ładowania (regresja liniowa z ostatnich 2 godzin)
+bool UITask::battEstimate(char* dest, size_t n) {
+  int a = _bh_seg, cnt;
+  if (_bh_n - a > 16) a = _bh_n - 16;
+  cnt = _bh_n - a;
+  bool chg = digitalRead(M9_PIN_EXT_PWR) == LOW;
+  if (cnt < 5 || chg != _bh_chg) { scopy(dest, n, chg ? "ładuje · mierzę…" : "mierzę…"); return false; }
+  double sx = 0, sy = 0, sxy = 0, sxx = 0;
+  for (int i = 0; i < cnt; i++) { double x = i, y = _bh[a + i]; sx += x; sy += y; sxy += x * y; sxx += x * x; }
+  double den = cnt * sxx - sx * sx;
+  double slope = den != 0 ? (cnt * sxy - sx * sy) / den : 0;      // mV na próbkę
+  double perH = slope * 3600000.0 / BATT_SAMPLE_MS;              // mV na godzinę
+  uint16_t mv = _bh[_bh_n - 1];
+  if (chg) {
+    if (mv >= 4120) scopy(dest, n, "prawie pełna");
+    else if (perH > 2) { double h = (4150 - mv) / perH; if (h < 1) snprintf(dest, n, "pełna za %d min", (int)(h * 60) + 1); else snprintf(dest, n, "pełna za %.0f h", h); }
+    else scopy(dest, n, "ładuje");
+    return true;
+  }
+  if (perH > -1) { scopy(dest, n, "zostało ponad 99 h"); return true; }
+  double pctH = -perH * 100.0 / (4150 - 3300);
+  double h = battPercent(mv) / pctH;
+  if (h < 1) snprintf(dest, n, "zostało ok. %d min", (int)(h * 60));
+  else if (h > 99) scopy(dest, n, "zostało ponad 99 h");
+  else snprintf(dest, n, "zostało ok. %.0f h", h);
+  return true;
+}
+
+void UITask::detailBattery() {
+  char t[64];
+  uint16_t mv = getBattMilliVolts();
+  bool chg = digitalRead(M9_PIN_EXT_PWR) == LOW;
+  kvOpen("Bateria", chg ? "ładowanie" : "na baterii");
+  snprintf(t, sizeof(t), "%d%% · %d,%02d V", battPercent(mv), mv / 1000, (mv % 1000) / 10); kvAdd("Poziom", t);
+  battEstimate(t, sizeof(t)); kvAdd(chg ? "Ładowanie" : "Czas pracy", t);
+  int a = _bh_seg; if (_bh_n - a > 16) a = _bh_n - 16;
+  if (_bh_n - a >= 2) {
+    int d = (int)_bh[_bh_n - 1] - (int)_bh[a];
+    double hrs = (_bh_n - 1 - a) * (BATT_SAMPLE_MS / 3600000.0);
+    snprintf(t, sizeof(t), "%+d mV w %.1f h", d, hrs); comma(t); kvAdd("Zmiana napięcia", t);
+  } else kvAdd("Zmiana napięcia", "mierzę… (pomiar co 7,5 min)");
+  snprintf(t, sizeof(t), "%d MHz%s", m9cpuMhz(), _cfg.cpu_full ? "" : " (80 MHz po wygaszeniu)"); kvAdd("Procesor", t);
+  kvAdd("Przyciemnianie", DIM_NAMES[_cfg.dim_idx]);
+  kvAdd("Wygaszanie", SLEEP_NAMES[_cfg.sleep_idx]);
+  kvAdd("GPS", _prefs->gps_enabled ? GPS_NAMES[_cfg.gps_mode] : "wyłączony");
+  kvAdd("Bluetooth bez połączenia", BTA_MIN[_cfg.bt_auto] ? BTA_NAMES[_cfg.bt_auto] : "nie wyłącza się");
+  push(S_KV);
+}
+
+// ======================= widmo =======================
+
+void UITask::sweepRange(float& f0, float& step) {
+  switch (_sp_range) {
+    case 1: f0 = 868.0f; step = 2.0f / UI_SPEC_BINS; break;
+    case 2: f0 = 869.3f; step = 0.6f / UI_SPEC_BINS; break;
+    default: f0 = 863.0f; step = 0.125f; break;
+  }
+}
+
+void UITask::fillSpec() {
+  UiView& v = *_v;
+  v.screen = UIS_SPEC; v.tab = -1;
+  v.spec_tab = _sp_tab; v.spec_pause = _sp_pause;
+  strcpy(v.title, "Widmo");
+  float f0, step; sweepRange(f0, step);
+  v.spec_f0 = f0; v.spec_step = step; v.spec_mark = _prefs->freq;
+  if (_sp_tab == 0) {
+    if (_sp_range == 0) strcpy(v.title_right, "863–870 MHz · co 125 kHz");
+    else if (_sp_range == 1) strcpy(v.title_right, "868–870 MHz · co 36 kHz");
+    else strcpy(v.title_right, "869,3–869,9 MHz · co 11 kHz");
+    v.spec_have = _sp_have;
+    memcpy(v.spec_cur, _sp_cur, sizeof(_sp_cur)); memcpy(v.spec_peak, _sp_peak, sizeof(_sp_peak));
+    memcpy(v.spec_wf, _sp_wf, sizeof(_sp_wf)); v.spec_wf_n = _sp_wf_n;
+    if (_sp_pause) strcpy(v.spec_info, "pauza · Enter wznawia pomiar");
+    else if (_sp_have) {
+      int best = 0; for (int i = 1; i < UI_SPEC_BINS; i++) if (_sp_peak[i] > _sp_peak[best]) best = i;
+      int lo = 0; long sum = 0; for (int i = 0; i < UI_SPEC_BINS; i++) sum += _sp_cur[i]; lo = (int)(sum / UI_SPEC_BINS);
+      char f[16]; snprintf(f, sizeof(f), "%.3f", f0 + step * (best + 0.5f)); comma(f);
+      snprintf(v.spec_info, sizeof(v.spec_info), "średnio %d dBm · najsilniej %s MHz %d dBm", lo, f, _sp_peak[best]);
+    } else strcpy(v.spec_info, "na czas pomiaru odbiór pakietów jest przerywany");
+    strcpy(v.hint[0].key, "◄►"); strcpy(v.hint[0].txt, "karta");
+    strcpy(v.hint[1].key, "▲▼"); strcpy(v.hint[1].txt, "zakres");
+    strcpy(v.hint[2].key, "Enter"); strcpy(v.hint[2].txt, _sp_pause ? "wznów" : "pauza");
+    strcpy(v.hint[3].key, "Menu"); strcpy(v.hint[3].txt, "log");
+    v.nhints = 4;
+  } else {
+    snprintf(v.title_right, sizeof(v.title_right), "%.3f MHz · %.4g kHz", _prefs->freq, _prefs->bw); comma(v.title_right);
+    v.noise_dbm = m9radioNoiseFloor();
+    memcpy(v.nhist, _nh, _nh_n); v.nnhist = _nh_n;
+    unsigned long now = millis();
+    uint32_t air = 0;
+    for (int i = 0; i < m9logCount(); i++) {
+      const M9Pkt* p = m9logGet(i);
+      unsigned long age = now - p->ms;
+      if (age > 600000UL) break;
+      if (i == 0) { v.have_last = true; v.last_rssi = p->rssi; snprintf(v.last_snr, sizeof(v.last_snr), "SNR %.1f", p->snr_x4 / 4.0f); comma(v.last_snr); }
+      if (age < 60000UL) air += m9radioAirtime(p->len);
+      if (v.npk < UI_PKDOT_MAX) { v.pk_x[v.npk] = (int16_t)(UI_NOISE_N - 1 - age / NOISE_SLOT_MS); v.pk_dbm[v.npk] = (int8_t)(p->rssi < -128 ? -128 : p->rssi); v.npk++; }
+    }
+    v.busy_pct = (int)(air * 100 / 60000); if (v.busy_pct > 100) v.busy_pct = 100;
+    strcpy(v.hint[0].key, "◄►"); strcpy(v.hint[0].txt, "karta");
+    strcpy(v.hint[1].key, "Menu"); strcpy(v.hint[1].txt, "log pakietów");
+    v.nhints = 2;
+  }
+}
+
+void UITask::keySpec(uint8_t k) {
+  if (k == M9K_LEFT || k == M9K_RIGHT) { _sp_tab ^= 1; return; }
+  if (k == M9K_F3) { push(S_LOG); return; }
+  if (_sp_tab != 0) return;
+  if (k == M9K_UP || k == M9K_DOWN) {
+    _sp_range = (uint8_t)((_sp_range + (k == M9K_DOWN ? 1 : 2)) % 3);
+    _sp_have = false; _sp_wf_n = 0; memset(_sp_peak, -128, sizeof(_sp_peak)); _sp_next = 0;
+    return;
+  }
+  if (k == M9K_ENTER) { _sp_pause = !_sp_pause; _sp_next = 0; }
+}
+
+// ======================= log pakietów =======================
+
+static bool logMatch(uint8_t filter, uint8_t type) {
+  switch (filter) {
+    case 1: return type == 4;
+    case 2: return type == 2 || type == 5 || type == 6;
+    case 3: return !(type == 4 || type == 2 || type == 5 || type == 6);
+  }
+  return true;
+}
+
+void UITask::buildLog() {
+  _lg_n = 0;
+  for (int i = 0; i < m9logCount() && _lg_n < 200; i++) {
+    M9PktInfo in;
+    const M9Pkt* p = m9logGet(i);
+    uint8_t type = m9logParse(*p, in) ? in.type : 0xFF;
+    if (_lg_filter == 0 || (type != 0xFF && logMatch(_lg_filter, type)) || (type == 0xFF && _lg_filter == 3)) _lg_idx[_lg_n++] = (int16_t)i;
+  }
+}
+
+static uint8_t logColor(uint8_t type) {
+  switch (type) {
+    case 4: return ULC_GREEN;
+    case 5: case 6: return ULC_BLUE;
+    case 2: return ULC_PINK;
+    case 8: return ULC_ACC;
+    case 3: case 9: return ULC_DIM;
+  }
+  return ULC_LINE;
+}
+
+void UITask::fillLog() {
+  UiView& v = *_v;
+  v.screen = UIS_LOG; v.tab = -1;
+  buildLog();
+  strcpy(v.title, "Log pakietów");
+  unsigned long now = millis(); int perMin = 0;
+  for (int i = 0; i < m9logCount(); i++) { if (now - m9logGet(i)->ms > 60000UL) break; perMin++; }
+  snprintf(v.title_right, sizeof(v.title_right), "%lu · %d/min", (unsigned long)m9logTotal(), perMin);
+  static const char* const F[4] = { "Wszystkie", "Adverty", "Wiadomości", "Inne" };
+  for (int i = 0; i < 4; i++) strcpy(v.chips[i], F[i]);
+  v.nchips = 4; v.chip_active = _lg_filter;
+  strcpy(v.empty, m9logCount() ? "Brak pakietów tego rodzaju." : "Nic jeszcze nie odebrano.");
+  int16_t& s = sel(); int16_t& top = _nav[_depth - 1].top;
+  if (s >= _lg_n) s = _lg_n ? _lg_n - 1 : 0;
+  if (s < top) top = s;
+  if (s >= top + UI_LOG_ROWS) top = s - UI_LOG_ROWS + 1;
+  if (top < 0) top = 0;
+  for (int r = 0; r < UI_LOG_ROWS && top + r < _lg_n; r++) {
+    const M9Pkt* p = m9logGet(_lg_idx[top + r]);
+    UiLogRow& w = v.lrow[v.nlrow++];
+    struct tm lt; localTime(p->ts, &lt);
+    snprintf(w.t, sizeof(w.t), "%02d:%02d:%02d", lt.tm_hour, lt.tm_min, lt.tm_sec);
+    snprintf(w.snr, sizeof(w.snr), "%.1f", p->snr_x4 / 4.0f); comma(w.snr);
+    snprintf(w.rssi, sizeof(w.rssi), "%d", p->rssi);
+    M9PktInfo in;
+    if (!m9logParse(*p, in)) { strcpy(w.type, "?"); w.col = ULC_LINE; snprintf(w.who, sizeof(w.who), "nieczytelny · %d B", p->len); continue; }
+    scopy(w.type, sizeof(w.type), m9logTypeShort(in.type)); w.col = logColor(in.type);
+    bool direct = in.route == 2 || in.route == 3;
+    if (direct) strcpy(w.hop, "D"); else snprintf(w.hop, sizeof(w.hop), "%dh", in.hops);
+    char path[40]; m9logPath(in, path, sizeof(path), 3);
+    char who[40]; who[0] = 0;
+    if (in.type == 4 && in.payload_len > 101) {                    // advert: nazwa z danych aplikacji
+      int i = 100; uint8_t fl = in.payload[i++];
+      if (fl & 0x10) i += 8; if (fl & 0x20) i += 2; if (fl & 0x40) i += 2;
+      int nl = in.payload_len - i; if (nl > 30) nl = 30;
+      if ((fl & 0x80) && nl > 0) { memcpy(who, &in.payload[i], nl); who[nl] = 0; }
+      else snprintf(who, sizeof(who), "%02X%02X", in.payload[0], in.payload[1]);
+    } else if ((in.type == 5 || in.type == 6) && in.payload_len > 3) {
+      char ch[32], nm[24];
+      if (the_mesh.uiDecodeGroup(in.payload, in.payload_len, ch, sizeof(ch), nm, sizeof(nm))) snprintf(who, sizeof(who), nm[0] ? "%s · %s" : "%s", ch, nm);
+      else snprintf(who, sizeof(who), "kanał %02X", in.payload[0]);
+    } else if ((in.type <= 2 || in.type == 8) && in.payload_len > 2) {
+      char nm[32]; if (!the_mesh.uiNameByHash(in.payload[1], nm, sizeof(nm))) snprintf(nm, sizeof(nm), "%02X", in.payload[1]);
+      snprintf(who, sizeof(who), "od: %s", nm);
+    } else if (in.type == 7 && in.payload_len > 1) {
+      char nm[32]; if (!the_mesh.uiNameByHash(in.payload[0], nm, sizeof(nm))) snprintf(nm, sizeof(nm), "%02X", in.payload[0]);
+      snprintf(who, sizeof(who), "do: %s", nm);
+    } else snprintf(who, sizeof(who), "%d B", p->len);
+    if (path[0]) snprintf(w.who, sizeof(w.who), "%s · %s", who, path); else scopy(w.who, sizeof(w.who), who);
+  }
+  v.sel = s - top;
+  v.sb_total = _lg_n; v.sb_view = UI_LOG_ROWS; v.sb_pos = top;
+  strcpy(v.hint[0].key, "▲▼"); strcpy(v.hint[0].txt, "wybierz");
+  strcpy(v.hint[1].key, "Enter"); strcpy(v.hint[1].txt, "szczegóły");
+  strcpy(v.hint[2].key, "◄►"); strcpy(v.hint[2].txt, "filtr");
+  v.nhints = 3;
+}
+
+void UITask::keyLog(uint8_t k) {
+  buildLog();
+  int16_t& s = sel();
+  if (k == M9K_UP && s > 0) s--;
+  else if (k == M9K_DOWN && s + 1 < _lg_n) s++;
+  else if (k == M9K_LEFT || k == M9K_RIGHT) { _lg_filter = (uint8_t)((_lg_filter + (k == M9K_RIGHT ? 1 : 3)) % 4); s = 0; _nav[_depth - 1].top = 0; }
+  else if (k == M9K_ENTER && s < _lg_n) detailPkt(m9logGet(_lg_idx[s])->seq);
+}
+
+void UITask::detailPkt(uint32_t seq) {
+  const M9Pkt* p = NULL; int pos = -1;
+  buildLog();
+  for (int i = 0; i < _lg_n; i++) if (m9logGet(_lg_idx[i])->seq == seq) { p = m9logGet(_lg_idx[i]); pos = i; break; }
+  if (p == NULL) { popup("Pakietu już nie ma w logu"); return; }
+  char t[80], r[40];
+  struct tm lt; localTime(p->ts, &lt);
+  snprintf(t, sizeof(t), "Pakiet %02d:%02d:%02d", lt.tm_hour, lt.tm_min, lt.tm_sec);
+  snprintf(r, sizeof(r), "%d z %d", pos + 1, _lg_n);
+  bool wasKv = scr() == S_KV && _kv_pkt;
+  kvOpen(t, r);
+  _kv_pkt = seq;
+  _chas_pos = false;
+  M9PktInfo in;
+  if (!m9logParse(*p, in)) { kvAdd("Typ", "nieczytelny"); snprintf(t, sizeof(t), "%d B", p->len); kvAdd("Długość", t); }
+  else {
+    kvAdd("Typ", m9logTypeLong(in.type));
+    if (in.type == 4 && in.payload_len > 101) {
+      int i = 100; uint8_t fl = in.payload[i++];
+      static const char* const KIND[5] = { "?", "osoba", "repeater", "pokój", "czujnik" };
+      int32_t lat = 0, lon = 0;
+      if (fl & 0x10) { memcpy(&lat, &in.payload[i], 4); memcpy(&lon, &in.payload[i + 4], 4); i += 8; }
+      if (fl & 0x20) i += 2; if (fl & 0x40) i += 2;
+      char nm[32] = ""; int nl = in.payload_len - i; if (nl > 30) nl = 30;
+      if ((fl & 0x80) && nl > 0) { memcpy(nm, &in.payload[i], nl); nm[nl] = 0; }
+      snprintf(t, sizeof(t), "%s (%s)", nm[0] ? nm : "bez nazwy", KIND[(fl & 15) < 5 ? (fl & 15) : 0]); kvAdd("Nadawca", t);
+      snprintf(t, sizeof(t), "%02x%02x %02x%02x …", in.payload[0], in.payload[1], in.payload[2], in.payload[3]); kvAdd("Klucz", t);
+      if (lat || lon) {
+        _clat = lat / 1e6; _clon = lon / 1e6; _chas_pos = true;
+        double ml, mo; int sats; char d[24] = "";
+        if (gpsFix(&ml, &mo, &sats)) { snprintf(d, sizeof(d), " · %.0f km", distKm(ml, mo, _clat, _clon)); }
+        snprintf(t, sizeof(t), "%.3f N %.3f E%s", _clat, _clon, d); comma(t); kvAdd("Pozycja", t);
+      }
+    } else if ((in.type == 5 || in.type == 6) && in.payload_len > 3) {
+      char ch[32], nm[24];
+      if (the_mesh.uiDecodeGroup(in.payload, in.payload_len, ch, sizeof(ch), nm, sizeof(nm))) { kvAdd("Kanał", ch); if (nm[0]) kvAdd("Nadawca", nm); }
+      else { snprintf(t, sizeof(t), "nieznany (hash %02X)", in.payload[0]); kvAdd("Kanał", t); }
+    } else if ((in.type <= 2 || in.type == 8) && in.payload_len > 2) {
+      char nm[32];
+      if (!the_mesh.uiNameByHash(in.payload[1], nm, sizeof(nm))) snprintf(nm, sizeof(nm), "nieznany (%02X)", in.payload[1]); kvAdd("Od", nm);
+      if (!the_mesh.uiNameByHash(in.payload[0], nm, sizeof(nm))) snprintf(nm, sizeof(nm), "%02X", in.payload[0]); kvAdd("Do", nm);
+    }
+    bool direct = in.route == 2 || in.route == 3;
+    if (direct) snprintf(t, sizeof(t), "bezpośrednio%s", in.hops ? " (wyznaczona trasa)" : "");
+    else if (in.hops == 0) strcpy(t, "flood · prosto od nadawcy");
+    else snprintf(t, sizeof(t), "flood · %d %s", in.hops, in.hops == 1 ? "hop" : in.hops < 5 ? "hopy" : "hopów");
+    kvAdd("Trasa", t);
+    if (in.hops) { char path[80]; m9logPath(in, path, sizeof(path), 8); kvAdd("Ścieżka", path); }
+  }
+  snprintf(t, sizeof(t), "SNR %.1f dB · %d dBm", p->snr_x4 / 4.0f, p->rssi); comma(t); kvAdd("Sygnał", t);
+  snprintf(t, sizeof(t), "%d B · w eterze %lu ms", p->len, (unsigned long)m9radioAirtime(p->len)); kvAdd("Długość", t);
+  char ago[16]; fmtAgo(ago, sizeof(ago), p->ts); kvAdd("Odebrano", ago);
+  if (!wasKv) push(S_KV); else _dirty = true;
+}
+
+// ======================= info o kanale i kod QR =======================
+
+static void chTitle(char* dest, size_t n, const char* name) { snprintf(dest, n, "%s%s", name[0] == '#' ? "" : "# ", name); }
+
+void UITask::fillChInfo() {
+  UiView& v = *_v;
+  v.screen = UIS_CHINFO; v.tab = -1;
+  chTitle(v.title, sizeof(v.title), _tname);
+  strcpy(v.title_right, "Info o kanale");
+  char t[52];
+  int idx = the_mesh.uiChannelIndex(_tname);
+  ChannelDetails cd; memset(&cd, 0, sizeof(cd));
+  if (idx >= 0) the_mesh.getChannel(idx, cd);
+  static const uint8_t PUB[16] = { 0x8b, 0x33, 0x87, 0xe9, 0xc5, 0xcd, 0xea, 0x6a, 0xc9, 0xe5, 0xed, 0xba, 0xa1, 0x15, 0xcd, 0x72 };
+  auto kv = [&](const char* k, const char* val) { if (v.nkv < UI_KV_MAX) { scopy(v.kv[v.nkv].k, sizeof(v.kv[0].k), k); scopy(v.kv[v.nkv].v, sizeof(v.kv[0].v), val); v.nkv++; } };
+  kv("Rodzaj", _tname[0] == '#' ? "hasztag · klucz z nazwy" : memcmp(cd.channel.secret, PUB, 16) == 0 ? "publiczny" : "prywatny · własny klucz");
+  if (idx >= 0) snprintf(t, sizeof(t), "%02X · miejsce %d z %d", cd.channel.hash[0], idx + 1, MAX_GROUP_CHANNELS); else strcpy(t, "—");
+  kv("Hash kanału", t);
+  int cnt = 0, unread = 0, hopsN = 0, hopsSum = 0, snrN = 0, snrSum = 0, last = -1;
+  struct Top { char who[24]; int n; } top[24]; int ntop = 0;
+  uint32_t now = the_mesh.getRTCClock()->getCurrentTime();
+  for (int i = 0; i < _msg_n; i++) {
+    const UiMsg& m = _msgs[i];
+    if (!m.chan || strcmp(m.thread, _tname) != 0) continue;
+    cnt++; if (m.unread) unread++;
+    if (m.out) continue;
+    last = i;
+    hopsN++; hopsSum += m.direct ? 0 : m.hops;
+    if (m.snr_x4) { snrN++; snrSum += m.snr_x4; }
+    if (m.who[0] && m.ts + 86400 >= now) {
+      int k = 0; while (k < ntop && strcmp(top[k].who, m.who) != 0) k++;
+      if (k == ntop && ntop < 24) { scopy(top[ntop].who, sizeof(top[0].who), m.who); top[ntop].n = 0; ntop++; }
+      if (k < ntop) top[k].n++;
+    }
+  }
+  snprintf(t, sizeof(t), unread ? "%d · %d nowych" : "%d", cnt, unread); kv("Wiadomości", t);
+  if (last >= 0) { char c[8]; fmtClock(c, sizeof(c), _msgs[last].ts, true); snprintf(t, sizeof(t), "%s · %s", c, _msgs[last].who[0] ? _msgs[last].who : "?"); } else strcpy(t, "—");
+  kv("Ostatnia", t);
+  if (hopsN) { if (snrN) snprintf(t, sizeof(t), "%.1f hopa · SNR %.1f", hopsSum / (double)hopsN, snrSum / 4.0 / snrN); else snprintf(t, sizeof(t), "%.1f hopa", hopsSum / (double)hopsN); comma(t); } else strcpy(t, "—");
+  kv("Średnio do nas", t);
+  for (int r = 0; r < 3; r++) {                     // trzech najaktywniejszych
+    int b = -1; for (int k = 0; k < ntop; k++) if (top[k].n > 0 && (b < 0 || top[k].n > top[b].n)) b = k;
+    if (b < 0) break;
+    scopy(v.top_name[v.ntop], sizeof(v.top_name[0]), top[b].who); v.top_cnt[v.ntop] = top[b].n; v.ntop++;
+    top[b].n = 0;
+  }
+  strcpy(v.hint[0].key, "Enter"); strcpy(v.hint[0].txt, "kod QR");
+  strcpy(v.hint[1].key, "Menu"); strcpy(v.hint[1].txt, "opcje");
+  v.nhints = 2;
+}
+
+void UITask::fillQR() {
+  UiView& v = *_v;
+  v.screen = UIS_QR; v.tab = -1;
+  chTitle(v.title, sizeof(v.title), _tname);
+  strcpy(v.title_right, "Udostępnij kanał");
+  int idx = the_mesh.uiChannelIndex(_tname);
+  ChannelDetails cd; memset(&cd, 0, sizeof(cd));
+  if (idx >= 0) the_mesh.getChannel(idx, cd);
+  int klen = 16; for (int i = 16; i < 32; i++) if (cd.channel.secret[i]) klen = 32;
+  char hex[72]; for (int i = 0; i < klen; i++) snprintf(hex + i * 2, 3, "%02x", cd.channel.secret[i]);
+  char url[200]; int n = snprintf(url, sizeof(url), "meshcore://channel/add?name=");
+  for (const char* p = _tname; *p && n < 150; p++) {
+    uint8_t c = (uint8_t)*p;
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.') url[n++] = c;
+    else n += snprintf(url + n, sizeof(url) - n, "%%%02X", c);
+  }
+  url[n] = 0;
+  snprintf(url + n, sizeof(url) - n, "&secret=%s", hex);
+  static uint8_t tmp[UI_QR_BYTES];
+  v.qr_ok = qrcodegen_encodeText(url, tmp, v.qr, qrcodegen_Ecc_LOW, 1, 10, qrcodegen_Mask_AUTO, true);
+  for (int l = 0; l < 4 && l * 16 < klen * 2; l++) {
+    char* d = v.qr_line[l];
+    for (int g = 0; g < 4; g++) { memcpy(d, hex + l * 16 + g * 4, 4); d += 4; *d++ = g < 3 ? ' ' : 0; }
+  }
+  strcpy(v.hint[0].key, "Wstecz"); strcpy(v.hint[0].txt, ""); v.nhints = 1;
 }

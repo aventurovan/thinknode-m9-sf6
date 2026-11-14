@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include "FontData.h"
 #include "LogoData.h"
+#include "qrcodegen.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -48,6 +49,13 @@ static const char* const IC_MUTE[12] = { "#.....#.....", ".#...##.....", "..#.##
 
 static const char* const IC_SIGNAL[12] = { "", "..........##", "..........##", ".......##.##", ".......##.##", "....##.##.##", "....##.##.##", ".##.##.##.##", ".##.##.##.##", ".##.##.##.##", "", "" };
 
+static const char* const IC_NET[12] = { "....####....", "..##.##.##..", ".#..#..#..#.", ".#..#..#..#.", "############", "#...#..#...#", "#...#..#...#", "############", ".#..#..#..#.", ".#..#..#..#.", "..##.##.##..", "....####...." };
+static const char* const IC_SPEC[12] = { "", "", "..#.........", "..#.....#...", "..#.....#...", "..#..#..#...", "#.#..#..#.#.", "#.#..#..#.#.", "#.#.##.##.##", "#.#.##.##.##", "############", "" };
+static const char* const IC_BATT[12] = { "", "", "", "##########..", "#........#..", "#.######.###", "#.######.###", "#........#..", "##########..", "", "", "" };
+static const char* const IC_WIFI[12] = { "", "...######...", ".##......##.", "#..........#", "....####....", "..##....##..", "............", "....####....", "...#....#...", "............", ".....##.....", ".....##....." };
+
+static void dot(Gfx& g, int cx, int cy, int r, uint16_t c);
+
 static const char* const* iconRows(uint8_t i) {
   switch (i) {
     case UII_MAIL: return IC_MAIL; case UII_TOWER: return IC_TOWER; case UII_USER: return IC_USER; case UII_HASH: return IC_HASH;
@@ -55,6 +63,7 @@ static const char* const* iconRows(uint8_t i) {
     case UII_BOLT: return IC_BOLT; case UII_SD: return IC_SD; case UII_ROOM: return IC_ROOM;
     case UII_CHECK: return IC_CHECK; case UII_MUTE: return IC_MUTE; case UII_SIGNAL: return IC_SIGNAL;
     case UII_HOME: return IC_HOME; case UII_GEAR: return IC_GEAR; case UII_SCREEN: return IC_SCREEN; case UII_SHIELD: return IC_SHIELD;
+    case UII_NET: return IC_NET; case UII_SPEC: return IC_SPEC; case UII_BATT: return IC_BATT; case UII_WIFI: return IC_WIFI;
   }
   return NULL;
 }
@@ -213,6 +222,35 @@ static void drawList(Gfx& g, const UiView& v) {
 }
 
 // Siatka kafelków, po której chodzi się strzałkami. Start: duży zegar i 3 kolumny; Ustawienia: nagłówek i 2 kolumny.
+// mały wykres liniowy (2 px grubości); minRange: najmniejszy rozrzut wartości, żeby szum nie wyglądał jak góry
+static void drawSpark(Gfx& g, int x, int y, int w, int h, const int8_t* d, int n, uint16_t c, int minRange) {
+  if (n < 2 || w < 4) return;
+  int lo = 127, hi = -128;
+  for (int i = 0; i < n; i++) { if (d[i] < lo) lo = d[i]; if (d[i] > hi) hi = d[i]; }
+  if (minRange >= 1000) { lo = -50; hi = 50; }                 // prawie płaski: rysuj środkiem
+  else if (hi - lo < minRange) { int m = (hi + lo) / 2; lo = m - minRange / 2; hi = lo + minRange; }
+  int prev = -1;
+  for (int i = 0; i < w; i++) {
+    int k = n * i / w;
+    int yy = y + h - 2 - (d[k] - lo) * (h - 2) / (hi - lo > 0 ? hi - lo : 1);
+    if (yy < y) yy = y;
+    if (prev >= 0) { int a = prev < yy ? prev : yy, b = prev < yy ? yy : prev; g.fillRect(x + i, a, 1, b - a + 2, c); }
+    prev = yy;
+  }
+}
+
+// kafelek Sieć: Bluetooth i WiFi w dwóch wierszach
+static void drawNetTile(Gfx& g, const UiView& v, int x, int y, int tw) {
+  uint16_t bc = v.bt_state == 2 ? C_BLUE : v.bt_state == 1 ? C_TXT : C_DIM;
+  g.icon(x + 7, y + 26, IC_BT, bc);
+  g.text(x + 22, y + 25, v.bt_txt, F_SMALL, bc, tw - 26);
+  char w[24];
+  if (v.wifi_dbm) snprintf(w, sizeof(w), "WIFI %d", v.wifi_dbm); else strcpy(w, "WIFI OFF");
+  g.icon(x + 7, y + 46, IC_WIFI, v.wifi_dbm ? C_GRN : C_DIM);
+  int ww = g.text(x + 22, y + 45, w, F_SMALL, v.wifi_dbm ? C_TXT : C_DIM, tw - 26);
+  if (v.wifi_dbm) g.text(x + 25 + ww, y + 45, "dBm", F_SMALL, C_DIM);
+}
+
 static void drawGrid(Gfx& g, const UiView& v) {
   int top;
   bool start = v.big[0] != 0;
@@ -241,8 +279,20 @@ static void drawGrid(Gfx& g, const UiView& v) {
     if (start) {                                      // ikona + nazwa, duża wartość, drobny opis
       if (ic) g.icon(x + 7, y + 6, ic, sel ? C_ACC : C_DIM);
       g.text(x + 23, y + 6, t.label, F_SMALL, sel ? C_ACC : C_DIM, tw - 28);
+      if (t.kind == UIT_NET) { drawNetTile(g, v, x, y, tw); continue; }
       bool fits = Gfx::textWidth(t.value, F_BIG) <= tw - 14;
-      g.text(x + 7, y + (fits ? 23 : 26), t.value, fits ? F_BIG : F_BOLD, t.accent ? C_ACC : C_TXT, tw - 14);
+      int vw = g.text(x + 7, y + (fits ? 23 : 26), t.value, fits ? F_BIG : F_BOLD, t.accent ? C_ACC : C_TXT, tw - 14);
+      if (t.kind == UIT_NOISE) drawSpark(g, x + vw + 13, y + 26, tw - vw - 20, 15, v.spark, v.nspark, C_BLUE, 6);
+      if (t.kind == UIT_BATT) {
+        int8_t tmp[UI_SPARK_N]; int n = v.nbhist; uint16_t lo = 65535, hi = 0;
+        for (int i2 = 0; i2 < n; i2++) { if (v.bhist[i2] < lo) lo = v.bhist[i2]; if (v.bhist[i2] > hi) hi = v.bhist[i2]; }
+        for (int i2 = 0; i2 < n; i2++) tmp[i2] = (int8_t)(((int)v.bhist[i2] - lo) * 100 / (hi > lo ? hi - lo : 1) - 50);
+        if (n >= 2) {
+          int bx = x + vw + 12, bw = tw - vw - 19;
+          g.fillRect(bx, y + 41, bw, 1, C_LINE);
+          drawSpark(g, bx, y + 25, bw, 16, tmp, n, v.bchg ? C_ACC : C_GRN, hi - lo < 30 ? 1000 : 0);
+        }
+      }
       g.text(x + 7, y + 46, t.sub, F_SMALL, C_DIM, tw - 14);
     } else {                                          // ikona w kółku, nazwa i jedna linia podsumowania
       g.fillRound(x + 6, y + (th - 22) / 2, 22, 22, 6, sel ? C_ACC : C_LINE);
@@ -389,6 +439,186 @@ static void drawTime(Gfx& g, const UiView& v) {
   g.textCenter(GFX_W / 2, 168, v.line1, F_SMALL, C_DIM);
 }
 
+
+// ---------- Widmo, log pakietów, info o kanale, kod QR ----------
+
+static void chipsRow(Gfx& g, int y, const char* const* names, int n, int active) {
+  int x = 8;
+  for (int i = 0; i < n; i++) {
+    int w = Gfx::textWidth(names[i], F_SMALL) + 14;
+    g.fillRound(x, y, w, 17, 8, i == active ? C_ACC : C_TILE);
+    g.text(x + 7, y + 2, names[i], F_SMALL, i == active ? C_INK : C_DIM);
+    x += w + 6;
+  }
+}
+
+static uint16_t heat(int dbm) {                  // kolor wodospadu: czarny → niebieski → bursztynowy → biały
+  static const int16_t K[5][4] = { { -125, 4, 6, 12 }, { -112, 16, 40, 90 }, { -98, 124, 196, 255 }, { -84, 255, 176, 32 }, { -68, 255, 255, 255 } };
+  if (dbm <= K[0][0]) return GFX_RGB(K[0][1], K[0][2], K[0][3]);
+  for (int i = 1; i < 5; i++) if (dbm <= K[i][0]) {
+    int t = (dbm - K[i - 1][0]) * 256 / (K[i][0] - K[i - 1][0]);
+    return GFX_RGB(K[i - 1][1] + (K[i][1] - K[i - 1][1]) * t / 256, K[i - 1][2] + (K[i][2] - K[i - 1][2]) * t / 256, K[i - 1][3] + (K[i][3] - K[i - 1][3]) * t / 256);
+  }
+  return GFX_RGB(255, 255, 255);
+}
+
+static void dbmScale(Gfx& g, int x0, int x1, int yt, int yb, int dTop, int dBot) {
+  for (int d = dTop; d >= dBot + 10; d -= 20) {
+    char t[8]; snprintf(t, sizeof(t), "%d", d);
+    int y = yb - (d - dBot) * (yb - yt) / (dTop - dBot);
+    g.textRight(x0 - 4, y - 7, t, F_SMALL, C_DIM);
+    for (int x = x0; x < x1; x += 4) g.fillRect(x, y, 2, 1, C_LINE);
+  }
+}
+
+static void drawSpecBand(Gfx& g, const UiView& v) {
+  const int x0 = 32, bw = 5, nb = UI_SPEC_BINS, yt = 70, yb = 148, dTop = -60, dBot = -130;
+  auto ydb = [&](int d) { int y = yb - (d - dBot) * (yb - yt) / (dTop - dBot); return y < yt ? yt : y > yb ? yb : y; };
+  float f1 = v.spec_f0 + v.spec_step * nb;
+  // podpasmo P (869,4–869,65 MHz) w tle, jeśli jest w zakresie
+  float pa = 869.4f > v.spec_f0 ? 869.4f : v.spec_f0, pb = 869.65f < f1 ? 869.65f : f1;
+  if (pb > pa) { int a = x0 + (int)((pa - v.spec_f0) / v.spec_step * bw), b = x0 + (int)((pb - v.spec_f0) / v.spec_step * bw); g.fillRect(a, yt, b - a, yb - yt, C_TILE); }
+  dbmScale(g, x0, x0 + nb * bw, yt, yb, dTop, dBot);
+  if (v.spec_have) for (int i = 0; i < nb; i++) {
+    int y = ydb(v.spec_cur[i]);
+    g.fillRect(x0 + i * bw, y, bw - 1, yb - y, v.spec_cur[i] > -100 ? C_BLUE : GFX_RGB(0x2A, 0x50, 0x80));
+    g.fillRect(x0 + i * bw, ydb(v.spec_peak[i]), bw - 1, 2, C_ACC);
+  }
+  g.fillRect(x0, yb, nb * bw, 1, C_LINE);
+  if (v.spec_mark > v.spec_f0 && v.spec_mark < f1) {           // nasza częstotliwość
+    int xm = x0 + (int)((v.spec_mark - v.spec_f0) / v.spec_step * bw);
+    for (int y = yt - 2; y < yb; y += 4) g.fillRect(xm, y, 1, 2, C_ACC);
+    g.textRight(xm - 3, yt - 2, "SF6", F_SMALL, C_ACC);
+  }
+  // podpisy częstotliwości: brzegi i środek
+  // szerokie pasmo: pełne megaherce co 2 MHz i koniec zakresu; wąskie: podział na cztery części
+  for (int k = 0; k <= 4; k++) {
+    float f;
+    if (v.spec_step >= 0.1f) { f = (float)(int)(v.spec_f0 + 0.999f) + 2 * k; if (f > f1 - 0.6f) f = f1; }
+    else f = v.spec_f0 + (f1 - v.spec_f0) * k / 4;
+    int x = x0 + (int)((f - v.spec_f0) / v.spec_step * bw + 0.5f);
+    char t[12]; if (v.spec_step >= 0.1f) snprintf(t, sizeof(t), "%.0f", f); else snprintf(t, sizeof(t), "%.2f", f);
+    for (char* p = t; *p; p++) if (*p == '.') *p = ',';
+    g.fillRect(x, yb, 1, 3, C_DIM);
+    if (x >= x0 + nb * bw - 12) { g.textRight(x + 1, yb + 3, t, F_SMALL, C_DIM); break; }
+    else if (k == 0) g.text(x, yb + 3, t, F_SMALL, C_DIM); else g.textCenter(x, yb + 3, t, F_SMALL, C_DIM);
+  }
+  const int wy = 168;
+  for (int r = 0; r < v.spec_wf_n; r++) for (int i = 0; i < nb; i++) g.fillRect(x0 + i * bw, wy + r * 2, bw, 2, heat(v.spec_wf[r][i]));
+  g.textRight(x0 - 4, wy - 2, "teraz", F_SMALL, C_DIM);
+  if (!v.spec_have) g.textCenter(GFX_W / 2, 100, "mierzę…", F_NORMAL, C_DIM);
+  g.text(8, 201, v.spec_info, F_SMALL, v.spec_pause ? C_ACC : C_DIM, GFX_W - 16);
+}
+
+static void statTile(Gfx& g, int x, int y, int w, const char* label, const char* val, const char* sub, uint16_t c) {
+  g.fillRound(x, y, w, 46, 5, C_TILE);
+  g.text(x + 7, y + 3, label, F_SMALL, C_DIM);
+  int vw = g.text(x + 7, y + 17, val, F_BOLD, c);
+  g.text(x + 9 + vw, y + 20, sub, F_SMALL, C_DIM, w - vw - 14);
+}
+
+static void drawSpecChannel(Gfx& g, const UiView& v) {
+  char a[16], b[16];
+  const int y = 68;
+  snprintf(a, sizeof(a), "%d", v.noise_dbm); statTile(g, 8, y, 98, "Szum", a, "dBm", C_TXT);
+  if (v.have_last) { snprintf(a, sizeof(a), "%d", v.last_rssi); statTile(g, 111, y, 98, "Ostatni pakiet", a, v.last_snr, C_ACC); }
+  else statTile(g, 111, y, 98, "Ostatni pakiet", "—", "", C_DIM);
+  snprintf(b, sizeof(b), "%d %%", v.busy_pct); statTile(g, 214, y, 98, "Zajętość", b, "1 min", C_TXT);
+  const int x0 = 32, x1 = x0 + UI_NOISE_N, yt = 124, yb = 196, dTop = -60, dBot = -125;
+  auto ydb = [&](int d) { int yy = yb - (d - dBot) * (yb - yt) / (dTop - dBot); return yy < yt ? yt : yy > yb ? yb : yy; };
+  dbmScale(g, x0, x1, yt, yb, dTop, dBot);
+  int prev = -1, off = UI_NOISE_N - v.nnhist;
+  for (int i = 0; i < v.nnhist; i++) {
+    int yy = ydb(v.nhist[i]);
+    if (prev >= 0) { int p = prev < yy ? prev : yy, q = prev < yy ? yy : prev; g.fillRect(x0 + off + i, p, 1, q - p + 1, C_BLUE); }
+    prev = yy;
+  }
+  for (int i = 0; i < v.npk; i++) dot(g, x0 + v.pk_x[i], ydb(v.pk_dbm[i]), 2, v.pk_dbm[i] > -80 ? C_ACC : GFX_RGB(0xC0, 0x84, 0x18));
+  g.fillRect(x0, yb, x1 - x0, 1, C_LINE);
+  g.text(x0, yb + 3, "-10 min", F_SMALL, C_DIM);
+  g.textRight(x1, yb + 3, "teraz", F_SMALL, C_DIM);
+  int lx = (x0 + x1) / 2 - 50;
+  g.fillRect(lx, yb + 10, 12, 2, C_BLUE); lx += 16; lx += g.text(lx, yb + 3, "szum", F_SMALL, C_DIM) + 12;
+  dot(g, lx + 3, yb + 10, 2, C_ACC); g.text(lx + 10, yb + 3, "pakiety", F_SMALL, C_DIM);
+  if (v.spec_pause) g.textRight(GFX_W - 8, STATUS_H + HEADER_H + 5, "pauza", F_SMALL, C_ACC);
+}
+
+static void drawSpec(Gfx& g, const UiView& v) {
+  drawHeader(g, v, STATUS_H);
+  static const char* const T[2] = { "Pasmo", "Nasz kanał" };
+  chipsRow(g, STATUS_H + HEADER_H + 3, T, 2, v.spec_tab);
+  if (v.spec_tab == 0) drawSpecBand(g, v); else drawSpecChannel(g, v);
+}
+
+static void drawLog(Gfx& g, const UiView& v) {
+  drawHeader(g, v, STATUS_H);
+  const char* ch[8]; for (int i = 0; i < v.nchips && i < 8; i++) ch[i] = v.chips[i];
+  chipsRow(g, STATUS_H + HEADER_H + 3, ch, v.nchips, v.chip_active);
+  int y = 68;
+  g.text(8, y, "czas", F_SMALL, C_DIM); g.text(62, y, "typ", F_SMALL, C_DIM); g.text(104, y, "hop", F_SMALL, C_DIM);
+  g.text(130, y, "od / ścieżka", F_SMALL, C_DIM); g.textRight(276, y, "SNR", F_SMALL, C_DIM); g.textRight(312, y, "dBm", F_SMALL, C_DIM);
+  y += 15;
+  static const uint16_t COL[6] = { C_BLUE, C_GRN, C_DIM, C_PINK, C_ACC, C_LINE };
+  if (v.nlrow == 0) g.textCenter(GFX_W / 2, 130, v.empty, F_NORMAL, C_DIM);
+  for (int i = 0; i < v.nlrow; i++, y += 16) {
+    const UiLogRow& p = v.lrow[i];
+    bool sel = i == v.sel;
+    if (sel) g.fillRect(0, y, GFX_W - 6, 16, C_ACC);
+    uint16_t fg = sel ? C_INK : C_TXT, dim = sel ? C_INK : C_DIM;
+    g.text(8, y + 1, p.t, F_SMALL, dim);
+    g.fillRound(60, y + 1, 40, 14, 3, sel ? C_INK : COL[p.col % 6]);
+    g.textCenter(80, y + 1, p.type, F_SMALL, sel ? C_ACC : C_INK);
+    g.text(106, y + 1, p.hop, F_SMALL, fg);
+    g.text(130, y + 1, p.who, F_SMALL, fg, 118);
+    g.textRight(276, y + 1, p.snr, F_SMALL, fg);
+    g.textRight(312, y + 1, p.rssi, F_SMALL, fg);
+  }
+  if (v.sb_total > v.sb_view && v.sb_view > 0) {                 // suwak: gdzie jesteśmy w logu
+    int H = 128, th = H * v.sb_view / v.sb_total; if (th < 8) th = 8;
+    int ty = 84 + (H - th) * v.sb_pos / (v.sb_total - v.sb_view);
+    g.fillRect(GFX_W - 3, 84, 2, H, C_LINE); g.fillRect(GFX_W - 4, ty, 3, th, C_ACC);
+  }
+}
+
+static void drawChInfo(Gfx& g, const UiView& v) {
+  drawHeader(g, v, STATUS_H);
+  int y = STATUS_H + HEADER_H + 4;
+  for (int i = 0; i < v.nkv && i < 5; i++, y += 19) {
+    int vw = g.textRight(GFX_W - 8, y + 2, v.kv[i].v, F_BOLD, C_TXT);
+    g.text(8, y + 2, v.kv[i].k, F_NORMAL, C_DIM, GFX_W - 24 - vw);
+  }
+  y += 3;
+  g.fillRect(8, y, GFX_W - 16, 1, C_LINE);
+  g.text(8, y + 3, "Najaktywniejsi (24 h)", F_SMALL, C_DIM);
+  y += 19;
+  if (v.ntop == 0) g.text(8, y, "nikt nie pisał", F_SMALL, C_DIM);
+  int mx = 1; for (int i = 0; i < v.ntop; i++) if (v.top_cnt[i] > mx) mx = v.top_cnt[i];
+  for (int i = 0; i < v.ntop; i++, y += 14) {
+    g.text(8, y, v.top_name[i], F_SMALL, C_BLUE, 50);
+    int w = v.top_cnt[i] * 200 / mx; if (w < 4) w = 4;
+    g.fillRound(60, y + 3, w, 9, 3, C_ACC);
+    char c[8]; snprintf(c, sizeof(c), "%d", v.top_cnt[i]); g.text(66 + w, y, c, F_SMALL, C_DIM);
+  }
+}
+
+static void drawQR(Gfx& g, const UiView& v) {
+  drawHeader(g, v, STATUS_H);
+  int by = STATUS_H + HEADER_H + 8;
+  if (!v.qr_ok) { g.textCenter(GFX_W / 2, 110, "Nie udało się utworzyć kodu", F_NORMAL, C_DIM); return; }
+  int n = qrcodegen_getSize(v.qr), q = 2;
+  int m = 150 / (n + 2 * q); if (m < 2) m = 2;
+  int box = (n + 2 * q) * m, bx = 10;
+  g.fillRect(bx, by, box, box, GFX_RGB(255, 255, 255));
+  for (int r = 0; r < n; r++) for (int c = 0; c < n; c++) if (qrcodegen_getModule(v.qr, c, r)) g.fillRect(bx + (q + c) * m, by + (q + r) * m, m, m, C_BG);
+  int x = bx + box + 12, y = by + 2;
+  g.text(x, y, "Zeskanuj telefonem", F_BOLD, C_TXT); y += 19;
+  g.text(x, y, "w aplikacji MeshCore", F_SMALL, C_DIM); y += 14;
+  g.text(x, y, "albo MeshSpeed —", F_SMALL, C_DIM); y += 14;
+  g.text(x, y, "kanał doda się sam.", F_SMALL, C_DIM); y += 24;
+  g.text(x, y, "Klucz", F_SMALL, C_DIM); y += 14;
+  for (int i = 0; i < 4; i++) if (v.qr_line[i][0]) { g.text(x, y, v.qr_line[i], F_SMALL, C_TXT, GFX_W - x - 4); y += 14; }
+}
+
 void uiRender(Gfx& g, const UiView& v) {
   g.clear(C_BG);
   switch (v.screen) {
@@ -399,6 +629,10 @@ void uiRender(Gfx& g, const UiView& v) {
     case UIS_LIST: drawList(g, v); break;
     case UIS_THREAD: drawThread(g, v); break;
     case UIS_INFO: drawInfo(g, v); break;
+    case UIS_SPEC: drawSpec(g, v); break;
+    case UIS_LOG: drawLog(g, v); break;
+    case UIS_CHINFO: drawChInfo(g, v); break;
+    case UIS_QR: drawQR(g, v); break;
   }
   drawStatus(g, v);
   drawBottom(g, v);

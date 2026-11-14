@@ -53,6 +53,9 @@ public:
   UiDisc ui_disc[UI_DISC_MAX]; int ui_disc_n = 0;
   bool uiDiscoverStart();
   bool uiAddDiscovered(int i) { ContactInfo c; memset(&c, 0, sizeof(c)); memcpy(c.id.pub_key, ui_disc[i].key, 32); snprintf(c.name, sizeof(c.name), "RPT %02x%02x%02x", ui_disc[i].key[0], ui_disc[i].key[1], ui_disc[i].key[2]); c.type = ADV_TYPE_REPEATER; c.lastmod = 1794580320UL; cts.push_back(c); return true; }
+  char ui_app_name[24] = "MeshSpeed";
+  bool uiDecodeGroup(const uint8_t* p, int, char* chan, int cn, char* who, int wn) { for (auto& c : chans) if (c.channel.hash[0] == p[0]) { snprintf(chan, cn, "%s", c.name); snprintf(who, wn, "BBot"); return true; } snprintf(chan, cn, "%s", ""); who[0] = 0; return false; }
+  bool uiNameByHash(uint8_t h, char* d, int n) { for (auto& c : cts) if (c.id.pub_key[0] == h) { snprintf(d, n, "%s", c.name); return true; } return false; }
   void uiReboot() { } bool uiFactoryReset() { return true; } void uiSetLatLon(double, double) { }
 };
 extern MyMesh the_mesh;

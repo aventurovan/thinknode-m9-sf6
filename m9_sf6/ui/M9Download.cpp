@@ -612,3 +612,5 @@ int m9wifiBars() {
   int r = (int)WiFi.RSSI();
   return r > -55 ? 4 : r > -67 ? 3 : r > -78 ? 2 : 1;
 }
+
+int m9wifiRssi() { return WiFi.status() == WL_CONNECTED ? (int)WiFi.RSSI() : 0; }

@@ -25,3 +25,22 @@ void m9bleShutdown() { }
 unsigned m9FreeHeapKB() { return 30; }
 volatile uint32_t m9ble_connects, m9ble_auth_ok, m9ble_auth_fail, m9ble_rx, m9ble_tx;
 volatile uint8_t m9ble_fail_reason;
+int m9wifiRssi() { return sim_wifi >= 1 && sim_wifi <= 4 ? -62 : 0; }
+// atrapy radia (widmo) i procesora
+#include <math.h>
+#include <stdlib.h>
+static unsigned rs = 7; static float rnd() { rs = rs * 1103515245 + 12345; return ((rs >> 16) & 0x7FFF) / 32767.0f; }
+int m9radioRssi() { return -116 + (int)(rnd() * 5); }
+bool m9radioSweep(float f0, float step, int n, int8_t* out) {
+  for (int i = 0; i < n; i++) {
+    float f = f0 + step * (i + 0.5f), d = -117 + rnd() * 5;
+    const float S[4][2] = { { 868.1f, -86 }, { 869.525f, -79 }, { 869.618f, -72 }, { 868.3f, -97 } };
+    for (auto& x : S) { float e = (f - x[0]) / 0.08f; float v = x[1] - e * e * 9 + rnd() * 3; if (v > d) d = v; }
+    out[i] = (int8_t)d;
+  }
+  return true;
+}
+int m9radioNoiseFloor() { return -114; }
+uint32_t m9radioAirtime(int len) { return 60 + len * 3; }
+void m9cpuSave(bool) { }
+int m9cpuMhz() { return 240; }

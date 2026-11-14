@@ -9,14 +9,25 @@
 #define UI_KV_MAX     9
 #define UI_INPUT_MAX  140
 
-enum UiScreen { UIS_START, UIS_LIST, UIS_THREAD, UIS_INFO, UIS_BOOT, UIS_LOCK, UIS_GRID, UIS_TIME };
-enum UiIcon { UII_NONE, UII_MAIL, UII_TOWER, UII_USER, UII_HASH, UII_STAR, UII_GPS, UII_BT, UII_LOCK, UII_BOLT, UII_SD, UII_ROOM, UII_HOME, UII_GEAR, UII_SCREEN, UII_SHIELD, UII_CHECK, UII_MUTE, UII_SIGNAL };
+enum UiScreen { UIS_START, UIS_LIST, UIS_THREAD, UIS_INFO, UIS_BOOT, UIS_LOCK, UIS_GRID, UIS_TIME, UIS_SPEC, UIS_LOG, UIS_CHINFO, UIS_QR };
+enum UiIcon { UII_NONE, UII_MAIL, UII_TOWER, UII_USER, UII_HASH, UII_STAR, UII_GPS, UII_BT, UII_LOCK, UII_BOLT, UII_SD, UII_ROOM, UII_HOME, UII_GEAR, UII_SCREEN, UII_SHIELD, UII_CHECK, UII_MUTE, UII_SIGNAL, UII_NET, UII_SPEC, UII_BATT, UII_WIFI };
 
 struct UiRow { char text[44]; char sub[80]; char right[64]; uint8_t icon; uint8_t badge; bool icon_accent; };
 struct UiBubble { char who[24]; char meta[32]; char text[168]; char path[72]; bool out; bool sel; };
 struct UiKV { char k[64]; char v[52]; };
 struct UiHint { char key[14]; char txt[32]; };
-struct UiTile { char label[24]; char value[36]; char sub[72]; uint8_t icon; bool accent; };
+struct UiTile { char label[24]; char value[36]; char sub[72]; uint8_t icon; bool accent; uint8_t kind; };   // kind: UIT_*
+enum UiTileKind { UIT_PLAIN, UIT_NOISE, UIT_BATT, UIT_NET };
+
+#define UI_SPARK_N    48        // punkty małych wykresów na kafelkach
+#define UI_SPEC_BINS  56        // słupki widma
+#define UI_SPEC_WF    16        // wiersze wodospadu
+#define UI_NOISE_N    280       // szum z 10 minut (co ok. 2 s)
+#define UI_PKDOT_MAX  64        // kropki pakietów na wykresie kanału
+#define UI_LOG_ROWS   8
+#define UI_QR_BYTES   410       // bufor kodu QR do wersji 10
+enum UiLogColor { ULC_BLUE, ULC_GREEN, ULC_DIM, ULC_PINK, ULC_ACC, ULC_LINE };
+struct UiLogRow { char t[10]; char type[8]; uint8_t col; char hop[6]; char who[64]; char snr[8]; char rssi[8]; };
 
 struct UiView {
   // pasek stanu
@@ -47,6 +58,23 @@ struct UiView {
   bool popup; bool popup_danger; char popup1[56]; char popup2[80];
   // start/blokada
   char big[12]; char line1[280]; char line2[80];
+  // Start: wykres szumu, napięcie baterii, Bluetooth i WiFi
+  int8_t spark[UI_SPARK_N]; int nspark;
+  uint16_t bhist[UI_SPARK_N]; int nbhist; bool bchg;
+  uint8_t bt_state; char bt_txt[24]; int wifi_dbm;          // bt_state: 0 wył., 1 czeka, 2 połączony; wifi_dbm 0 = wył.
+  // widmo
+  uint8_t spec_tab; bool spec_pause; char spec_range[40];
+  float spec_f0, spec_step; int8_t spec_cur[UI_SPEC_BINS], spec_peak[UI_SPEC_BINS]; bool spec_have;
+  int8_t spec_wf[UI_SPEC_WF][UI_SPEC_BINS]; int spec_wf_n; float spec_mark; char spec_info[80];
+  int noise_dbm; int last_rssi; char last_snr[16]; int busy_pct; bool have_last;
+  int8_t nhist[UI_NOISE_N]; int nnhist;                      // szum od najstarszego (co ok. 2 s)
+  int16_t pk_x[UI_PKDOT_MAX]; int8_t pk_dbm[UI_PKDOT_MAX]; int npk;   // pakiety: pozycja 0..UI_NOISE_N-1 i siła
+  // log pakietów
+  UiLogRow lrow[UI_LOG_ROWS]; int nlrow;
+  // info o kanale: najaktywniejsi
+  char top_name[3][24]; int top_cnt[3]; int ntop;
+  // kod QR
+  uint8_t qr[UI_QR_BYTES]; bool qr_ok; char qr_line[4][40];
 };
 
 void uiRender(Gfx& g, const UiView& v);

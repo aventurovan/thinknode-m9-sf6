@@ -42,15 +42,15 @@ struct UiMsg {
 class UITask : public AbstractUITask {
   enum Scr { S_START = 0, S_MSGS = 1, S_CONTACTS = 2, S_RPTS = 3, S_SETTINGS = 4,
              S_THREAD, S_KV, S_BOOT, S_MENU, S_HEARD, S_QUICK, S_DISC, S_LOGIN, S_ADMIN, S_ADMIN_ACT, S_ADMIN_CLI,
-             S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS, S_PICK, S_MAP, S_MAP_NET, S_TIME, S_OTA };
+             S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS, S_PICK, S_MAP, S_MAP_NET, S_TIME, S_OTA, S_SPEC, S_LOG, S_CHINFO, S_QR };
   enum InputMode { IN_MSG = 0, IN_CHANNEL, IN_FREQ, IN_NAME, IN_TIME, IN_PASS, IN_CLI, IN_LAT, IN_LON, IN_PIN, IN_WIFI_SSID, IN_WIFI_PASS, IN_MAP_URL };
-  enum Act { A_WRITE, A_FAV, A_DETAIL, A_MANAGE, A_DELETE, A_REPLY, A_RESEND, A_COPY, A_DELMSG, A_OPEN, A_MUTE, A_MARKREAD, A_DELCHAN, A_DELTHREAD, A_REPLY_ACK, A_SHOWMAP, A_ROUTE, A_ADDCHAN };
+  enum Act { A_WRITE, A_FAV, A_DETAIL, A_MANAGE, A_DELETE, A_REPLY, A_RESEND, A_COPY, A_DELMSG, A_OPEN, A_MUTE, A_MARKREAD, A_DELCHAN, A_DELTHREAD, A_REPLY_ACK, A_SHOWMAP, A_ROUTE, A_ADDCHAN, A_CHINFO, A_SPEC, A_LOG, A_PKTMAP };
   enum Pick { P_PRESET, P_BW, P_SF, P_CR, P_TX, P_HASH, P_AIR, P_BT, P_GPS, P_ADVLOC, P_TEL0, P_TEL1, P_TEL2, P_AUTOADV, P_AA_MODE, P_AA_T0, P_AA_T1, P_AA_T2, P_AA_T3,
-              P_AA_FULL, P_AA_HOPS, P_SHOWPATH, P_MULTIACK, P_SOUND, P_SLEEP, P_KBLIGHT, P_WAKE, P_LOCK, P_RPTSORT, P_BRIGHT, P_MSGSND, P_ADVSND, P_MAPRANGE };
+              P_AA_FULL, P_AA_HOPS, P_SHOWPATH, P_MULTIACK, P_SOUND, P_SLEEP, P_KBLIGHT, P_WAKE, P_LOCK, P_RPTSORT, P_BRIGHT, P_MSGSND, P_ADVSND, P_MAPRANGE, P_GPSMODE, P_DIM, P_CPU, P_BTAUTO };
   enum Confirm { C_NONE = 0, C_DEL_CHANNEL, C_DEL_CONTACT, C_REBOOT, C_FACTORY, C_RPT_REBOOT, C_RPT_SF6, C_CLEAR_MSGS, C_CLEAR_PW, C_CLEAR_BONDS, C_DEL_THREAD, C_WIFI_DL, C_WIFI_AP, C_BT_RESTART, C_WIFI_OTA, C_OTA_INSTALL };
   struct Thread { char name[32]; uint8_t chan; uint8_t unread; uint32_t last; int16_t last_msg; };
   struct Nav { uint8_t scr; int16_t sel, top; };
-  struct Cfg { uint32_t magic; uint8_t show_path, sleep_idx, kb_light, adv_idx, ct_filter, rpt_sort, no_wake, lock, bright, no_msg_snd, adv_snd, map_range, bt_off; };   // map_range: 0 = cała mapa, 1 = bez zoomu 15, 2 = do zoomu 13;   // bright: 0 = nie ustawiono (pełna jasność), 1..5 = poziom
+  struct Cfg { uint32_t magic; uint8_t show_path, sleep_idx, kb_light, adv_idx, ct_filter, rpt_sort, no_wake, lock, bright, no_msg_snd, adv_snd, map_range, bt_off, gps_mode, dim_idx, cpu_full, bt_auto; };   // gps_mode 0 = stale; dim_idx 0 = po 10 s; cpu_full 0 = 80 MHz po wygaszeniu; bt_auto 0 = nigdy   // map_range: 0 = cała mapa, 1 = bez zoomu 15, 2 = do zoomu 13;   // bright: 0 = nie ustawiono (pełna jasność), 1..5 = poziom
   struct Pw { uint8_t key[6]; char pw[16]; };
   struct WifiCfg { char ssid[33]; char pass[64]; char url[128]; };
 
@@ -91,6 +91,18 @@ class UITask : public AbstractUITask {
   unsigned long _ota_reboot_at;
   unsigned long _sd_test_at;             // zaplanowany test karty SD (po narysowaniu okienka)
   bool _bt_boot_done; int _wifi_bars;
+  // pomiary w tle: szum na naszym kanale (co ok. 2 s) i napięcie baterii (co 7,5 min)
+  int8_t _nh[UI_NOISE_N]; int _nh_n; unsigned long _nh_next, _nh_slot_end; int _nh_min;
+  uint16_t _bh[UI_SPARK_N]; int _bh_n, _bh_seg; unsigned long _bh_next; bool _bh_chg;
+  // widmo
+  uint8_t _sp_tab, _sp_range; bool _sp_pause, _sp_have; unsigned long _sp_next; unsigned _sp_ms;
+  int8_t _sp_cur[UI_SPEC_BINS], _sp_peak[UI_SPEC_BINS], _sp_wf[UI_SPEC_WF][UI_SPEC_BINS]; int _sp_wf_n;
+  // log pakietów
+  uint8_t _lg_filter; int16_t _lg_idx[200]; int _lg_n; uint32_t _kv_pkt;   // _kv_pkt: numer pakietu w szczegółach (0 = inne szczegóły)
+  // oszczędzanie energii
+  bool _dimmed; bool _gps_off_phase; unsigned long _gps_next, _gps_on_at, _gps_fix_at;
+  bool _gps_cache; double _gps_lat, _gps_lon;
+  unsigned long _bt_idle_since; bool _bt_auto_off;
   bool _bt_killed;                       // Bluetooth wyłączony na czas WiFi (do restartu)
   uint32_t _adv_seen;                    // ostatni advert, dla którego zagrał dźwięk
   int _tf[5]; int _tf_sel;               // ustawianie daty i godziny: rok, miesiąc, dzień, godzina, minuta
@@ -191,6 +203,11 @@ class UITask : public AbstractUITask {
   void fill();
   void fillStatus();
   void fillStart();
+  void fillSpec(); void keySpec(uint8_t k); void sweepRange(float& f0, float& step);
+  void buildLog(); void fillLog(); void keyLog(uint8_t k); void detailPkt(uint32_t seq);
+  void fillChInfo(); void fillQR();
+  void detailBattery(); bool battEstimate(char* dest, size_t n);
+  void sampleLoop(unsigned long now); void powerLoop(unsigned long now);
   void openMap();
   void drawMap();
   void keyMap(uint8_t k);
