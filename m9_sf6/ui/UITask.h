@@ -168,6 +168,8 @@ class UITask : public AbstractUITask {
   void saveCfg();
   void savePw();
   void saveMsgs();
+  int  readMsgFile(const char* path);
+  int _msg_loaded, _msg_src, _msg_saved; uint32_t _msg_saved_at;   // diagnostyka zapisu wiadomości
   bool saveStep();
 
   // klawisze

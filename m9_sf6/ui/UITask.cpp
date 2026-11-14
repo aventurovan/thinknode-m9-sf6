@@ -24,6 +24,7 @@
 #define DEF_LAT          49.8225         // środek mapy, gdy nie ma pozycji: Bielsko-Biała
 #define DEF_LON          19.0469
 #define FILE_MSGS_TMP    "/m9ui.tmp"
+#define FILE_MSGS_BAK    "/m9ui.bak"
 #define SAVE_DELAY_MS    45000UL        // wiadomości zapisujemy 45 s po zmianie (albo po wygaszeniu ekranu)
 #define SAVE_CHUNK       6              // ile wiadomości na jedno przejście pętli
 
@@ -150,6 +151,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   memset(&_wifi, 0, sizeof(_wifi)); strcpy(_wifi.url, MAP_URL_DEFAULT);
   memset(_tf, 0, sizeof(_tf)); _tf_sel = 0; _snap = NULL;
   _bt_killed = false; _adv_seen = 0; _sd_test_at = 0;
+  _msg_loaded = 0; _msg_src = 0; _msg_saved = 0; _msg_saved_at = 0;
   _route_n = 0; _route_star = false; _route_unknown = 0; _route_title[0] = 0; _ota_reboot_at = 0;
 }
 
@@ -200,19 +202,14 @@ void UITask::loadAll() {
     f.close();
   }
 
-  f = SPIFFS.open(FILE_MSGS, "r");
-  if (f && _msgs) {
-    uint8_t h[6];
-    int n = -1;
-    if (f.read(h, 4) == 4 && h[2] == (uint8_t)(sizeof(UiMsg) & 0xFF)) {
-      if (h[0] == 'M' && h[1] == '9') n = h[3];                                        // starszy format: liczba w jednym bajcie
-      else if (h[0] == 'M' && h[1] == 'A' && f.read(h + 4, 2) == 2) n = h[4] | (h[5] << 8);
-    }
-    if (n > UI_MSG_MAX) n = UI_MSG_MAX;
-    if (n > 0 && f.read((uint8_t*)_msgs, sizeof(UiMsg) * n) == sizeof(UiMsg) * n) _msg_n = n;
-    for (int i = 0; i < _msg_n; i++) _msgs[i].sent_id = 0;       // numery wysyłek nie przeżywają restartu
+  // wiadomości: główny plik, a gdy go nie ma albo jest niepełny — kopia sprzed podmiany albo plik tymczasowy
+  static const char* const MSG_FILES[3] = { FILE_MSGS, FILE_MSGS_BAK, FILE_MSGS_TMP };
+  for (int k = 0; k < 3 && _msgs && _msg_n == 0; k++) {
+    int n = readMsgFile(MSG_FILES[k]);
+    if (n >= 0) { _msg_n = n; _msg_src = k; break; }
   }
-  if (f) f.close();
+  for (int i = 0; i < _msg_n; i++) _msgs[i].sent_id = 0;       // numery wysyłek nie przeżywają restartu
+  _msg_loaded = _msg_n;
 
   f = SPIFFS.open(FILE_WIFI, "r");
   if (f) {
@@ -263,6 +260,29 @@ void UITask::toggleMute(const char* name) {
   saveMuted();
 }
 
+// czyta plik wiadomości; -1 = brak albo uszkodzony (zła długość)
+int UITask::readMsgFile(const char* path) {
+  File f = SPIFFS.open(path, "r");
+  if (!f) return -1;
+  uint8_t h[6];
+  int n = -1;
+  if (f.read(h, 4) == 4 && h[2] == (uint8_t)(sizeof(UiMsg) & 0xFF)) {
+    if (h[0] == 'M' && h[1] == '9') n = h[3];                                        // starszy format: liczba w jednym bajcie
+    else if (h[0] == 'M' && h[1] == 'A' && f.read(h + 4, 2) == 2) n = h[4] | (h[5] << 8);
+  }
+  if (n > UI_MSG_MAX) n = -1;
+  if (n > 0 && f.read((uint8_t*)_msgs, sizeof(UiMsg) * n) != sizeof(UiMsg) * n) n = -1;
+  f.close();
+  return n;
+}
+
+// podmiana pliku wiadomości tak, żeby przerwa w dowolnym momencie zostawiła któryś pełny plik
+static void swapMsgFiles() {
+  SPIFFS.remove(FILE_MSGS_BAK);
+  if (SPIFFS.exists(FILE_MSGS)) SPIFFS.rename(FILE_MSGS, FILE_MSGS_BAK);
+  if (SPIFFS.rename(FILE_MSGS_TMP, FILE_MSGS)) SPIFFS.remove(FILE_MSGS_BAK);
+}
+
 void UITask::saveCfg() {
   File f = SPIFFS.open(FILE_CFG, "w");
   if (!f) return;
@@ -306,8 +326,8 @@ bool UITask::saveStep() {
   if (!ok) { sv_file.close(); SPIFFS.remove(FILE_MSGS_TMP); sv_active = false; return false; }     // brak miejsca: zostaje poprzedni plik
   if (sv_idx >= sv_n) {
     sv_file.close(); sv_active = false;
-    SPIFFS.remove(FILE_MSGS);
-    SPIFFS.rename(FILE_MSGS_TMP, FILE_MSGS);
+    swapMsgFiles();
+    _msg_saved = sv_n; _msg_saved_at = the_mesh.getRTCClock()->getCurrentTime();
     if (_msgs_dirty) _save_at = millis() + SAVE_DELAY_MS;
     return false;
   }
@@ -318,12 +338,14 @@ void UITask::saveMsgs() {
   if (sv_active) { sv_file.close(); SPIFFS.remove(FILE_MSGS_TMP); sv_active = false; }
   _msgs_dirty = false;
   if (_msgs == NULL) return;
-  File f = SPIFFS.open(FILE_MSGS, "w");
+  File f = SPIFFS.open(FILE_MSGS_TMP, "w");
   if (!f) return;
   uint8_t h[6] = { 'M', 'A', (uint8_t)(sizeof(UiMsg) & 0xFF), 0, (uint8_t)(_msg_n & 0xFF), (uint8_t)(_msg_n >> 8) };
   bool ok = f.write(h, 6) == 6 && f.write((const uint8_t*)_msgs, sizeof(UiMsg) * _msg_n) == sizeof(UiMsg) * _msg_n;
   f.close();
-  if (!ok) SPIFFS.remove(FILE_MSGS);                 // brak miejsca: lepiej bez pliku niż z uszkodzonym
+  if (!ok) { SPIFFS.remove(FILE_MSGS_TMP); return; }  // brak miejsca: zostaje poprzedni plik
+  swapMsgFiles();
+  _msg_saved = _msg_n; _msg_saved_at = the_mesh.getRTCClock()->getCurrentTime();
 }
 
 const char* UITask::pwGet(const uint8_t* key) {
@@ -777,6 +799,13 @@ void UITask::detailInfo() {
   snprintf(t, sizeof(t), "0x%02X", _kb.addr()); kvAdd("Klawiatura", _kb.isFound() ? t : "nie znaleziona");
   snprintf(t, sizeof(t), "%lu kB · PSRAM %lu kB", (unsigned long)(ESP.getFreeHeap() / 1024), (unsigned long)(ESP.getFreePsram() / 1024)); kvAdd("Wolna pamięć RAM", t);
   snprintf(t, sizeof(t), "%lu z %lu kB", (unsigned long)(SPIFFS.usedBytes() / 1024), (unsigned long)(SPIFFS.totalBytes() / 1024)); kvAdd("Pamięć na dane", t);
+  {
+    static const char* const SRC[3] = { "plik główny", "kopia", "plik tymczasowy" };
+    snprintf(t, sizeof(t), "%d (%s)", _msg_loaded, _msg_loaded ? SRC[_msg_src % 3] : "brak pliku"); kvAdd("Wiadomości po starcie", t);
+    if (_msg_saved_at) { char c[8]; fmtClock(c, sizeof(c), _msg_saved_at, false); snprintf(t, sizeof(t), "%d, o %s", _msg_saved, c); }
+    else strcpy(t, _msgs_dirty ? "jeszcze nie (czeka)" : "nie było zmian");
+    kvAdd("Ostatni zapis wiadomości", t);
+  }
   unsigned long up = millis() / 60000UL;
   snprintf(t, sizeof(t), "%lu godz. %lu min", up / 60, up % 60); kvAdd("Czas pracy", t);
   const uint8_t* pk = the_mesh.self_id.pub_key;
