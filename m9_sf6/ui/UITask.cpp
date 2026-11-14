@@ -2445,6 +2445,11 @@ void UITask::loop() {
     }
     uint32_t ms = SLEEP_STEPS[_cfg.sleep_idx]; if (ms) _sleep_at = millis() + ms;
   }
+  // zegar z serwera mapy (nagłówek Date): poprawka, gdy różni się o więcej niż 3 s
+  if (uint32_t st = m9dlServerTime()) {
+    uint32_t mine = the_mesh.getRTCClock()->getCurrentTime();
+    if (st > mine + 3 || mine > st + 3) the_mesh.getRTCClock()->setCurrentTime(st);
+  }
   if (m9dlFinished()) { _map.scan(); wake(); popup("Mapa pobrana", "możesz wyjść z menu (Wstecz)", false, 20000); }
   if (m9dlFailed()) {                                // błąd pobierania: ekran ze szczegółami (zostaje do naciśnięcia Wstecz)
     wake();

@@ -14,4 +14,5 @@ bool m9dlFailed();               // true raz po przejściu w stan błędu (opis 
 bool m9dlChanged();              // true raz, gdy na karcie przybył plik (trzeba odświeżyć listę map)
 const char* m9dlStatus();        // krótki stan, np. „pobieram 3 z 12”
 const char* m9dlDetail();
-const char* m9dlDiag();          // po błędzie: szczegóły w kilku wierszach (etap, kod, błąd szyfrowania, pamięć, WiFi)        // szczegóły, np. nazwa pliku i postęp
+const char* m9dlDiag();
+uint32_t m9dlServerTime();       // czas UTC z ostatniej odpowiedzi serwera (nagłówek Date), poprawiony o czas od odczytu; 0 = brak. Zwraca raz.          // po błędzie: szczegóły w kilku wierszach (etap, kod, błąd szyfrowania, pamięć, WiFi)        // szczegóły, np. nazwa pliku i postęp

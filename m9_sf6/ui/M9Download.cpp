@@ -54,6 +54,22 @@ static char list_body[4096];
 static char d_tls[72] = "", diag[480] = "";
 static volatile int d_hop = 0, d_code = 0, d_heap = 0, d_block = 0, d_rssi = 0, d_wifi = 0;
 static char d_host[40] = "";
+static volatile uint32_t srv_time = 0;
+static volatile unsigned long srv_ms = 0;
+
+// „Sat, 14 Nov 2026 06:31:00 GMT” → sekundy od 1970 (UTC)
+static uint32_t parseHttpDate(const char* s) {
+  static const char* const MON = "JanFebMarAprMayJunJulAugSepOctNovDec";
+  char mon[4] = ""; int D, Y, h, m, sec;
+  if (sscanf(s, "%*3s, %d %3s %d %d:%d:%d", &D, mon, &Y, &h, &m, &sec) != 6) return 0;
+  const char* p = strstr(MON, mon);
+  if (!p || Y < 2025 || Y > 2099) return 0;
+  int M = (int)(p - MON) / 3 + 1;
+  int y = Y - (M <= 2), era = y / 400, yoe = y - era * 400, mp = (M + 9) % 12;
+  int doy = (153 * mp + 2) / 5 + D - 1, doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  long days = (long)era * 146097 + doe - 719468;
+  return (uint32_t)(days * 86400L + h * 3600L + m * 60L + sec);
+}
 
 static void noteFailure(const String& u, int hop, int code) {
   d_hop = hop; d_code = code;
@@ -88,11 +104,15 @@ static bool openUrl(const char* url, uint32_t from, uint32_t to) {
     http->setTimeout(15000);
     http->setReuse(false);
     if (!http->begin(*client, u)) { last_code = -100; noteFailure(u, hop, -100); return false; }
-    static const char* KEYS[] = { "Location" };
-    http->collectHeaders(KEYS, 1);
+    static const char* KEYS[] = { "Location", "Date" };
+    http->collectHeaders(KEYS, 2);
     if (to > 0) { char r[48]; snprintf(r, sizeof(r), "bytes=%lu-%lu", (unsigned long)from, (unsigned long)to); http->addHeader("Range", r); }
     int code = http->GET();
     last_code = code;
+    if (code > 0) {                                   // dokładny czas z serwera: urządzenie poprawia nim swój zegar
+      uint32_t t = parseHttpDate(http->header("Date").c_str());
+      if (t) { srv_ms = millis(); srv_time = t; }
+    }
     if (code < 0) {                                   // nie doszło do odpowiedzi serwera: zapisz, co mówi warstwa szyfrowania
       d_tls[0] = 0;
       if (tls) ((WiFiClientSecure*)client)->lastError(d_tls, sizeof(d_tls));
@@ -459,6 +479,12 @@ bool m9dlFinished() { bool f = done_flag; done_flag = false; return f; }
 const char* m9dlStatus() { return status; }
 const char* m9dlDetail() { return detail; }
 const char* m9dlDiag() { return diag; }
+uint32_t m9dlServerTime() {
+  uint32_t t = srv_time;
+  if (!t) return 0;
+  srv_time = 0;
+  return t + (uint32_t)((millis() - srv_ms) / 1000);
+}
 
 #else
 // atrapa dla symulatora
@@ -472,4 +498,5 @@ bool m9dlFinished() { return false; }
 const char* m9dlStatus() { return ""; }
 const char* m9dlDetail() { return ""; }
 const char* m9dlDiag() { return ""; }
+uint32_t m9dlServerTime() { return 0; }
 #endif
