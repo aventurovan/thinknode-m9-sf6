@@ -319,7 +319,76 @@ static void screensHome() {
   screenHome("8-home-inne-stany.ppm", B, 8, st);
 }
 
+// ---------- Start (Home) w wersji z 6 kafelkami 3×2 i dużym zegarem ----------
+enum { K_PLAIN, K_SPARK, K_BATT, K_LINK };
+struct Tile6 { const char* const* ic; const char* label; const char* val; const char* sub; uint16_t vc; int kind; int pct; };
+
+static void home6(const char* file, const Tile6* T, int selIdx, const UiView& st, bool btOn, bool btConn, int wifiDbm, const char* wifiName) {
+  v = st;
+  g.clear(C_BG);
+  drawStatus(g, v);
+  int cw = g.text(8, STATUS_H + 1, v.time, F_HUGE, C_TXT);
+  g.text(8 + cw + 10, STATUS_H + 8, "SP9 Paweł M9", F_BOLD, C_TXT, GFX_W - cw - 26);
+  g.text(8 + cw + 10, STATUS_H + 25, "sobota, 14.11.2026", F_SMALL, C_DIM, GFX_W - cw - 26);
+  const int top = STATUS_H + 46, cols = 3, gap = 4;
+  const int tw = (GFX_W - 12 - (cols - 1) * gap) / cols, th = (GFX_H - BOTTOM_H - top - 4 - gap) / 2;
+  for (int i = 0; i < 6; i++) {
+    const Tile6& t = T[i];
+    int x = 6 + (i % cols) * (tw + gap), y = top + (i / cols) * (th + gap);
+    bool sel = i == selIdx;
+    if (sel) { g.fillRound(x - 1, y - 1, tw + 2, th + 2, 7, C_ACC); g.fillRound(x + 1, y + 1, tw - 2, th - 2, 5, C_SELT); }
+    else g.fillRound(x, y, tw, th, 6, C_TILE);
+    g.icon(x + 7, y + 6, t.ic, sel ? C_ACC : C_DIM);
+    g.text(x + 23, y + 6, t.label, F_SMALL, sel ? C_ACC : C_DIM, tw - 28);
+    if (t.kind == K_LINK) {                          // dwa wiersze: Bluetooth i WiFi
+      g.icon(x + 7, y + 26, IC_BT, btOn ? (btConn ? C_BLUE : C_TXT) : C_LINE);
+      g.text(x + 23, y + 24, btOn ? (btConn ? "połączony" : "czeka") : "wyłączony", F_BOLD, btOn ? (btConn ? C_BLUE : C_TXT) : C_DIM, tw - 28);
+      g.icon(x + 7, y + 47, IC_WIFI, wifiDbm ? C_TXT : C_LINE);
+      char w[24]; if (wifiDbm) snprintf(w, sizeof(w), "%d dBm", wifiDbm); else strcpy(w, "wyłączone");
+      g.text(x + 23, y + 45, w, F_BOLD, wifiDbm ? C_TXT : C_DIM, tw - 28);
+      continue;
+    }
+    int vw = g.text(x + 7, y + 23, t.val, F_BIG, t.vc, tw - 14);
+    if (t.kind == K_SPARK) sparkline(x + vw + 13, y + 26, tw - vw - 20, 15);
+    if (t.kind == K_BATT) {
+      int bx = x + vw + 13, bw = tw - vw - 21;
+      g.fillRound(bx, y + 29, bw, 10, 3, C_LINE);
+      g.fillRound(bx, y + 29, bw * t.pct / 100, 10, 3, t.pct <= 15 ? C_RED : C_GRN);
+    }
+    g.text(x + 7, y + 47, t.sub, F_SMALL, C_DIM, tw - 14);
+  }
+  drawTabs(g, 0, v.unread, false);
+  savePPM(file);
+}
+
+static void screensHome6() {
+  UiView st; memset(&st, 0, sizeof(st));
+  strcpy(st.time, "12:14"); st.batt = 78; st.bt = 2; st.gps_on = true; st.sats = 7; st.unread = 2; st.tab = 0;
+  // wariant A: Kontakty i Repeatery zostają; Radio łączy się z Widmem, Bateria z Bluetooth i WiFi (Zasilanie)
+  const Tile6 A[6] = {
+    { IC_MAIL, "Wiadomości", "2 nowe", "#bot · BBot", C_ACC, K_PLAIN, 0 },
+    { IC_USER, "Kontakty", "38", "usłyszane: 12", C_TXT, K_PLAIN, 0 },
+    { IC_TOWER, "Repeatery", "21", "Skrzyczne, 2 min", C_TXT, K_PLAIN, 0 },
+    { IC_SPEC, "Radio", "SF6", "szum -114 · 7 %", C_TXT, K_SPARK, 0 },
+    { IC_GPS, "Pozycja", "49,8214", "19,0461 · sat. 7", C_TXT, K_PLAIN, 0 },
+    { IC_BATT, "Bateria", "78 %", "zostało ok. 14 h", C_TXT, K_BATT, 78 },
+  };
+  home6("9-home6-A.ppm", A, 3, st, true, true, 0, "");
+  // wariant B: Kontakty i Repeatery tylko na dolnym pasku (i pod klawiszem pinezki); osobno Widmo, Radio, Łączność, Bateria
+  const Tile6 B[6] = {
+    { IC_MAIL, "Wiadomości", "2 nowe", "#bot · BBot", C_ACC, K_PLAIN, 0 },
+    { IC_SPEC, "Widmo", "-114", "zajęte 7 %", C_TXT, K_SPARK, 0 },
+    { IC_SIGNAL, "Radio", "SF6", "869,618 · 62,5", C_TXT, K_PLAIN, 0 },
+    { IC_GPS, "Pozycja", "49,8214", "19,0461 · sat. 7", C_TXT, K_PLAIN, 0 },
+    { IC_BT, "Łączność", "", "", C_TXT, K_LINK, 0 },
+    { IC_BATT, "Bateria", "78 %", "zostało ok. 14 h", C_TXT, K_BATT, 78 },
+  };
+  st.wifi = 4;
+  home6("10-home6-B.ppm", B, 4, st, true, true, -62, "Dom_5G");
+}
+
 int main() {
+  screensHome6();
   screensHome();
   screenSpectrumBand();
   screenSpectrumChannel();
