@@ -239,10 +239,6 @@ static void screenChannelQR() {
 
 
 // ---------- Start (Home): 9 kafelków 3×3, zegar w jednym wierszu ----------
-static const char* const IC_WIFI[12] = { "", "...######...", ".##......##.", "#..........#", "....####....", "..##....##..", "............", "....####....", "...#....#...", "............", ".....##.....", ".....##....." };
-static const char* const IC_SPEC[12] = { "", "", "..#.........", "..#.....#...", "..#.....#...", "..#..#..#...", "#.#..#..#.#.", "#.#..#..#.#.", "#.#.##.##.##", "#.#.##.##.##", "############", "" };
-static const char* const IC_NET[12] = { "....####....", "..##.##.##..", ".#..#..#..#.", ".#..#..#..#.", "############", "#...#..#...#", "#...#..#...#", "############", ".#..#..#..#.", ".#..#..#..#.", "..##.##.##..", "....####...." };
-static const char* const IC_BATT[12] = { "", "", "", "##########..", "#........#..", "#.######.###", "#.######.###", "#........#..", "##########..", "", "", "" };
 
 struct HomeTile { const char* const* ic; const char* label; const char* val; const char* sub; uint16_t vc; int spark; int bar; };
 
@@ -423,7 +419,136 @@ static void screensHomeFinal() {
   home6("12-home-final-inne.ppm", G, 5, st, false, false, 0, "");
 }
 
+
+// ---------- Start bez dużego zegara: nazwa i data w nagłówku, 6 wymiennych kafelków — trzy propozycje układu ----------
+enum { Q_PLAIN, Q_SPARK, Q_BATT, Q_NET };
+struct Tq { const char* const* ic; const char* label; const char* val; const char* side; const char* sub; const char* sub2; uint16_t vc; int kind; };
+static const Tq TQ[6] = {
+  { IC_MAIL, "Wiadomości", "2 nowe", "", "#bot · BBot", "rozmów: 6", C_ACC, Q_PLAIN },
+  { IC_USER, "Kontakty", "38", "1 min", "RPT Skrzyczne", "ulubionych: 5", C_TXT, Q_PLAIN },
+  { IC_SIGNAL, "Radio", "SF6", "", "869,618 MHz", "BW 62,5 · CR 4/8", C_TXT, Q_PLAIN },
+  { IC_NET, "Sieć", "", "", "", "", C_TXT, Q_NET },
+  { IC_SPEC, "Widmo", "-114", "", "zajęte 7 %", "ostatni -71 dBm", C_TXT, Q_SPARK },
+  { IC_BATT, "Bateria", "78 %", "", "zostało ok. 14 h", "3,92 V · -3 %/h", C_TXT, Q_BATT },
+};
+
+static void battLine(int x, int y, int w, int h) {
+  int prev = -1;
+  g.fillRect(x, y + h, w, 1, C_LINE);
+  for (int i = 0; i < w; i++) {
+    float f = (float)i / (w - 1), u = 0.95f - 0.55f * f - 0.2f * f * f + (rnd() - 0.5f) * 0.05f;
+    int yy = y + h - 1 - (int)(u * (h - 1)); if (yy < y) yy = y;
+    if (prev >= 0) { int a = prev < yy ? prev : yy, b = prev < yy ? yy : prev; g.fillRect(x + i, a, 1, b - a + 2, C_GRN); }
+    prev = yy;
+  }
+}
+static void netRows(int x, int y1, int y2, int w) {
+  g.icon(x, y1 + 1, IC_BT, C_BLUE); g.text(x + 15, y1, "MeshSpeed", F_SMALL, C_BLUE, w - 15);
+  g.icon(x, y2 + 1, IC_WIFI, C_GRN); int ww = g.text(x + 15, y2, "WIFI -62", F_SMALL, C_TXT); g.text(x + 18 + ww, y2, "dBm", F_SMALL, C_DIM);
+}
+static void tileBg(int x, int y, int w, int h, bool sel) {
+  if (sel) { g.fillRound(x - 1, y - 1, w + 2, h + 2, 7, C_ACC); g.fillRound(x + 1, y + 1, w - 2, h - 2, 5, C_SELT); }
+  else g.fillRound(x, y, w, h, 6, C_TILE);
+}
+// wysoki kafelek (3 kolumny): nazwa, duża wartość, dwa wiersze opisu
+static void tileTall(int x, int y, int w, int h, const Tq& t, bool sel) {
+  tileBg(x, y, w, h, sel);
+  g.icon(x + 7, y + 6, t.ic, sel ? C_ACC : C_DIM);
+  g.text(x + 23, y + 6, t.label, F_SMALL, sel ? C_ACC : C_DIM, w - 28);
+  if (t.kind == Q_NET) { netRows(x + 7, y + 27, y + 46, w - 14); g.text(x + 7, y + h - 17, "sieć: Dom_5G", F_SMALL, C_DIM, w - 14); return; }
+  int vw = g.text(x + 7, y + 24, t.val, F_BIG, t.vc, w - 14);
+  if (t.side[0]) g.textRight(x + w - 7, y + 31, t.side, F_SMALL, C_DIM);
+  if (t.kind == Q_SPARK) sparkline(x + vw + 13, y + 27, w - vw - 20, 15);
+  if (t.kind == Q_BATT) battLine(x + vw + 12, y + 26, w - vw - 19, 16);
+  g.text(x + 7, y + 49, t.sub, F_SMALL, C_TXT, w - 14);
+  if (h >= 78) g.text(x + 7, y + 63, t.sub2, F_SMALL, C_DIM, w - 14);
+}
+// szeroki kafelek (2 kolumny): nazwa i wartość z lewej, wykres albo czas z prawej, pod spodem opis na całą szerokość
+static void tileWide(int x, int y, int w, int h, const Tq& t, bool sel) {
+  tileBg(x, y, w, h, sel);
+  g.icon(x + 7, y + 5, t.ic, sel ? C_ACC : C_DIM);
+  g.text(x + 23, y + 4, t.label, F_SMALL, sel ? C_ACC : C_DIM, w - 28);
+  if (t.kind == Q_NET) { netRows(x + 7, y + 20, y + 35, w - 14); g.textRight(x + w - 7, y + 4, "Dom_5G", F_SMALL, C_DIM); return; }
+  int vw = g.text(x + 7, y + 17, t.val, F_BOLD, t.vc, w - 14);
+  if (t.side[0]) g.textRight(x + w - 7, y + 4, t.side, F_SMALL, C_DIM);
+  if (t.kind == Q_SPARK) sparkline(x + vw + 14, y + 18, w - vw - 22, 15);
+  if (t.kind == Q_BATT) battLine(x + vw + 14, y + 17, w - vw - 22, 15);
+  char both[96]; snprintf(both, sizeof(both), "%s · %s", t.sub, t.sub2);
+  g.text(x + 7, y + 35, t.kind == Q_PLAIN && Gfx::textWidth(both, F_SMALL) <= w - 14 ? both : t.sub, F_SMALL, C_DIM, w - 14);
+}
+// duży kafelek (pół ekranu): to samo co wysoki, z większym wykresem
+static void tileBig(int x, int y, int w, int h, const Tq& t, bool sel) {
+  tileBg(x, y, w, h, sel);
+  g.icon(x + 8, y + 7, t.ic, sel ? C_ACC : C_DIM);
+  g.text(x + 24, y + 7, t.label, F_SMALL, sel ? C_ACC : C_DIM, w - 30);
+  if (t.kind == Q_NET) { netRows(x + 8, y + 30, y + 50, w - 16); g.text(x + 8, y + h - 18, "sieć: Dom_5G", F_SMALL, C_DIM, w - 16); return; }
+  int vw = g.text(x + 8, y + 26, t.val, F_BIG, t.vc, w - 16);
+  if (t.side[0]) g.textRight(x + w - 8, y + 33, t.side, F_SMALL, C_DIM);
+  if (t.kind == Q_SPARK) sparkline(x + vw + 16, y + 24, w - vw - 24, 24);
+  if (t.kind == Q_BATT) battLine(x + vw + 16, y + 24, w - vw - 24, 22);
+  g.text(x + 8, y + 54, t.sub, F_SMALL, C_TXT, w - 16);
+  g.text(x + 8, y + 69, t.sub2, F_SMALL, C_DIM, w - 16);
+}
+// mały kafelek (4 w rzędzie): ikona, nazwa, wartość, jeden opis
+static void tileSmall(int x, int y, int w, int h, const Tq& t, bool sel) {
+  tileBg(x, y, w, h, sel);
+  g.icon(x + 6, y + 6, t.ic, sel ? C_ACC : C_DIM);
+  if (t.side[0]) g.textRight(x + w - 6, y + 5, t.side, F_SMALL, C_DIM);
+  g.text(x + 6, y + 21, t.label, F_SMALL, sel ? C_ACC : C_DIM, w - 10);
+  if (t.kind == Q_NET) { g.icon(x + 6, y + 38, IC_BT, C_BLUE); g.text(x + 21, y + 37, "ON", F_SMALL, C_BLUE); g.icon(x + 6, y + 54, IC_WIFI, C_GRN); g.text(x + 21, y + 53, "-62", F_SMALL, C_TXT); return; }
+  g.text(x + 6, y + 36, t.val, F_BOLD, t.vc, w - 10);
+  g.text(x + 6, y + 54, t.sub, F_SMALL, C_DIM, w - 10);
+}
+
+static void homeHead(const char* variant) {
+  memset(&v, 0, sizeof(v));
+  strcpy(v.time, "12:14"); v.batt = 78; v.bt = 2; v.gps_on = true; v.sats = 7; v.unread = 2; v.tab = 0; v.wifi = 4;
+  strcpy(v.title, "SP9 Paweł M9"); strcpy(v.title_right, "sobota, 14.11.2026");
+  g.clear(C_BG);
+  drawStatus(g, v);
+  drawHeader(g, v, STATUS_H);
+  drawTabs(g, 0, v.unread, false);
+  (void)variant;
+}
+
+static void screensHomeNew() {
+  const int top = STATUS_H + HEADER_H + 4, bot = GFX_H - BOTTOM_H - 4, gap = 4;
+  // A: 3 kolumny × 2 rzędy, kafelki wyższe o miejsce po zegarze (100 × 80)
+  homeHead("A");
+  { int tw = (GFX_W - 12 - 2 * gap) / 3, th = (bot - top - gap) / 2;
+    for (int i = 0; i < 6; i++) tileTall(6 + (i % 3) * (tw + gap), top + (i / 3) * (th + gap), tw, th, TQ[i], i == 1); }
+  savePPM("13-start-A.ppm");
+  // B: 2 kolumny × 3 rzędy, kafelki szerokie (152 × 52) — mieszczą się dłuższe nazwy
+  homeHead("B");
+  { int tw = (GFX_W - 12 - gap) / 2, th = (bot - top - 2 * gap) / 3;
+    for (int i = 0; i < 6; i++) tileWide(6 + (i % 2) * (tw + gap), top + (i / 2) * (th + gap), tw, th, TQ[i], i == 1); }
+  savePPM("14-start-B.ppm");
+  // C: dwa duże kafelki u góry (152 × 88) i cztery małe pod nimi (74 × 70)
+  homeHead("C");
+  { int bw = (GFX_W - 12 - gap) / 2, bh = 88, sw = (GFX_W - 12 - 3 * gap) / 4, sh = bot - top - bh - gap;
+    static const int ORD[6] = { 0, 4, 1, 2, 3, 5 };          // duże: Wiadomości i Widmo
+    for (int i = 0; i < 2; i++) tileBig(6 + i * (bw + gap), top, bw, bh, TQ[ORD[i]], false);
+    for (int i = 0; i < 4; i++) tileSmall(6 + i * (sw + gap), top + bh + gap, sw, sh, TQ[ORD[2 + i]], i == 0); }
+  savePPM("15-start-C.ppm");
+  // wybór kafelka: Menu na kafelku → „Zmień ten kafelek” → lista dwunastu
+  frame("Zmień kafelek", "miejsce 2 z 6", { { "Enter", "wstaw" }, { "Wstecz", "bez zmian" } });
+  { static const char* const N[8] = { "Wiadomości", "Kontakty", "Radio", "Sieć", "Widmo", "Bateria", "Repeatery", "Pozycja" };
+    static const char* const R[8] = { "miejsce 1", "tutaj", "miejsce 3", "miejsce 4", "miejsce 5", "miejsce 6", "", "" };
+    static const char* const* const IC[8] = { IC_MAIL, IC_USER, IC_SIGNAL, IC_NET, IC_SPEC, IC_BATT, IC_TOWER, IC_GPS };
+    int y = STATUS_H + HEADER_H;
+    for (int i = 0; i < 8; i++, y += ROW_H) {
+      bool sel = i == 6;
+      if (sel) g.fillRect(0, y, GFX_W, ROW_H, C_ACC);
+      g.icon(8, y + 4, IC[i], sel ? C_INK : (i == 1 ? C_ACC : C_DIM));
+      g.text(25, y + 2, N[i], sel ? F_BOLD : F_NORMAL, sel ? C_INK : C_TXT);
+      g.textRight(GFX_W - 12, y + 3, R[i], F_SMALL, sel ? C_INK : C_DIM);
+    }
+    g.fillRect(GFX_W - 3, STATUS_H + HEADER_H + 2, 2, 164, C_LINE); g.fillRect(GFX_W - 4, STATUS_H + HEADER_H + 2, 3, 110, C_ACC); }
+  savePPM("16-start-wybor-kafelka.ppm");
+}
+
 int main() {
+  screensHomeNew();
   screensHomeFinal();
   screensHome6();
   screensHome();
