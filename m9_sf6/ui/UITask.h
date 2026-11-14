@@ -72,7 +72,11 @@ class UITask : public AbstractUITask {
   Pw _pw[UI_PW_MAX]; int _pw_n;
 
   // rozmowa i pole pisania
-  char _cur[32]; bool _cur_chan; int _scroll;
+  char _cur[32]; bool _cur_chan;
+  int _scroll_px, _scroll_tgt;           // przewinięcie rozmowy od dołu w pikselach: bieżące i docelowe (animacja)
+  unsigned long _scroll_next;            // następna klatka animacji
+  int _th_total, _th_n, _th_sel;         // wysokość całej rozmowy, liczba wiadomości, wybrana (indeks w _msgs)
+  int16_t* _th_idx; uint16_t* _th_h;     // wiadomości rozmowy od najnowszej i wysokości ich dymków
   char _input[UI_INPUT_MAX * 2 + 4]; int _input_chars; bool _polish; uint8_t _input_mode;
   // wybrany kontakt / wiadomość / menu
   uint8_t _ck[32]; char _cname[32]; uint8_t _ctype; bool _cfav;
@@ -213,6 +217,8 @@ class UITask : public AbstractUITask {
   void fillSettings();
   bool gridKey(uint8_t k, int count, int cols);
   void fillThread();
+  void makeBubble(const UiMsg& m, UiBubble& b);
+  void scrollReset() { _scroll_px = _scroll_tgt = 0; }
   void fillList();
   void fillKv();
   void draw();

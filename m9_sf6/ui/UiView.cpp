@@ -236,46 +236,70 @@ static void drawGrid(Gfx& g, const UiView& v) {
   }
 }
 
+static const int TH_TOP = STATUS_H + HEADER_H + 2, TH_INPUT_H = 26, TH_BOTTOM = GFX_H - BOTTOM_H - TH_INPUT_H - 4;
+static const int TH_MAXW = 232, TH_LH = 15;
+
+int uiThreadViewH() { return TH_BOTTOM - TH_TOP; }
+
+// układ dymka: wiersze tekstu, szerokość i wysokość — ten sam dla rysowania i dla przewijania
+struct BubLayout { GfxLine ln[8]; int n, bw, bh, headLine, metaLine, pathLine, mw; char head[52]; };
+static void bubLayout(const UiBubble& b, BubLayout& L) {
+  L.n = Gfx::wrap(b.text, F_NORMAL, TH_MAXW, L.ln, 8);
+  if (L.n == 0) L.n = 1, L.ln[0].start = 0, L.ln[0].len = 0;
+  int tw = 0;
+  for (int k = 0; k < L.n; k++) { int w = Gfx::textWidth(b.text + L.ln[k].start, F_NORMAL, L.ln[k].len); if (w > tw) tw = w; }
+  L.head[0] = 0;
+  if (!b.out && b.who[0]) snprintf(L.head, sizeof(L.head), "%s", b.who);
+  int hw = L.head[0] ? Gfx::textWidth(L.head, F_SMALL) : 0;
+  L.mw = Gfx::textWidth(b.meta, F_SMALL);
+  L.headLine = (L.head[0] || !b.out) ? 13 : 0; L.metaLine = b.out ? 12 : 0; L.pathLine = b.path[0] ? 13 : 0;
+  if (L.pathLine) { int pw = Gfx::textWidth(b.path, F_SMALL); if (pw > tw) tw = pw; }
+  if (!b.out && hw + L.mw + 8 > tw) tw = hw + L.mw + 8;
+  if (b.out && L.mw > tw) tw = L.mw;
+  if (tw > TH_MAXW) tw = TH_MAXW;
+  L.bw = tw + 14; L.bh = L.headLine + L.n * TH_LH + L.metaLine + L.pathLine + 6;
+}
+
+int uiBubbleHeight(const UiBubble& b) { BubLayout L; bubLayout(b, L); return L.bh; }
+
 static void drawThread(Gfx& g, const UiView& v) {
   drawHeader(g, v, STATUS_H);
-  const int top = STATUS_H + HEADER_H + 2, inputH = 26;
-  const int bottom = GFX_H - BOTTOM_H - inputH - 4;
-  const int maxW = 232, lh = 15;
+  const int top = TH_TOP, inputH = TH_INPUT_H, bottom = TH_BOTTOM, maxW = TH_MAXW, lh = TH_LH;
 
-  // dymki od najnowszego w górę, aż skończy się miejsce
-  int y = bottom;
+  // dymki od najnowszego w górę; dolny może być przesunięty w dół (przewijanie co piksel),
+  // to, co wystaje poza obszar rozmowy, zasłaniają nagłówek i pole pisania
+  int y = bottom + v.bub_off;
   for (int i = v.nbub - 1; i >= 0 && y > top; i--) {
     const UiBubble& b = v.bub[i];
-    GfxLine ln[8];
-    int n = Gfx::wrap(b.text, F_NORMAL, maxW, ln, 8);
-    if (n == 0) n = 1, ln[0].start = 0, ln[0].len = 0;
-    int tw = 0;
-    for (int k = 0; k < n; k++) { int w = Gfx::textWidth(b.text + ln[k].start, F_NORMAL, ln[k].len); if (w > tw) tw = w; }
-    char head[52]; head[0] = 0;
-    if (!b.out && b.who[0]) snprintf(head, sizeof(head), "%s", b.who);
-    int hw = head[0] ? Gfx::textWidth(head, F_SMALL) : 0, mw = Gfx::textWidth(b.meta, F_SMALL);
-    int headLine = (head[0] || !b.out) ? 13 : 0, metaLine = b.out ? 12 : 0, pathLine = b.path[0] ? 13 : 0;
-    if (pathLine) { int pw = Gfx::textWidth(b.path, F_SMALL); if (pw > tw) tw = pw; }
-    if (!b.out && hw + mw + 8 > tw) tw = hw + mw + 8;
-    if (b.out && mw > tw) tw = mw;
-    if (tw > maxW) tw = maxW;
-    int bw = tw + 14, bh = headLine + n * lh + metaLine + pathLine + 6;
+    BubLayout L; bubLayout(b, L);
+    const int bw = L.bw, bh = L.bh, n = L.n, mw = L.mw;
     int by = y - bh, bx = b.out ? GFX_W - 8 - bw : 8;
-    if (by < top && i != v.nbub - 1) break;                  // dymek, który się nie mieści w całości, pomijamy
-    if (b.sel) g.fillRect(bx - 6, by + 1, 3, bh - 2, C_ACC);       // wybrana wiadomość (do opcji): pasek z lewej strony
-    if (b.out) { g.fillRound(bx, by, bw, bh, 6, C_ACC); g.fillRound(bx + 1, by + 1, bw - 2, bh - 2, 5, C_TILE); }
-    else g.fillRound(bx, by, bw, bh, 6, C_BUB);
-    int ty = by + 3;
-    if (headLine) {
-      int hx = bx + 7;
-      if (head[0]) hx += g.text(hx, ty, head, F_SMALL, C_BLUE, maxW - mw - 8) + 6;
-      g.text(hx, ty, b.meta, F_SMALL, C_DIM);
-      ty += headLine;
+    if (by < bottom) {
+      if (b.sel) g.fillRect(bx - 6, by + 1, 3, bh - 2, C_ACC);       // wybrana wiadomość (do opcji): pasek z lewej strony
+      if (b.out) { g.fillRound(bx, by, bw, bh, 6, C_ACC); g.fillRound(bx + 1, by + 1, bw - 2, bh - 2, 5, C_TILE); }
+      else g.fillRound(bx, by, bw, bh, 6, C_BUB);
+      int ty = by + 3;
+      if (L.headLine) {
+        int hx = bx + 7;
+        if (L.head[0]) hx += g.text(hx, ty, L.head, F_SMALL, C_BLUE, maxW - mw - 8) + 6;
+        g.text(hx, ty, b.meta, F_SMALL, C_DIM);
+        ty += L.headLine;
+      }
+      for (int k = 0; k < n; k++, ty += lh) g.textN(bx + 7, ty, b.text + L.ln[k].start, L.ln[k].len, F_NORMAL, C_TXT);
+      if (L.metaLine) { g.textRight(bx + bw - 7, ty, b.meta, F_SMALL, C_DIM); ty += L.metaLine; }
+      if (L.pathLine) { if (b.out) g.textRight(bx + bw - 7, ty, b.path, F_SMALL, C_ACC); else g.text(bx + 7, ty, b.path, F_SMALL, C_ACC, maxW); }
     }
-    for (int k = 0; k < n; k++, ty += lh) g.textN(bx + 7, ty, b.text + ln[k].start, ln[k].len, F_NORMAL, C_TXT);
-    if (metaLine) { g.textRight(bx + bw - 7, ty, b.meta, F_SMALL, C_DIM); ty += metaLine; }
-    if (pathLine) { if (b.out) g.textRight(bx + bw - 7, ty, b.path, F_SMALL, C_ACC); else g.text(bx + 7, ty, b.path, F_SMALL, C_ACC, maxW); }
     y = by - 4;
+  }
+  g.fillRect(0, 0, GFX_W, STATUS_H, C_BG);
+  // suwak z prawej: ile jest rozmowy i gdzie jesteśmy (tylko gdy rozmowa nie mieści się na ekranie)
+  if (v.sb_total > v.sb_view && v.sb_view > 0) {
+    int H = bottom - top - 4;
+    int th = H * v.sb_view / v.sb_total; if (th < 10) th = 10;
+    int range = v.sb_total - v.sb_view;
+    int ty = top + 2 + (H - th) - (int)((long)(H - th) * v.sb_pos / range);
+    g.fillRect(GFX_W - 3, top + 2, 2, H, C_LINE);
+    g.fillRect(GFX_W - 4, ty, 3, th, C_ACC);
   }
   g.fillRect(0, STATUS_H + HEADER_H, GFX_W, 2, C_BG);      // dymek nie wchodzi pod nagłówek
   g.fillRect(0, STATUS_H, GFX_W, HEADER_H, C_BG);

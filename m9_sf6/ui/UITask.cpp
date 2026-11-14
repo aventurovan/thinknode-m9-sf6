@@ -127,7 +127,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   memset(&_cfg, 0, sizeof(_cfg));
   _cfg.magic = CFG_MAGIC; _cfg.show_path = 1; _cfg.sleep_idx = 1; _cfg.kb_light = 1;
   _pw_n = 0;
-  _cur[0] = 0; _cur_chan = false; _scroll = 0;
+  _cur[0] = 0; _cur_chan = false; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_idx = NULL; _th_h = NULL;
   _input[0] = 0; _input_chars = 0; _polish = false; _input_mode = IN_MSG;
   memset(_ck, 0, sizeof(_ck)); _cname[0] = 0; _ctype = 0; _cfav = false;
   _msg_idx = -1; _menu_n = 0; _menu_title[0] = 0; _menu_msg = false; _search[0] = 0;
@@ -167,6 +167,8 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   _list = (uint16_t*)ps_calloc(UI_LIST_MAX, sizeof(uint16_t));
   _kv = (UiKV*)ps_calloc(UI_KVS_MAX, sizeof(UiKV));
   _snap = (UiMsg*)ps_calloc(UI_MSG_MAX, sizeof(UiMsg));
+  _th_idx = (int16_t*)ps_calloc(UI_MSG_MAX, sizeof(int16_t));
+  _th_h = (uint16_t*)ps_calloc(UI_MSG_MAX, sizeof(uint16_t));
 
   loadAll();
   _kb.begin();
@@ -486,7 +488,7 @@ void UITask::markRead(const char* name, bool chan) {
 void UITask::openThread(const char* name, bool chan) {
   scopy(_cur, sizeof(_cur), name);
   _cur_chan = chan;
-  _scroll = 0;
+  scrollReset();
   _input[0] = 0; _input_chars = 0; _polish = false;
   _input_mode = IN_MSG;
   markRead(name, chan);
@@ -509,7 +511,7 @@ bool UITask::sendText(const char* text) {
   if (!id) { popup("Nie udało się wysłać", "spróbuj jeszcze raz", true); return false; }
   UiMsg* m = addMsg(_cur, "", text, _cur_chan, true, 0);
   if (m) m->sent_id = id;
-  _scroll = 0;
+  scrollReset();
   return true;
 }
 
@@ -886,7 +888,7 @@ void UITask::doAct(uint8_t act) {
       case A_RESEND: { char t[164]; scopy(t, sizeof(t), m.text); pop(); sendText(t); break; }
       case A_DELMSG:
         memmove(&_msgs[_msg_idx], &_msgs[_msg_idx + 1], sizeof(UiMsg) * (_msg_n - _msg_idx - 1)); _msg_n--;
-        _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS; _scroll = 0; _msg_idx = -1;
+        _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS; scrollReset(); _msg_idx = -1;
         pop();
         break;
     }
@@ -1188,16 +1190,13 @@ void UITask::keyThread(uint8_t k) {
   }
   if (k == M9K_BKSP_LONG) { _input[0] = 0; _input_chars = 0; return; }
   if (mode == IN_MSG) {
-    if (k == M9K_UP) { _scroll++; return; }
-    if (k == M9K_DOWN) { if (_scroll > 0) _scroll--; return; }
+    // ▲▼: płynne przewinięcie o 1/3 obszaru rozmowy (animacja w loop)
+    int step = uiThreadViewH() / 3, maxs = _th_total - uiThreadViewH();
+    if (maxs < 0) maxs = 0;
+    if (k == M9K_UP) { _scroll_tgt += step; if (_scroll_tgt > maxs) _scroll_tgt = maxs; return; }
+    if (k == M9K_DOWN) { _scroll_tgt -= step; if (_scroll_tgt < 0) _scroll_tgt = 0; return; }
     if (k == M9K_RIGHT || k == M9K_F3) {              // Menu (albo ►): opcje zaznaczonej wiadomości
-      int skip = _scroll;
-      for (int i = _msg_n - 1; i >= 0; i--) {
-        if (_msgs[i].chan != _cur_chan || strcmp(_msgs[i].thread, _cur) != 0) continue;
-        if (skip > 0) { skip--; continue; }
-        openMenuMsg(i);
-        break;
-      }
+      if (_th_sel >= 0 && _th_sel < _msg_n && _msgs[_th_sel].chan == _cur_chan && strcmp(_msgs[_th_sel].thread, _cur) == 0) openMenuMsg(_th_sel);
       return;
     }
   }
@@ -2467,6 +2466,35 @@ void UITask::fillKv() {
   strcpy(v.hint[v.nhints].key, "Wstecz"); strcpy(v.hint[v.nhints].txt, ""); v.nhints++;
 }
 
+void UITask::makeBubble(const UiMsg& m, UiBubble& b) {
+  scopy(b.who, sizeof(b.who), m.who[0] ? m.who : (m.out ? "" : _cur));
+  scopy(b.text, sizeof(b.text), m.text);
+  b.out = m.out;
+  char t[8]; fmtClock(t, sizeof(t), m.ts, false);
+  char h[24]; hopsTxt(h, sizeof(h), m.hops, m.direct);
+  if (m.out && m.chan && m.repeats) snprintf(b.meta, sizeof(b.meta), "%s · Powtórzone ×%d", t, m.repeats);
+  else if (m.out && !m.chan && m.delivered) snprintf(b.meta, sizeof(b.meta), "%s · Doręczono", t);
+  else if (m.out) snprintf(b.meta, sizeof(b.meta), "%s · Wysłano", t);
+  else snprintf(b.meta, sizeof(b.meta), "%s · %s", t, h);
+  if (_cfg.show_path && m.out && m.rep_n > 0 && m.rep_hs > 0) {
+    // pod wysłaną: repeater, który pierwszy ją usłyszał i powtórzył
+    for (int q = 0; q < m.rep_hs && q < 3; q++) { char x[4]; snprintf(x, sizeof(x), "%02X", m.rep_id[0][q]); strcat(b.path, x); }
+  }
+  // pod odebraną: identyfikatory kolejnych repeaterów (2 znaki na bajt)
+  if (_cfg.show_path && !m.out && !m.direct && m.path_bytes > 0 && m.hash_size > 0) {
+    int cnt = m.path_bytes / m.hash_size, shown = 0;
+    for (int hh = 0; hh < cnt; hh++) {
+      char id[12]; id[0] = 0;
+      for (int q = 0; q < m.hash_size; q++) { char x[4]; snprintf(x, sizeof(x), "%02X", m.path[hh * m.hash_size + q]); strcat(id, x); }
+      if (strlen(b.path) + strlen(id) + 4 > sizeof(b.path) - 10) break;
+      if (b.path[0]) strcat(b.path, "→");
+      strcat(b.path, id);
+      shown++;
+    }
+    if (m.hops > shown) { char more[12]; snprintf(more, sizeof(more), "→+%d", m.hops - shown); strcat(b.path, more); }
+  }
+}
+
 void UITask::fillThread() {
   UiView& v = *_v;
   v.screen = UIS_THREAD; v.tab = -1;
@@ -2495,56 +2523,55 @@ void UITask::fillThread() {
     return;
   }
   snprintf(v.title, sizeof(v.title), "%s%s", _cur_chan ? "# " : "", _cur);
-  strcpy(v.title_right, _cur_chan ? "kanał" : "rozmowa prywatna");
   markRead(_cur, _cur_chan);
 
-  // ostatnie wiadomości tej rozmowy (z pominięciem _scroll najnowszych)
-  int idx[UI_BUB_MAX], n = 0, total = 0;
-  for (int i = 0; i < _msg_n; i++) if (_msgs[i].chan == _cur_chan && strcmp(_msgs[i].thread, _cur) == 0) total++;
-  if (_scroll > total - 1) _scroll = total > 0 ? total - 1 : 0;
-  int skip = _scroll;
-  for (int i = _msg_n - 1; i >= 0 && n < UI_BUB_MAX; i--) {
-    if (_msgs[i].chan != _cur_chan || strcmp(_msgs[i].thread, _cur) != 0) continue;
-    if (skip > 0) { skip--; continue; }
-    idx[n++] = i;
+  // wiadomości tej rozmowy od najnowszej i wysokości ich dymków (w czasie animacji przewijania — z poprzedniej klatki)
+  const int viewH = uiThreadViewH();
+  if (_th_idx && _th_h && (_scroll_px == _scroll_tgt || _th_n == 0)) {
+    static UiBubble tmp;
+    _th_n = 0; _th_total = 0;
+    for (int i = _msg_n - 1; i >= 0; i--) {
+      if (_msgs[i].chan != _cur_chan || strcmp(_msgs[i].thread, _cur) != 0) continue;
+      memset(&tmp, 0, sizeof(tmp));
+      makeBubble(_msgs[i], tmp);
+      int h = uiBubbleHeight(tmp);
+      _th_idx[_th_n] = i; _th_h[_th_n] = h; _th_n++;
+      _th_total += h + (_th_total ? 4 : 0);
+    }
   }
-  for (int k = n - 1; k >= 0; k--) {
-    UiMsg& m = _msgs[idx[k]];
+  int maxs = _th_total - viewH; if (maxs < 0) maxs = 0;
+  if (_scroll_tgt > maxs) _scroll_tgt = maxs;
+  if (_scroll_px > maxs) _scroll_px = maxs;
+  snprintf(v.title_right, sizeof(v.title_right), "%s · %d", _cur_chan ? "kanał" : "prywatna", _th_n);
+
+  // które dymki są widoczne: od pierwszego, który sięga w okno [_scroll_px, _scroll_px + viewH)
+  int first = 0, pos = 0;
+  while (first < _th_n && pos + _th_h[first] <= _scroll_px) { pos += _th_h[first] + 4; first++; }
+  v.bub_off = _scroll_px - pos;
+  // wybrana (do opcji): najniższa, której dół widać; gdy żadnej — ta, która wypełnia ekran
+  _th_sel = -1;
+  int sel = first, p2 = pos;
+  for (int j = first; j < _th_n && p2 < _scroll_px + viewH; j++) {
+    if (p2 >= _scroll_px - 4) { sel = j; break; }
+    p2 += _th_h[j] + 4;
+  }
+  int last = first, p3 = pos;
+  while (last < _th_n && last - first < UI_BUB_MAX && p3 < _scroll_px + viewH) { p3 += _th_h[last] + 4; last++; }
+  for (int j = last - 1; j >= first; j--) {
+    int i = _th_idx[j];
+    if (i < 0 || i >= _msg_n) continue;
     UiBubble& b = v.bub[v.nbub++];
-    scopy(b.who, sizeof(b.who), m.who[0] ? m.who : (m.out ? "" : _cur));
-    scopy(b.text, sizeof(b.text), m.text);
-    b.out = m.out;
-    b.sel = k == 0;                                  // dolna wiadomość jest zaznaczona: jej dotyczy ► (opcje)
-    char t[8]; fmtClock(t, sizeof(t), m.ts, false);
-    char h[24]; hopsTxt(h, sizeof(h), m.hops, m.direct);
-    if (m.out && m.chan && m.repeats) snprintf(b.meta, sizeof(b.meta), "%s · Powtórzone ×%d", t, m.repeats);
-    else if (m.out && !m.chan && m.delivered) snprintf(b.meta, sizeof(b.meta), "%s · Doręczono", t);
-    else if (m.out) snprintf(b.meta, sizeof(b.meta), "%s · Wysłano", t);
-    else snprintf(b.meta, sizeof(b.meta), "%s · %s", t, h);
-    if (_cfg.show_path && m.out && m.rep_n > 0 && m.rep_hs > 0) {
-      // pod wysłaną: repeater, który pierwszy ją usłyszał i powtórzył
-      for (int q = 0; q < m.rep_hs && q < 3; q++) { char x[4]; snprintf(x, sizeof(x), "%02X", m.rep_id[0][q]); strcat(b.path, x); }
-    }
-    // pod odebraną: identyfikatory kolejnych repeaterów (2 znaki na bajt)
-    if (_cfg.show_path && !m.out && !m.direct && m.path_bytes > 0 && m.hash_size > 0) {
-      int cnt = m.path_bytes / m.hash_size, shown = 0;
-      for (int hh = 0; hh < cnt; hh++) {
-        char id[12]; id[0] = 0;
-        for (int q = 0; q < m.hash_size; q++) { char x[4]; snprintf(x, sizeof(x), "%02X", m.path[hh * m.hash_size + q]); strcat(id, x); }
-        if (strlen(b.path) + strlen(id) + 4 > sizeof(b.path) - 10) break;
-        if (b.path[0]) strcat(b.path, "→");
-        strcat(b.path, id);
-        shown++;
-      }
-      if (m.hops > shown) { char more[12]; snprintf(more, sizeof(more), "→+%d", m.hops - shown); strcat(b.path, more); }
-    }
+    makeBubble(_msgs[i], b);
+    b.sel = j == sel;                                // jej dotyczy ► / Menu (opcje)
+    if (b.sel) _th_sel = i;
   }
+  v.sb_total = _th_total; v.sb_view = viewH; v.sb_pos = _scroll_px;
   scopy(v.input, sizeof(v.input), _input);
   v.input_chars = _input_chars;
   v.polish_next = _polish;
   strcpy(v.hint[0].key, "Enter"); strcpy(v.hint[0].txt, _input[0] ? "wyślij" : "szybkie");
   strcpy(v.hint[1].key, "ctrl"); strcpy(v.hint[1].txt, "ą ę ł…");
-  strcpy(v.hint[2].key, "▲▼"); strcpy(v.hint[2].txt, "wybierz");
+  strcpy(v.hint[2].key, "▲▼"); strcpy(v.hint[2].txt, "przewiń");
   strcpy(v.hint[3].key, "Menu"); strcpy(v.hint[3].txt, "opcje");
   v.nhints = 4;
 }
@@ -2706,6 +2733,18 @@ void UITask::loop() {
 
   // zapis wiadomości: w kawałkach, kilka minut po zmianie (albo zaraz po wygaszeniu ekranu) i nie w trakcie pisania
   if (sv_active || (_msgs_dirty && (long)(now - _save_at) >= 0 && now - _last_key > 5000)) saveStep();
+
+  // płynne przewijanie rozmowy: kilka klatek do celu
+  if (_scroll_px != _scroll_tgt && (long)(now - _scroll_next) >= 0) {
+    if (scr() != S_THREAD) _scroll_px = _scroll_tgt;
+    else {
+      int d = _scroll_tgt - _scroll_px, st = d * 2 / 5;
+      if (st == 0 || (d > 0 ? d : -d) <= 3) st = d;
+      _scroll_px += st;
+      _scroll_next = now + 25;
+      _dirty = true;
+    }
+  }
 
   if (_dirty && _awake) {
     _dirty = false;

@@ -111,6 +111,14 @@ int main(int argc, char** argv) {
   keys({ M9K_BACK, M9K_HOME, M9K_MSG, M9K_UP, M9K_UP, M9K_DOWN, M9K_ENTER, M9K_F3, M9K_DOWN, M9K_DOWN }); save("trasa-menu-wyslanej");
   keys({ M9K_ENTER }); save("trasa-wyslanej");
   keys({ M9K_BACK, M9K_HOME, M9K_LEFT, M9K_UP, M9K_UP, M9K_UP, M9K_LEFT, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_RIGHT, M9K_ENTER, M9K_DOWN, M9K_ENTER }); save("aktualizacja");
+  // płynne przewijanie długiej rozmowy i suwak
+  for (int i = 0; i < 14; i++) { char t[200]; snprintf(t, sizeof(t), "Ania: wiadomość numer %d%s", i + 1, i % 3 == 0 ? " — dłuższa, żeby zajęła kilka wierszy w dymku i było widać, jak przewija się po pikselu, a nie po całej wiadomości" : ""); rx("Public", t, i % 4); }
+  keys({ M9K_BACK, M9K_BACK, M9K_HOME, M9K_MSG }); for (int i = 0; i < 8; i++) keys({ M9K_UP }); keys({ M9K_ENTER }); save("przewijanie-dol");
+  keys({ M9K_UP }); save("przewijanie-1");
+  sim_keys.push_back(M9K_UP); sim_millis += 50; ui.loop(); sim_millis += 30; ui.loop(); { char fn[64]; snprintf(fn, sizeof(fn), "%02d-przewijanie-animacja.ppm", shot++); FILE* f = fopen(fn, "wb"); fprintf(f, "P6\n%d %d\n255\n", GFX_W, GFX_H); for (int i = 0; i < GFX_W * GFX_H; i++) { uint16_t p = last[i]; uint8_t rgb[3] = { (uint8_t)(((p >> 11) & 31) * 255 / 31), (uint8_t)(((p >> 5) & 63) * 255 / 63), (uint8_t)((p & 31) * 255 / 31) }; fwrite(rgb, 1, 3, f); } fclose(f); }
+  save("przewijanie-2");
+  for (int i = 0; i < 40; i++) keys({ M9K_UP }); save("przewijanie-gora");
+  keys({ M9K_F3 }); save("przewijanie-menu");
   printf("zrzutow: %d\n", shot);
   return 0;
 }

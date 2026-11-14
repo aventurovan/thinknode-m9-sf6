@@ -35,7 +35,10 @@ struct UiView {
   // wiersz filtrów nad listą (Kontakty)
   char chips[8][20]; int nchips; int chip_active; bool chip_focus;
   // rozmowa
-  UiBubble bub[UI_BUB_MAX]; int nbub; char input[UI_INPUT_MAX * 2 + 4]; int input_chars; bool polish_next;
+  UiBubble bub[UI_BUB_MAX]; int nbub;
+  int bub_off;                      // o ile pikseli dolny dymek jest przesunięty w dół (płynne przewijanie)
+  int sb_total, sb_view, sb_pos;    // suwak: wysokość całej rozmowy, widocznej części i przewinięcie od dołu (px)
+  char input[UI_INPUT_MAX * 2 + 4]; int input_chars; bool polish_next;
   // informacje (pary nazwa–wartość)
   UiKV kv[UI_KV_MAX]; int nkv;
   // podpowiedzi klawiszy
@@ -47,6 +50,9 @@ struct UiView {
 };
 
 void uiRender(Gfx& g, const UiView& v);
+// rozmowa: wysokość dymka w pikselach (bez odstępu) i wysokość obszaru z dymkami
+int uiBubbleHeight(const UiBubble& b);
+int uiThreadViewH();
 
 // Mapa: UITask sam składa podkład w buforze, a te funkcje dorysowują resztę.
 #define UI_MAP_TOP 20          // mapa zajmuje wiersze 20..215 (196 px)
