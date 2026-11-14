@@ -6,7 +6,7 @@ i oglądasz mapę bez telefonu. Przez Bluetooth łączy się z aplikacjami **Mes
 
 Domyślny preset radia: **SF6 — 869,618 MHz · BW 62,5 kHz · SF6 · CR 4/8**. Do wyboru jest też **EU/UK Narrow (SF8)**.
 
-Aktualna wersja: **0.23.0** (numer jest też na ekranie startowym i w Ustawieniach).
+Aktualna wersja: **0.24.0** (numer jest też na ekranie startowym i w Ustawieniach).
 
 ---
 
@@ -49,10 +49,12 @@ Stały PIN można ustawić w **Ustawieniach › Bluetooth**.
 
 **Ustawienia › karta Narzędzia › Aktualizacja** (albo Ustawienia › System › Aktualizacja przez WiFi):
 
-1. Wpisz sieć WiFi i hasło (domową albo hotspot z telefonu).
+1. Wejdź w **Sieci WiFi**, wybierz **Szukaj sieci**, wskaż swoją sieć na liście (domową albo hotspot z telefonu) i wpisz hasło. Można zapisać do 4 sieci; urządzenie samo łączy się z tą, która jest w zasięgu.
 2. Urządzenie sprawdzi wersję w wydaniu „Najnowszy build”. Gdy jest nowsza, sprawdzi **podpis cyfrowy**, pobierze plik, porówna go z podpisem i samo się zrestartuje.
 
 Aktualizacja bez poprawnego podpisu nie zostanie zainstalowana, a starszej wersji urządzenie nie wgra.
+
+Gdy kilka nadajników (AP) ma tę samą nazwę sieci, urządzenie przed połączeniem skanuje otoczenie i wybiera najmocniejszy. W wierszu „Sieci WiFi” widać wtedy, z czym się połączyło: nazwę, kanał, siłę sygnału i liczbę AP.
 
 Na czas WiFi Bluetooth jest wyłączony (oba naraz nie mieszczą się w pamięci). Wraca po restarcie.
 

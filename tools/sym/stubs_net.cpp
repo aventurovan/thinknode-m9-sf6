@@ -1,6 +1,8 @@
 // Atrapy WiFi (mapa, aktualizacja) i Bluetooth dla symulatora.
 #include <stdint.h>
-void m9dlStart(const char*, const char*, const char*, int) { }
+#include "M9Download.h"
+#include <string.h>
+void m9dlStart(const M9WifiNet*, int, const char*, int) { }
 void m9dlStop() { }
 void m9dlLoop() { }
 bool m9dlActive() { return false; }
@@ -11,7 +13,22 @@ const char* m9dlStatus() { return "gotowe"; }
 const char* m9dlDetail() { return ""; }
 const char* m9dlDiag() { return ""; }
 uint32_t m9dlServerTime() { return 0; }
-void m9otaCheck(const char*, const char*, const char*, const char*) { }
+void m9otaCheck(const M9WifiNet*, int, const char*, const char*) { }
+// lista sieci: po dwóch odpytaniach „znajduje” kilka sieci
+const char* sim_wifi_ap = "";
+const char* m9wifiAp() { return sim_wifi_ap; }
+static int sc_st = 0, sc_polls = 0;
+static const struct { const char* s; int r, ch, open, n; } SC[6] = { { "Furgon", -47, 6, 0, 3 }, { "Warsztat-Goscie", -58, 11, 1, 1 }, { "iPhone (Paweł)", -63, 1, 0, 1 },
+  { "UPC1234567", -71, 6, 0, 1 }, { "Orange_Swiatlowod_A1B0", -79, 11, 0, 2 }, { "NETIASPOT-2.4GHz-9F20", -86, 3, 0, 1 } };
+void m9wifiScan() { sc_st = 1; sc_polls = 0; }
+int m9wifiScanState() { if (sc_st == 1 && ++sc_polls > 2) sc_st = 2; return sc_st; }
+int m9wifiScanCount() { return sc_st == 2 ? 6 : 0; }
+bool m9wifiScanGet(int i, char* ssid, int* rssi, int* ch, bool* open, int* n) {
+  if (sc_st != 2 || i < 0 || i >= 6) return false;
+  if (ssid) strcpy(ssid, SC[i].s); if (rssi) *rssi = SC[i].r; if (ch) *ch = SC[i].ch; if (open) *open = SC[i].open; if (n) *n = SC[i].n;
+  return true;
+}
+void m9wifiScanEnd() { sc_st = 0; }
 void m9otaInstall() { }
 int m9otaState() { return 0; }
 bool m9otaActive() { return false; }

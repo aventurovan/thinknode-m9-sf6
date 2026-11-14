@@ -5,7 +5,12 @@
 
 #include <stdint.h>
 
-void m9dlStart(const char* ssid, const char* pass, const char* base_url, int max_zoom);   // max_zoom: 0 = wszystko
+// Zapisane sieci WiFi. Przed połączeniem urządzenie skanuje otoczenie i łączy się z najmocniejszym nadajnikiem (AP),
+// który nadaje którąkolwiek z zapisanych sieci — ważne tam, gdzie kilka AP ma tę samą nazwę.
+#define M9_WIFI_NETS 4
+struct M9WifiNet { char ssid[33]; char pass[64]; };
+
+void m9dlStart(const M9WifiNet* nets, int n_nets, const char* base_url, int max_zoom);   // max_zoom: 0 = wszystko
 void m9dlStop();
 void m9dlLoop();                 // wołać w pętli
 bool m9dlActive();               // trwa łączenie albo pobieranie
@@ -18,11 +23,19 @@ const char* m9dlDiag();
 uint32_t m9dlServerTime();
 
 // Aktualizacja firmware przez WiFi z wydania „latest-build” (plik wersja.txt + plik „aktualizacja”).
-void m9otaCheck(const char* ssid, const char* pass, const char* base_url, const char* cur_ver);
+void m9otaCheck(const M9WifiNet* nets, int n_nets, const char* base_url, const char* cur_ver);
 void m9otaInstall();                    // po m9otaState() == 2 (albo 3, żeby wgrać tę samą wersję jeszcze raz)
 int  m9otaState();                      // 0 nic, 1 sprawdzam, 2 jest nowsza, 3 aktualna, 4 pobieram, 5 gotowe — restart, 6 błąd
 bool m9otaActive();
 const char* m9otaVersion();             // wersja na serwerze
 int  m9otaPercent();
 int  m9wifiRssi();                     // siła sygnału WiFi (dBm), 0 = brak połączenia
-int  m9wifiBars();                     // -1 WiFi wyłączone, 0 łączy, 1..4 kreski zasięgu, 5 własna sieć (wgrywanie z telefonu)       // czas UTC z ostatniej odpowiedzi serwera (nagłówek Date), poprawiony o czas od odczytu; 0 = brak. Zwraca raz.          // po błędzie: szczegóły w kilku wierszach (etap, kod, błąd szyfrowania, pamięć, WiFi)        // szczegóły, np. nazwa pliku i postęp
+int  m9wifiBars();                     // -1 WiFi wyłączone, 0 łączy albo szuka, 1..4 kreski zasięgu
+const char* m9wifiAp();                // podgląd wybranego nadajnika: „Dom · kanał 6 · -48 dBm · 3 AP”; pusty, gdy nic nie łączymy
+
+// Lista sieci w zasięgu (do wyboru na ekranie). Sieci o tej samej nazwie są jedną pozycją z najmocniejszym sygnałem.
+void m9wifiScan();                     // włącza WiFi i zaczyna szukać (przerywa pobieranie, jeśli trwało)
+int  m9wifiScanState();                // 0 nie szukano, 1 szukam, 2 gotowe, 3 nie udało się
+int  m9wifiScanCount();
+bool m9wifiScanGet(int i, char* ssid33, int* rssi, int* channel, bool* open, int* n_aps);   // od najmocniejszej
+void m9wifiScanEnd();                  // czyści listę i wyłącza WiFi, jeśli nic nie pobieramy

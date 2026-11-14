@@ -156,7 +156,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   _radio_ok_at = _tx_until = _rx_until = _kb_next = 0; _tx_seen = _rx_seen = 0;
   _set_page = 0; _set_chip = false;
   _pw_n = 0;
-  _cur[0] = 0; _cur_chan = false; memset(_cur_key, 0, sizeof(_cur_key)); _msgs_old_format = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_new = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1;
+  _cur[0] = 0; _cur_chan = false; memset(_cur_key, 0, sizeof(_cur_key)); _msgs_old_format = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_new = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1; _wifi_sel = -1; _wifi_new[0] = 0; _wifi_scan_st = 0;
   _nh_n = 0; _nh_next = _nh_slot_end = 0; _nh_min = 1; _bh_n = _bh_seg = 0; _bh_next = 30000; _bh_chg = false;
   _sp_tab = _sp_range = 0; _sp_pause = _sp_have = false; _sp_next = 0; _sp_ms = 0; _sp_wf_n = 0;
   memset(_sp_cur, -128, sizeof(_sp_cur)); memset(_sp_peak, -128, sizeof(_sp_peak)); memset(_sp_wf, -128, sizeof(_sp_wf));
@@ -297,20 +297,44 @@ void UITask::loadAll() {
 
   f = SPIFFS.open(FILE_WIFI, "r");
   if (f) {
-    // nowy format „W2”: nazwa sieci i adres jawnie, hasło zaszyfrowane; stary (jawny) wczytujemy raz i zapisujemy od nowa
+    // format „W3”: adres mapy, liczba sieci, potem każda sieć: nazwa jawnie i hasło zaszyfrowane.
+    // Starsze („W2” z jedną siecią i zupełnie stary, jawny) wczytujemy raz i zapisujemy od nowa.
     WifiCfg w; memset(&w, 0, sizeof(w));
-    uint8_t h[2], sealed[WIFI_SEALED]; bool old = false;
-    if (f.size() == 2 + sizeof(w.ssid) + sizeof(w.url) + WIFI_SEALED && f.read(h, 2) == 2 && h[0] == 'W' && h[1] == '2'
-        && f.read((uint8_t*)w.ssid, sizeof(w.ssid)) == sizeof(w.ssid) && f.read((uint8_t*)w.url, sizeof(w.url)) == sizeof(w.url) && f.read(sealed, WIFI_SEALED) == WIFI_SEALED) {
-      uint8_t plain[sizeof(w.pass)];
-      if (the_mesh.uiUnseal(plain, sealed, WIFI_SEALED) >= (int)sizeof(w.pass)) memcpy(w.pass, plain, sizeof(w.pass));
-      memset(plain, 0, sizeof(plain));
-      w.ssid[32] = 0; w.pass[63] = 0; w.url[127] = 0; _wifi = w;
-    } else if (f.size() == sizeof(w)) {
+    struct OldCfg { char ssid[33]; char pass[64]; char url[128]; } o; memset(&o, 0, sizeof(o));
+    uint8_t h[2] = { 0, 0 }, sealed[WIFI_SEALED], plain[64]; bool old = false, ok = false;
+    size_t fs = f.size();
+    if (fs >= 2 + sizeof(w.url) + 1 && f.read(h, 2) == 2 && h[0] == 'W' && h[1] == '3') {
+      uint8_t n = 0;
+      if (f.read((uint8_t*)w.url, sizeof(w.url)) == sizeof(w.url) && f.read(&n, 1) == 1 && n <= M9_WIFI_NETS && fs == 2 + sizeof(w.url) + 1 + (size_t)n * (33 + WIFI_SEALED)) {
+        ok = true;
+        for (int i = 0; i < n; i++) {
+          M9WifiNet& t = w.net[w.n];
+          if (f.read((uint8_t*)t.ssid, 33) != 33 || f.read(sealed, WIFI_SEALED) != WIFI_SEALED) { ok = false; break; }
+          t.ssid[32] = 0;
+          memset(t.pass, 0, sizeof(t.pass));
+          if (the_mesh.uiUnseal(plain, sealed, WIFI_SEALED) >= (int)sizeof(t.pass)) memcpy(t.pass, plain, sizeof(t.pass));
+          t.pass[63] = 0;
+          if (t.ssid[0]) w.n++; else memset(&t, 0, sizeof(t));
+        }
+      }
+    } else if (fs == 2 + sizeof(o.ssid) + sizeof(o.url) + WIFI_SEALED && h[0] == 'W' && h[1] == '2'
+        && f.read((uint8_t*)o.ssid, sizeof(o.ssid)) == sizeof(o.ssid) && f.read((uint8_t*)o.url, sizeof(o.url)) == sizeof(o.url) && f.read(sealed, WIFI_SEALED) == WIFI_SEALED) {
+      if (the_mesh.uiUnseal(plain, sealed, WIFI_SEALED) >= (int)sizeof(o.pass)) memcpy(o.pass, plain, sizeof(o.pass));
+      old = true;
+    } else if (fs == sizeof(o)) {
       f.seek(0);
-      if (f.read((uint8_t*)&w, sizeof(w)) == sizeof(w)) { w.ssid[32] = 0; w.pass[63] = 0; w.url[127] = 0; _wifi = w; old = true; }
+      if (f.read((uint8_t*)&o, sizeof(o)) == sizeof(o)) old = true;
     }
+    memset(plain, 0, sizeof(plain));
     f.close();
+    if (old) {
+      o.ssid[32] = 0; o.pass[63] = 0; o.url[127] = 0;
+      memcpy(w.url, o.url, sizeof(w.url));
+      if (o.ssid[0]) { strcpy(w.net[0].ssid, o.ssid); strcpy(w.net[0].pass, o.pass); w.n = 1; }
+      ok = true;
+    }
+    memset(&o, 0, sizeof(o));
+    if (ok) { w.url[127] = 0; _wifi = w; }
     if (old) saveWifi();
   }
   if (!_wifi.url[0] || strcmp(_wifi.url, MAP_URL_OLD) == 0) strcpy(_wifi.url, MAP_URL_DEFAULT);
@@ -350,18 +374,62 @@ void UITask::pinPenalty(unsigned long now) {
 }
 
 void UITask::saveWifi() {
-  uint8_t plain[sizeof(_wifi.pass)], sealed[WIFI_SEALED + 16];
-  memset(plain, 0, sizeof(plain)); memcpy(plain, _wifi.pass, strnlen(_wifi.pass, sizeof(plain) - 1));
-  int n = the_mesh.uiSeal(sealed, plain, sizeof(plain));
-  memset(plain, 0, sizeof(plain));
-  if (n != WIFI_SEALED) return;
+  uint8_t plain[64], sealed[WIFI_SEALED + 16];
   File f = SPIFFS.open(FILE_WIFI, "w");
   if (!f) return;
-  f.write((const uint8_t*)"W2", 2);
-  f.write((const uint8_t*)_wifi.ssid, sizeof(_wifi.ssid));
+  if (_wifi.n > M9_WIFI_NETS) _wifi.n = M9_WIFI_NETS;
+  f.write((const uint8_t*)"W3", 2);
   f.write((const uint8_t*)_wifi.url, sizeof(_wifi.url));
-  f.write(sealed, WIFI_SEALED);
+  f.write(&_wifi.n, 1);
+  for (int i = 0; i < _wifi.n; i++) {
+    memset(plain, 0, sizeof(plain)); memcpy(plain, _wifi.net[i].pass, strnlen(_wifi.net[i].pass, sizeof(plain) - 1));
+    memset(sealed, 0, sizeof(sealed));
+    the_mesh.uiSeal(sealed, plain, sizeof(plain));
+    f.write((const uint8_t*)_wifi.net[i].ssid, 33);
+    f.write(sealed, WIFI_SEALED);
+  }
+  memset(plain, 0, sizeof(plain));
   f.close();
+}
+
+int UITask::wifiSaved(const char* ssid) {
+  for (int i = 0; i < _wifi.n; i++) if (strcmp(_wifi.net[i].ssid, ssid) == 0) return i;
+  return -1;
+}
+
+// sieci ze skanu, których jeszcze nie zapisano (zapisane mają własne wiersze na górze listy)
+int UITask::wifiScanRow(int k) {
+  char ss[33]; int n = m9wifiScanCount();
+  for (int i = 0; i < n; i++) {
+    if (!m9wifiScanGet(i, ss, NULL, NULL, NULL, NULL) || wifiSaved(ss) >= 0) continue;
+    if (k-- == 0) return i;
+  }
+  return -1;
+}
+int UITask::wifiScanRows() { int c = 0; while (wifiScanRow(c) >= 0) c++; return c; }
+
+// zapis nowej sieci albo nowego hasła do już zapisanej
+void UITask::wifiStore(const char* ssid, const char* pass) {
+  if (!ssid[0]) return;
+  int i = wifiSaved(ssid);
+  if (i < 0) {
+    if (_wifi.n >= M9_WIFI_NETS) { popup("Najwyżej 4 sieci", "najpierw zapomnij jedną", true); return; }
+    i = _wifi.n++;
+    memset(&_wifi.net[i], 0, sizeof(_wifi.net[i]));
+    scopy(_wifi.net[i].ssid, sizeof(_wifi.net[i].ssid), ssid);
+  }
+  memset(_wifi.net[i].pass, 0, sizeof(_wifi.net[i].pass));
+  scopy(_wifi.net[i].pass, sizeof(_wifi.net[i].pass), pass);
+  saveWifi();
+  popup("Sieć zapisana", ssid);
+}
+
+void UITask::wifiNames(char* dest, int n) {
+  dest[0] = 0;
+  if (_wifi.n == 0) { scopy(dest, n, "brak — wybierz z listy"); return; }
+  if (_wifi.n > 2) { snprintf(dest, n, "%.14s i %d inne", _wifi.net[0].ssid, _wifi.n - 1); return; }
+  if (_wifi.n == 2) snprintf(dest, n, "%.16s, %.16s", _wifi.net[0].ssid, _wifi.net[1].ssid);
+  else snprintf(dest, n, "%.30s", _wifi.net[0].ssid);
 }
 
 void UITask::saveMuted() {
@@ -885,6 +953,7 @@ void UITask::back() {
   if (scr() == S_CONTACTS && _sel_mode) { _sel_mode = false; _sel_n = 0; return; }     // Wstecz kończy zaznaczanie bez kasowania
   if (scr() == S_THREAD && _input_mode != IN_MSG) _input_mode = IN_MSG;   // anulowane pole do wpisania
   if (scr() == S_ADMIN) the_mesh.uiAdminLogout();
+  if (scr() == S_WIFI) m9wifiScanEnd();
   if (scr() == S_MAP_NET && m9dlActive()) { m9dlStop(); _map.scan(); }
   if (scr() == S_MAP && _route_n) _route_n = 0;     // koniec oglądania trasy
   if (scr() == S_OTA && m9otaState() == 4) { popup("Trwa instalacja", "poczekaj do końca"); return; }
@@ -1224,14 +1293,23 @@ void UITask::doConfirm(uint8_t what) {
     case C_RPT_REBOOT: adminCli("reboot"); break;
     case C_WIFI_DL:
       wifiPrepare();
-      m9dlStart(_wifi.ssid, _wifi.pass, _wifi.url, 13);
+      m9dlStart(_wifi.net, _wifi.n, _wifi.url, 13);
       break;
     case C_WIFI_OTA:
       wifiPrepare();
-      m9otaCheck(_wifi.ssid, _wifi.pass, OTA_URL, M9_FW_VERSION);
+      m9otaCheck(_wifi.net, _wifi.n, OTA_URL, M9_FW_VERSION);
       break;
     case C_OTA_INSTALL: m9otaInstall(); break;
-    case C_WIFI_FORGET: memset(_wifi.ssid, 0, sizeof(_wifi.ssid)); memset(_wifi.pass, 0, sizeof(_wifi.pass)); saveWifi(); popup("Sieć WiFi zapomniana"); break;
+    case C_WIFI_FORGET:
+      if (_wifi_sel >= 0 && _wifi_sel < _wifi.n) {
+        for (int i = _wifi_sel; i + 1 < _wifi.n; i++) _wifi.net[i] = _wifi.net[i + 1];
+        _wifi.n--; memset(&_wifi.net[_wifi.n], 0, sizeof(_wifi.net[0]));
+        saveWifi(); popup("Sieć WiFi zapomniana");
+        if (scr() == S_WIFI) sel() = 0;
+      }
+      _wifi_sel = -1;
+      break;
+    case C_WIFI_SCAN: wifiPrepare(); m9wifiScan(); break;
     case C_BT_RESTART: if (_msgs_dirty || true) saveMsgs(); the_mesh.uiReboot(); break;
     case C_CLEAR_MSGS: _msg_n = 0; _msg_idx = -1; saveMsgs(); popup("Wiadomości usunięte"); break;
     case C_CLEAR_PW: _pw_n = 0; savePw(); popup("Hasła repeaterów usunięte"); break;
@@ -1427,11 +1505,21 @@ void UITask::submitInput() {
       popup("Pozycja zapisana");
       return;
     }
-    case IN_WIFI_SSID: scopy(_wifi.ssid, sizeof(_wifi.ssid), _input); saveWifi(); _input_mode = IN_MSG; pop(); return;
-    case IN_WIFI_PASS:
-      if (_input[0]) { scopy(_wifi.pass, sizeof(_wifi.pass), _input); saveWifi(); }
+    case IN_WIFI_SSID:                                 // nazwa wpisana ręcznie (sieć ukryta albo poza zasięgiem): teraz hasło
+      scopy(_wifi_new, sizeof(_wifi_new), _input);
+      _input_mode = IN_MSG; pop();
+      if (_wifi_new[0]) { _wifi_sel = -1; openInput(IN_WIFI_PASS, ""); }
+      return;
+    case IN_WIFI_PASS: {
+      char pw[64]; scopy(pw, sizeof(pw), _input);
       memset(_input, 0, sizeof(_input));               // hasło nie zostaje w polu pisania
-      _input_mode = IN_MSG; pop(); return;
+      _input_mode = IN_MSG; pop();
+      if (_wifi_sel >= 0 && _wifi_sel < _wifi.n) { if (pw[0]) wifiStore(_wifi.net[_wifi_sel].ssid, pw); }   // zmiana hasła: puste = bez zmian
+      else wifiStore(_wifi_new, pw);                   // nowa sieć: puste hasło = sieć otwarta
+      memset(pw, 0, sizeof(pw));
+      _wifi_sel = -1;
+      return;
+    }
     case IN_MAP_URL: scopy(_wifi.url, sizeof(_wifi.url), _input); saveWifi(); _input_mode = IN_MSG; pop(); return;
     case IN_LOCKPIN: {
       if (strlen(_input) < 4) { popup("Kod ma mieć 4–8 znaków", "litery lub cyfry", true); return; }
@@ -1547,8 +1635,9 @@ int UITask::listCount(uint8_t s) {
     case S_RADIO: return 9;
     case S_SET_BT: return 7;
     case S_PICK: return _pick_n;
-    case S_MAP_NET: return 7;      // wyśrodkuj, pobierz, sieć, hasło, zapomnij sieć, adres, karta
-    case S_OTA: return 4;
+    case S_MAP_NET: return 5;      // wyśrodkuj, pobierz, sieci WiFi, adres, karta
+    case S_OTA: return 2;
+    case S_WIFI: return _wifi.n + wifiScanRows() + 2;   // zapisane, znalezione, szukaj, wpisz ręcznie
     case S_SET_POS: return 10;
     case S_SET_ADV: return 3;
     case S_SET_CT: return 6;
@@ -1591,6 +1680,16 @@ void UITask::listHead(uint8_t s) {
       if (m9dlStatus()[0] && m9otaState()) scopy(v.title_right, sizeof(v.title_right), m9dlStatus()); else snprintf(v.title_right, sizeof(v.title_right), "wersja %s", M9_FW_VERSION);
       hint("Enter", "wybierz"); hint("Wstecz", "");
       break;
+    case S_WIFI: {
+      strcpy(v.title, "Sieci WiFi");
+      int ss = m9wifiScanState();
+      if (ss == 1) strcpy(v.title_right, "szukam…");
+      else if (ss == 2) snprintf(v.title_right, sizeof(v.title_right), "w zasięgu: %d", m9wifiScanCount());
+      else if (ss == 3) strcpy(v.title_right, "szukanie nieudane");
+      else snprintf(v.title_right, sizeof(v.title_right), "zapisane: %d z %d", _wifi.n, M9_WIFI_NETS);
+      hint("Enter", "wybierz"); hint("Wstecz", "");
+      break;
+    }
     case S_MAP_NET:
       strcpy(v.title, "Mapa");
       if (m9dlStatus()[0]) scopy(v.title_right, sizeof(v.title_right), m9dlStatus());
@@ -1718,9 +1817,31 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
           default: snprintf(t, sizeof(t), "teraz %s", M9_FW_VERSION); setRow(r, "Sprawdź aktualizację", t, UII_SIGNAL); break;
         }
       }
-      else if (i == 1) setRow(r, "Sieć WiFi", _wifi.ssid[0] ? _wifi.ssid : "nie ustawiona");
-      else if (i == 2) setRow(r, "Hasło WiFi", _wifi.pass[0] ? "zapisane (zaszyfrowane)" : "brak", UII_LOCK);
-      else setRow(r, "Zapomnij sieć WiFi", "kasuje nazwę i hasło");
+      else { if (m9wifiAp()[0]) scopy(t, sizeof(t), m9wifiAp()); else wifiNames(t, sizeof(t)); setRow(r, "Sieci WiFi", t, UII_LOCK); }
+      return;
+    }
+    case S_WIFI: {
+      char ss[33]; int rssi = 0, ch = 0, naps = 0; bool open = false;
+      int st = m9wifiScanState();
+      if (i < _wifi.n) {                               // zapisana: czy jest w zasięgu i jak mocno
+        scopy(t, sizeof(t), st == 1 ? "zapisana · szukam…" : st == 2 ? "zapisana · poza zasięgiem" : "zapisana");
+        for (int k = 0; k < m9wifiScanCount(); k++)
+          if (m9wifiScanGet(k, ss, &rssi, &ch, &open, &naps) && strcmp(ss, _wifi.net[i].ssid) == 0) {
+            if (naps > 1) snprintf(t, sizeof(t), "zapisana · %d dBm · %d AP", rssi, naps); else snprintf(t, sizeof(t), "zapisana · %d dBm", rssi);
+            break;
+          }
+        setRow(r, _wifi.net[i].ssid, t, UII_CHECK);
+        return;
+      }
+      int k = i - _wifi.n, nf = wifiScanRows();
+      if (k < nf) {
+        if (!m9wifiScanGet(wifiScanRow(k), ss, &rssi, &ch, &open, &naps)) { setRow(r, "", ""); return; }
+        if (naps > 1) snprintf(t, sizeof(t), "%d dBm · %d AP", rssi, naps); else snprintf(t, sizeof(t), "%d dBm%s", rssi, open ? " · otwarta" : "");
+        setRow(r, ss, t, open ? UII_SIGNAL : UII_LOCK);
+        return;
+      }
+      if (k == nf) setRow(r, st == 1 ? "Szukam sieci…" : st ? "Szukaj ponownie" : "Szukaj sieci", st == 1 ? "kilka sekund" : _bt_killed ? "" : "wyłączy Bluetooth do restartu", UII_SIGNAL, st == 1);
+      else setRow(r, "Inna sieć", "wpisz nazwę (sieć ukryta)");
       return;
     }
     case S_MAP_NET:
@@ -1728,10 +1849,8 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       switch (i) {
         case 0: setRow(r, "Wyśrodkuj na mojej pozycji", "", UII_GPS); break;
         case 1: scopy(t, sizeof(t), m9dlStatus()[0] ? m9dlDetail() : "przez sieć WiFi poniżej"); setRow(r, m9dlActive() ? "Przerwij" : "Pobierz z internetu", t, UII_SIGNAL, m9dlActive()); break;
-        case 2: setRow(r, "Sieć WiFi", _wifi.ssid[0] ? _wifi.ssid : "nie ustawiona"); break;
-        case 3: setRow(r, "Hasło WiFi", _wifi.pass[0] ? "zapisane (zaszyfrowane)" : "brak", UII_LOCK); break;
-        case 4: setRow(r, "Zapomnij sieć WiFi", "kasuje nazwę i hasło"); break;
-        case 5: {
+        case 2: if (m9wifiAp()[0]) scopy(t, sizeof(t), m9wifiAp()); else wifiNames(t, sizeof(t)); setRow(r, "Sieci WiFi", t, UII_LOCK); break;
+        case 3: {
           const char* u = _wifi.url; if (strncmp(u, "https://", 8) == 0) u += 8;
           int n = strlen(u);
           if (n > 30) snprintf(t, sizeof(t), "%.13s…%s", u, u + n - 14); else scopy(t, sizeof(t), u);
@@ -1917,15 +2036,16 @@ void UITask::listEnter(uint8_t s, int i) {
       else if (i == 1) {
         if (m9dlActive()) { m9dlStop(); _map.scan(); }
         else if (!_map.sdOk()) popup("Brak karty SD", "", true);
-        else if (!_wifi.ssid[0]) popup("Najpierw ustaw sieć WiFi", "pozycje niżej: sieć i hasło");
+        else if (!_wifi.n) popup("Najpierw wybierz sieć WiFi", "pozycja niżej: Sieci WiFi");
         else if (!_bt_killed) ask(C_WIFI_DL, "WiFi wyłączy Bluetooth do restartu", "");
         else doConfirm(C_WIFI_DL);
       }
-      else if (i == 2) openInput(IN_WIFI_SSID, _wifi.ssid);
-      else if (i == 3) openInput(IN_WIFI_PASS, "");   // zapisanego hasła nie pokazujemy; puste pole = bez zmian
-      else if (i == 4) ask(C_WIFI_FORGET, "Zapomnieć sieć WiFi?", _wifi.ssid);
-      else if (i == 5) openInput(IN_MAP_URL, _wifi.url);
-      else if (i == 6) {                              // test karty: zapis próbny, zawartość, wolne miejsce
+      else if (i == 2) {
+        if (m9dlActive()) popup("Najpierw zatrzymaj pobieranie", "");
+        else { push(S_WIFI); if (_bt_killed) m9wifiScan(); }
+      }
+      else if (i == 3) openInput(IN_MAP_URL, _wifi.url);
+      else if (i == 4) {                              // test karty: zapis próbny, zawartość, wolne miejsce
         if (m9dlActive()) popup("Najpierw zatrzymaj pobieranie", "");
         else { _sd_pending = false; popup("Sprawdzam kartę SD…", "to potrwa do minuty, ekran stoi", false, 120000); _sd_test_at = millis() + 500; }
       }
@@ -1933,12 +2053,32 @@ void UITask::listEnter(uint8_t s, int i) {
     case S_OTA: {
       int os = m9otaState();
       if (i == 0) {
-        if (os == 0 || os == 6) { if (!_wifi.ssid[0]) popup("Najpierw ustaw sieć WiFi", "pozycje niżej: sieć i hasło"); else if (!_bt_killed) ask(C_WIFI_OTA, "WiFi wyłączy Bluetooth do restartu", ""); else doConfirm(C_WIFI_OTA); }
+        if (os == 0 || os == 6) { if (!_wifi.n) popup("Najpierw wybierz sieć WiFi", "pozycja niżej: Sieci WiFi"); else if (!_bt_killed) ask(C_WIFI_OTA, "WiFi wyłączy Bluetooth do restartu", ""); else doConfirm(C_WIFI_OTA); }
         else if (os == 2 || os == 3) { char t[48]; snprintf(t, sizeof(t), os == 2 ? "Zainstalować wersję %s?" : "Wgrać ponownie %s?", m9otaVersion()); ask(C_OTA_INSTALL, t, ""); }
       }
-      else if (i == 1) openInput(IN_WIFI_SSID, _wifi.ssid);
-      else if (i == 2) openInput(IN_WIFI_PASS, "");
-      else if (i == 3) ask(C_WIFI_FORGET, "Zapomnieć sieć WiFi?", _wifi.ssid);
+      else if (os == 1 || os == 4) popup("Najpierw poczekaj", "trwa sprawdzanie albo instalacja");
+      else { push(S_WIFI); if (_bt_killed) m9wifiScan(); }
+      return;
+    }
+    case S_WIFI: {
+      int nf = wifiScanRows();
+      if (i < _wifi.n) {
+        _wifi_sel = i;
+        pickBegin(P_WIFINET, _wifi.net[i].ssid); pickAdd("Zmień hasło"); pickAdd("Zapomnij tę sieć"); pickOpen(-1);
+      } else if (i - _wifi.n < nf) {
+        bool open = false;
+        if (!m9wifiScanGet(wifiScanRow(i - _wifi.n), _wifi_new, NULL, NULL, &open, NULL)) return;
+        if (_wifi.n >= M9_WIFI_NETS) { popup("Najwyżej 4 sieci", "najpierw zapomnij jedną", true); return; }
+        _wifi_sel = -1;
+        if (open) { wifiStore(_wifi_new, ""); sel() = 0; }
+        else openInput(IN_WIFI_PASS, "");
+      } else if (i - _wifi.n == nf) {
+        if (m9wifiScanState() == 1) return;
+        if (!_bt_killed) ask(C_WIFI_SCAN, "WiFi wyłączy Bluetooth do restartu", ""); else doConfirm(C_WIFI_SCAN);
+      } else {
+        if (_wifi.n >= M9_WIFI_NETS) { popup("Najwyżej 4 sieci", "najpierw zapomnij jedną", true); return; }
+        openInput(IN_WIFI_SSID, "");
+      }
       return;
     }
     case S_QUICK: {
@@ -2145,6 +2285,11 @@ void UITask::applyPick(uint8_t id, int i) {
     case P_DIM: _cfg.dim_idx = i; saveCfg(); break;
     case P_CPU: _cfg.cpu_full = i == 1; saveCfg(); break;
     case P_BTAUTO: _cfg.bt_auto = i; saveCfg(); _bt_idle_since = 0; break;
+    case P_WIFINET:
+      if (_wifi_sel < 0 || _wifi_sel >= _wifi.n) break;
+      if (i == 0) openInput(IN_WIFI_PASS, "");
+      else ask(C_WIFI_FORGET, "Zapomnieć sieć WiFi?", _wifi.net[_wifi_sel].ssid);
+      break;
     case P_TILE: {                                    // wstaw wybrany kafelek; jeśli jest już na ekranie, zamień miejscami
       if (i < 0 || i >= T_COUNT || _tile_slot < 0 || _tile_slot >= 6) break;
       for (int k = 0; k < 6; k++) if (_cfg.tiles[k] == i) _cfg.tiles[k] = _cfg.tiles[_tile_slot];
@@ -2845,7 +2990,7 @@ void UITask::fillTile(UiTile& t, uint8_t id) {
       else if (hasConnection()) { v.bt_state = 2; scopy(v.bt_txt, sizeof(v.bt_txt), the_mesh.ui_app_name[0] ? the_mesh.ui_app_name : "połączony"); }
       else { v.bt_state = 1; strcpy(v.bt_txt, "BT ON"); snprintf(t.sub, sizeof(t.sub), "PIN %06lu", (unsigned long)the_mesh.getBLEPin()); }
       v.wifi_dbm = m9wifiBars() >= 1 && m9wifiBars() <= 4 ? m9wifiRssi() : 0;
-      if (v.wifi_dbm && _wifi.ssid[0]) snprintf(t.sub, sizeof(t.sub), "sieć: %s", _wifi.ssid);
+      if (v.wifi_dbm && m9wifiAp()[0]) { const char* ap = m9wifiAp(); const char* e = strstr(ap, " \xC2\xB7"); snprintf(t.sub, sizeof(t.sub), "sieć: %.*s", e ? (int)(e - ap) : 20, ap); }
       break;
     }
     case T_SPEC: {                                   // szum na naszym kanale z ostatnich minut
@@ -3077,7 +3222,7 @@ void UITask::fillThread() {
   if (_input_mode != IN_MSG) {                       // pole do wpisania czegoś innego niż wiadomość
     static const char* const T[14] = { "", "Nowy kanał", "Częstotliwość", "Nazwa urządzenia", "Data i godzina", "Hasło repeatera", "Komenda", "Szerokość geograficzna", "Długość geograficzna", "PIN Bluetooth",
                                        "Sieć WiFi", "Hasło WiFi", "Adres mapy", "Kod blokady ekranu" };
-    static const char* const R[14] = { "", "kanał z hasztagiem", "MHz", "do 22 znaków", "czas polski", "", "konsola repeatera", "stopnie", "stopnie", "6 cyfr", "nazwa sieci", "puste = bez zmian", "internet", "4–8 liter lub cyfr" };
+    static const char* const R[14] = { "", "kanał z hasztagiem", "MHz", "do 22 znaków", "czas polski", "", "konsola repeatera", "stopnie", "stopnie", "6 cyfr", "nazwa sieci", "hasło sieci", "internet", "4–8 liter lub cyfr" };
     static const char* const N[14] = { "", "Wpisz nazwę, np. #beskidy. Kto wpisze tę samą nazwę, ten jest na kanale.", "Wpisz częstotliwość w MHz, np. 869.618",
       "Pod tą nazwą widzą Cię inni w sieci. Polskie litery: ctrl, potem litera.",
       "Format: RRRR-MM-DD GG:MM. Zegar ustawia się też sam po połączeniu z aplikacją w telefonie i z GPS po złapaniu pozycji.",
@@ -3086,7 +3231,7 @@ void UITask::fillThread() {
       "Szerokość w stopniach, np. 49.82250 (ujemna = południowa).", "Długość w stopniach, np. 19.04690 (ujemna = zachodnia).",
       "Nowy PIN do parowania. Zacznie działać po restarcie. W telefonie trzeba będzie sparować urządzenie od nowa.",
       "Nazwa sieci WiFi, przez którą urządzenie pobierze mapę: domowa albo hotspot z telefonu. Wielkość liter ma znaczenie.",
-      "Hasło do tej sieci WiFi. Zapisane hasło jest zaszyfrowane i nie jest tu pokazywane; wpisz nowe albo zostaw puste pole.",
+      "Hasło do sieci WiFi. Zostanie zapisane zaszyfrowane i nie będzie pokazywane. Przy zmianie hasła puste pole = bez zmian.",
       "Adres w internecie, spod którego urządzenie pobiera pliki mapy (musi tam być plik lista.txt).",
       "Nowy kod do odblokowania ekranu: litery lub cyfry (wielkość liter nie ma znaczenia). Zapamiętaj go: bez kodu pomoże tylko wgranie firmware kablem z kasowaniem pamięci." };
     strcpy(v.title, T[_input_mode]); strcpy(v.title_right, R[_input_mode]); strcpy(v.line1, N[_input_mode]);
@@ -3326,7 +3471,7 @@ void UITask::loop() {
   if (the_mesh.ui_sent_changed) { the_mesh.ui_sent_changed = false; pollSent(); }
 
   if ((long)(now - _next_tick) >= 0) {             // zegar, bateria, „… min temu”, odpowiedzi discovery
-    _next_tick = now + ((scr() == S_DISC || scr() == S_MAP_NET || scr() == S_OTA) ? 1000 : scr() == S_MAP ? 3000 : 5000);
+    _next_tick = now + ((scr() == S_DISC || scr() == S_MAP_NET || scr() == S_OTA || scr() == S_WIFI) ? 1000 : scr() == S_MAP ? 3000 : 5000);
     // zegar niewiarygodny (przed 2025 r.), a GPS ma czas: ustaw sam
     if (the_mesh.getRTCClock()->getCurrentTime() < 1735689600UL) timeFromGps();
     _dirty = true;
@@ -3348,6 +3493,11 @@ void UITask::loop() {
   }
   // ikona WiFi na pasku stanu: odświeżaj, gdy zmieni się stan albo zasięg
   { int w = m9wifiBars(); if (w != _wifi_bars) { _wifi_bars = w; _dirty = true; } }
+  {                                                  // lista sieci: odśwież ekran, gdy skończy się szukanie; po wyjściu z ekranów WiFi wyłącz radio
+    uint8_t ws = (uint8_t)m9wifiScanState();
+    if (ws != _wifi_scan_st) { _wifi_scan_st = ws; _dirty = true; if (scr() == S_WIFI && sel() >= listCount(S_WIFI)) sel() = 0; }
+    if (ws) { bool on = false; for (int i = 0; i < _depth; i++) if (_nav[i].scr == S_WIFI) on = true; if (!on) m9wifiScanEnd(); }
+  }
 
   sampleLoop(now);
   powerLoop(now);

@@ -219,6 +219,15 @@ int main(int argc, char** argv) {
   keys({ M9K_RIGHT }); save("u-narzedzia-karty"); keys({ M9K_DOWN, M9K_RIGHT }); save("u-narzedzia");
   keys({ M9K_DOWN, M9K_ENTER }); save("u-mapa-z-internetu"); keys({ M9K_BACK });
   keys({ M9K_DOWN, M9K_LEFT, M9K_ENTER }); save("u-aktualizacja"); keys({ M9K_BACK });
+  // sieci WiFi: lista ze skanu, zapis sieci otwartej, hasło do zabezpieczonej, menu zapisanej
+  keys({ M9K_ENTER, M9K_DOWN, M9K_ENTER }); save("w-sieci-puste");
+  keys({ M9K_ENTER }); save("w-pytanie-bt"); keys({ M9K_ENTER }); save("w-szukam");
+  run(400); save("w-lista");
+  keys({ M9K_ENTER }); save("w-haslo"); keys({ 'a', 'b', 'c', 'd', '1', '2', '3', '4', M9K_ENTER }); save("w-zapisana");
+  run(100); keys({ M9K_DOWN, M9K_ENTER }); save("w-otwarta-zapisana");
+  run(3000); keys({ M9K_ENTER }); save("w-menu-sieci"); keys({ M9K_BACK, M9K_BACK });
+  { extern const char* sim_wifi_ap; sim_wifi_ap = "Furgon \xC2\xB7 kanał 6 \xC2\xB7 -47 dBm \xC2\xB7 3 AP"; run(6000); save("w-podglad"); sim_wifi_ap = ""; }
+  keys({ M9K_BACK, M9K_BACK });
   keys({ M9K_F3 }); save("u-menu-wraca");
   // zaznaczanie wielu kontaktów
   keys({ M9K_HOME }); save("z-start");

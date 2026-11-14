@@ -38,6 +38,18 @@ enum { N_IDLE, N_REQ, N_OPEN, N_STREAM, N_DONE, N_FAIL };
 static uint8_t st = ST_IDLE;
 static char base[160], status[64] = "", detail[96] = "";
 static char w_ssid[33] = "", w_pass[64] = "";
+static M9WifiNet w_nets[M9_WIFI_NETS]; static int w_n = 0;      // zapisane sieci; w_ssid/w_pass = ta, z którą teraz łączymy
+
+// sieci w zasięgu: jedna pozycja na nazwę, z danymi najmocniejszego nadajnika
+struct ApInfo { char ssid[33]; int8_t rssi; uint8_t ch, open, naps; uint8_t bssid[6]; };
+#define AP_MAX 20
+static ApInfo aps[AP_MAX]; static int n_aps = 0;
+static uint8_t scan_st = 0;                     // 0 nie szukano, 1 szukam, 2 gotowe, 3 błąd
+static unsigned long t_scan = 0;
+static bool conn_scan = false;                  // łączenie czeka na wynik szukania
+static bool have_ap = false, ap_show = false;   // have_ap: znamy nadajnik (kolejne porcje łączą się z nim od razu)
+static uint8_t ap_bssid[6]; static int ap_ch = 0, ap_rssi = 0, ap_naps = 0;
+static char ap_txt[72] = "";
 static struct { char name[40]; uint32_t size; uint8_t zoom; } files[MAX_FILES];
 static int n_files = 0, cur = -1, done_files = 0, retries = 0, max_zoom = 99, w_tries = 0, wifi_fails = 0;
 static unsigned long t_wifi_wait = 0;          // przerwa przed kolejną próbą połączenia z WiFi
@@ -251,11 +263,86 @@ static void stopTask() { session = session + 1; net = N_IDLE; }
 
 static void wifiOff() { WiFi.disconnect(true); WiFi.mode(WIFI_OFF); }
 
-static void wifiOn() {
+static void scanBegin() {
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
-  WiFi.begin(w_ssid, w_pass);
+  WiFi.scanDelete();
+  int r = WiFi.scanNetworks(true, false, false, 150);        // w tle, wszystkie kanały
+  scan_st = r == WIFI_SCAN_FAILED ? 3 : 1;
+  t_scan = millis();
+}
+
+// odbiera wynik szukania: te same nazwy sklejamy w jedną pozycję (najmocniejszy AP), potem sortujemy od najmocniejszej
+static void scanPoll() {
+  if (scan_st != 1) return;
+  int n = WiFi.scanComplete();
+  if (n == WIFI_SCAN_RUNNING) { if (millis() - t_scan > 15000) { WiFi.scanDelete(); scan_st = 3; } return; }
+  if (n < 0) { scan_st = 3; return; }
+  n_aps = 0;
+  for (int i = 0; i < n; i++) {
+    String s = WiFi.SSID(i);
+    if (s.length() == 0 || s.length() > 32) continue;        // sieci ukrytych nie pokazujemy
+    int r = WiFi.RSSI(i); if (r < -127) r = -127; if (r > 0) r = 0;
+    int k = 0;
+    while (k < n_aps && strcmp(aps[k].ssid, s.c_str()) != 0) k++;
+    if (k == n_aps) {
+      if (n_aps >= AP_MAX) continue;
+      n_aps++;
+      strncpy(aps[k].ssid, s.c_str(), 32); aps[k].ssid[32] = 0; aps[k].naps = 0; aps[k].rssi = -128;
+    }
+    if (aps[k].naps < 99) aps[k].naps++;
+    if (r > aps[k].rssi) {
+      aps[k].rssi = (int8_t)r; aps[k].ch = (uint8_t)WiFi.channel(i); aps[k].open = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
+      const uint8_t* b = WiFi.BSSID(i); if (b) memcpy(aps[k].bssid, b, 6); else memset(aps[k].bssid, 0, 6);
+    }
+  }
+  for (int i = 1; i < n_aps; i++) { ApInfo t = aps[i]; int j = i; while (j > 0 && aps[j - 1].rssi < t.rssi) { aps[j] = aps[j - 1]; j--; } aps[j] = t; }
+  WiFi.scanDelete();
+  scan_st = 2;
+}
+
+static void apText() {
+  int r = WiFi.status() == WL_CONNECTED ? (int)WiFi.RSSI() : ap_rssi;
+  if (ap_naps > 1) snprintf(ap_txt, sizeof(ap_txt), "%.20s · kanał %d · %d dBm · %d AP", w_ssid, ap_ch, r, ap_naps);
+  else snprintf(ap_txt, sizeof(ap_txt), "%.20s · kanał %d · %d dBm", w_ssid, ap_ch, r);
+}
+
+// po szukaniu: najmocniejszy nadajnik spośród zapisanych sieci. Gdy żadnej nie widać, próbujemy pierwszej zapisanej
+// „na ślepo” (sieć z ukrytą nazwą) — też z wyborem najmocniejszego AP.
+static void connectBest() {
+  int best = -1, net = -1;
+  for (int i = 0; i < n_aps && best < 0; i++)                 // aps są już od najmocniejszej
+    for (int k = 0; k < w_n; k++) if (strcmp(aps[i].ssid, w_nets[k].ssid) == 0) { best = i; net = k; break; }
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  if (best >= 0) {
+    strcpy(w_ssid, w_nets[net].ssid); strcpy(w_pass, w_nets[net].pass);
+    memcpy(ap_bssid, aps[best].bssid, 6); ap_ch = aps[best].ch; ap_rssi = aps[best].rssi; ap_naps = aps[best].naps;
+    have_ap = true; ap_show = true;
+    WiFi.begin(w_ssid, w_pass, ap_ch, ap_bssid);
+    snprintf(detail, sizeof(detail), "%s · kanał %d · %d dBm", w_ssid, ap_ch, ap_rssi);
+  } else {
+    strcpy(w_ssid, w_nets[0].ssid); strcpy(w_pass, w_nets[0].pass);
+    have_ap = false; ap_show = false;
+    WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+    WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+    WiFi.begin(w_ssid, w_pass);
+    snprintf(detail, sizeof(detail), "nie widzę zapisanych sieci, próbuję %s", w_ssid);
+  }
   t0 = millis();
+}
+
+static void wifiOn() {
+  t0 = millis();
+  if (have_ap) {                                              // kolejna porcja mapy: ten sam nadajnik, bez szukania
+    WiFi.persistent(false);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(w_ssid, w_pass, ap_ch, ap_bssid);
+    conn_scan = false;
+    return;
+  }
+  scanBegin();
+  conn_scan = true;
 }
 
 static void fail(const char* why) {
@@ -269,6 +356,7 @@ static void fail(const char* why) {
   snprintf(detail, sizeof(detail), "%s", why);
   stopTask();
   wifiOff();
+  have_ap = false; ap_show = false; conn_scan = false;
 }
 
 static void request(const char* url, uint32_t from, uint32_t to) {
@@ -279,8 +367,9 @@ static void request(const char* url, uint32_t from, uint32_t to) {
   net = N_REQ;
 }
 
-void m9dlStart(const char* ssid, const char* pass, const char* base_url, int max_zoom_) {
+void m9dlStart(const M9WifiNet* nets, int n_nets, const char* base_url, int max_zoom_) {
   m9dlStop();
+  scan_st = 0; n_aps = 0;
   if (cbuf == NULL) cbuf = (uint8_t*)ps_malloc(CHUNK_SZ);
   if (cbuf == NULL) { fail("brak pamięci PSRAM na porcję"); return; }
   mbedtls_platform_set_calloc_free(tlsCalloc, tlsFree);
@@ -288,8 +377,13 @@ void m9dlStart(const char* ssid, const char* pass, const char* base_url, int max
   if (task_alive) { fail("poprzednie połączenie jeszcze się zamyka"); return; }
   if (base_url == NULL || base_url[0] == 0) { fail("brak adresu serwera"); return; }
   snprintf(base, sizeof(base), "%s%s", base_url, base_url[strlen(base_url) - 1] == '/' ? "" : "/");
-  strncpy(w_ssid, ssid, sizeof(w_ssid) - 1); w_ssid[sizeof(w_ssid) - 1] = 0;
-  strncpy(w_pass, pass, sizeof(w_pass) - 1); w_pass[sizeof(w_pass) - 1] = 0;
+  w_n = 0;
+  for (int i = 0; i < n_nets && nets && w_n < M9_WIFI_NETS; i++) {
+    if (!nets[i].ssid[0]) continue;
+    w_nets[w_n] = nets[i]; w_nets[w_n].ssid[32] = 0; w_nets[w_n].pass[63] = 0; w_n++;
+  }
+  if (w_n == 0) { fail("brak zapisanej sieci WiFi"); return; }
+  w_ssid[0] = 0; w_pass[0] = 0; have_ap = false; ap_show = false;
   n_files = 0; cur = -1; done_files = 0; retries = 0; t_retry = 0; last_code = 0; list_asked = false; after_wifi_list = true;
   wifi_fails = 0; t_wifi_wait = 0;
   max_zoom = max_zoom_ > 0 ? max_zoom_ : 99;
@@ -297,14 +391,14 @@ void m9dlStart(const char* ssid, const char* pass, const char* base_url, int max
   if (xTaskCreatePinnedToCore(netTask, "m9dl", 16384, (void*)(uintptr_t)session, 1, NULL, 0) != pdPASS) { task_alive = false; fail("nie mogę uruchomić pobierania (pamięć)"); return; }
   wifiOn();
   st = ST_CONNECT;
-  snprintf(status, sizeof(status), "łączę z WiFi…");
-  snprintf(detail, sizeof(detail), "%s", ssid);
+  snprintf(status, sizeof(status), "szukam sieci WiFi…");
+  detail[0] = 0;
 }
 
 static int verNum(const char* v) { int a = 0, b = 0, c = 0; sscanf(v, "%d.%d.%d", &a, &b, &c); return a * 1000000 + b * 1000 + c; }
 
-void m9otaCheck(const char* ssid, const char* pass, const char* base_url, const char* cur_ver) {
-  m9dlStart(ssid, pass, base_url, 0);
+void m9otaCheck(const M9WifiNet* nets, int n_nets, const char* base_url, const char* cur_ver) {
+  m9dlStart(nets, n_nets, base_url, 0);
   if (st == ST_ERROR) return;
   ota_mode = true;
   strncpy(ota_cur, cur_ver, sizeof(ota_cur) - 1); ota_cur[sizeof(ota_cur) - 1] = 0;
@@ -340,6 +434,7 @@ void m9dlStop() {
   ota_mode = false;
   stopTask();
   if (st != ST_IDLE) wifiOff();
+  have_ap = false; ap_show = false; conn_scan = false;
   st = ST_IDLE;
   status[0] = 0; detail[0] = 0;
 }
@@ -417,6 +512,15 @@ void m9dlLoop() {
         wifiOn();
         break;
       }
+      if (conn_scan) {                                 // najpierw lista sieci w zasięgu, potem wybór najmocniejszego nadajnika
+        scanPoll();
+        if (scan_st == 1) { snprintf(status, sizeof(status), "szukam sieci WiFi… %lu s", (now - t0) / 1000); break; }
+        conn_scan = false;
+        if (scan_st != 2) n_aps = 0;                   // szukanie się nie udało: łączymy po samej nazwie
+        connectBest();
+        scan_st = 0;
+        break;
+      }
       if (WiFi.status() == WL_CONNECTED) {
         wifi_fails = 0;
         WiFi.setSleep(false);                          // bez usypiania radia WiFi pobieranie jest szybsze
@@ -429,6 +533,7 @@ void m9dlLoop() {
         // WiFi wyłączamy, czekamy i próbujemy dalej — błąd zgłaszamy dopiero po ok. 30 minutach prób.
         // Przy pierwszym łączeniu dajemy 3 próby (zła nazwa albo hasło nie powinny kazać czekać pół godziny).
         int limit = after_wifi_list ? 3 : 40;
+        have_ap = false;                               // następna próba od nowa szuka najmocniejszego nadajnika
         if (++wifi_fails < limit) {
           wifiOff();
           t_wifi_wait = now + (wifi_fails < 5 ? 10000UL : 45000UL);
@@ -623,12 +728,47 @@ uint32_t m9dlServerTime() {
   return t + (uint32_t)((millis() - srv_ms) / 1000);
 }
 
+const char* m9wifiAp() {
+  if (!ap_show || st == ST_IDLE || st == ST_ERROR) return "";
+  apText();
+  return ap_txt;
+}
+
+void m9wifiScan() {
+  m9dlStop();
+  n_aps = 0;
+  scanBegin();
+}
+int m9wifiScanState() { if (!conn_scan) scanPoll(); return scan_st; }
+int m9wifiScanCount() { return scan_st == 2 ? n_aps : 0; }
+bool m9wifiScanGet(int i, char* ssid33, int* rssi, int* channel, bool* open, int* naps) {
+  if (scan_st != 2 || i < 0 || i >= n_aps) return false;
+  if (ssid33) strcpy(ssid33, aps[i].ssid);
+  if (rssi) *rssi = aps[i].rssi;
+  if (channel) *channel = aps[i].ch;
+  if (open) *open = aps[i].open != 0;
+  if (naps) *naps = aps[i].naps;
+  return true;
+}
+void m9wifiScanEnd() {
+  if (conn_scan) return;                               // szukanie należy do trwającego łączenia
+  bool was = scan_st != 0;
+  scan_st = 0; n_aps = 0;
+  if (was && st == ST_IDLE) { WiFi.scanDelete(); wifiOff(); }
+}
+
 #else
 // atrapa dla symulatora
-void m9dlStart(const char*, const char*, const char*, int) { }
+void m9dlStart(const M9WifiNet*, int, const char*, int) { }
 void m9dlStop() { }
 void m9dlLoop() { }
-void m9otaCheck(const char*, const char*, const char*, const char*) { }
+void m9otaCheck(const M9WifiNet*, int, const char*, const char*) { }
+const char* m9wifiAp() { return ""; }
+void m9wifiScan() { }
+int m9wifiScanState() { return 0; }
+int m9wifiScanCount() { return 0; }
+bool m9wifiScanGet(int, char*, int*, int*, bool*, int*) { return false; }
+void m9wifiScanEnd() { }
 void m9otaInstall() { }
 int m9otaState() { return 0; }
 const char* m9otaVersion() { return ""; }
