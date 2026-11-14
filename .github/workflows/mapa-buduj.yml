@@ -32,7 +32,7 @@ jobs:
           docker run -e JAVA_TOOL_OPTIONS="-Xmx11g" -v "$(pwd)/data":/data ghcr.io/onthegomap/planetiler:latest --download --area=poland --storage=mmap --nodemap-type=sparsearray > planetiler.log 2>&1 || { tail -60 planetiler.log; exit 1; }
           tail -8 planetiler.log
           ls -la data; df -h /
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4
         with:
           name: dane-polska
           path: data/output.mbtiles
@@ -59,8 +59,8 @@ jobs:
           - { nazwa: pl-13-a,  obszar: "14.07,48.95,19.10,54.90", zoom: "13" }
           - { nazwa: pl-13-b,  obszar: "19.10,48.95,24.20,54.90", zoom: "13" }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093   # v4
         with:
           name: dane-polska
           path: data
@@ -79,7 +79,7 @@ jobs:
           python3 pakuj_mape.py mapa --zrodlo "http://localhost:8080/styles/ciemna/256/{z}/{x}/{y}.png" --obszar "${{ matrix.obszar }}" --zoom "${{ matrix.zoom }}" --wyjscie ../paczki --watki 6 2>&1 | tee ../pakowanie.log | grep -E "zoom|zapisano|100" || true
           ls -la ../paczki
           test -n "$(ls ../paczki/*.mcm 2>/dev/null)"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4
         with:
           name: paczki-${{ matrix.nazwa }}
           path: paczki/*.mcm
@@ -97,8 +97,8 @@ jobs:
     if: always() && needs.dane.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093   # v4
         with:
           pattern: paczki-*
           path: paczki

@@ -6,7 +6,7 @@ i oglądasz mapę bez telefonu. Przez Bluetooth łączy się z aplikacjami **Mes
 
 Domyślny preset radia: **SF6 — 869,618 MHz · BW 62,5 kHz · SF6 · CR 4/8**. Do wyboru jest też **EU/UK Narrow (SF8)**.
 
-Aktualna wersja: **0.19.2** (numer jest też na ekranie startowym i w Ustawieniach).
+Aktualna wersja: **0.20.0** (numer jest też na ekranie startowym i w Ustawieniach).
 
 ---
 
@@ -20,7 +20,7 @@ Wejdź w zakładkę **Releases** i otwórz wydanie **„Najnowszy build”**:
 |---|---|
 | `MC-SF6-ThinkNode-M9-<wersja>-pelny.bin` | pierwsze wgranie kablem USB (pełny obraz) |
 | `MC-SF6-ThinkNode-M9-<wersja>-aktualizacja.bin` | sama aplikacja (aktualizacje kablem) |
-| `wersja.txt` | z tego pliku urządzenie sprawdza aktualizacje przez WiFi |
+| `wersja.txt` | podpisany opis wersji, z którego urządzenie sprawdza aktualizacje przez WiFi |
 | `mapa-testowa.zip` | mała mapa testowa (siatka i miasta) |
 
 ### 2. Pierwsze wgranie (kabel USB)
@@ -50,14 +50,16 @@ Stały PIN można ustawić w **Ustawieniach › Bluetooth**.
 **Ustawienia › System › Aktualizacja przez WiFi**:
 
 1. Wpisz sieć WiFi i hasło (domową albo hotspot z telefonu).
-2. Urządzenie sprawdzi wersję w wydaniu „Najnowszy build”. Gdy jest nowsza, pobierze ją, sprawdzi sumę MD5 i samo się zrestartuje.
+2. Urządzenie sprawdzi wersję w wydaniu „Najnowszy build”. Gdy jest nowsza, sprawdzi **podpis cyfrowy**, pobierze plik, porówna go z podpisem i samo się zrestartuje.
+
+Aktualizacja bez poprawnego podpisu nie zostanie zainstalowana, a starszej wersji urządzenie nie wgra.
 
 Na czas WiFi Bluetooth jest wyłączony (oba naraz nie mieszczą się w pamięci). Wraca po restarcie.
 
 ### 6. Mapa
 
 Mapa całej Polski (zoom 6–13, ok. 330 MB) leży na wbudowanej karcie SD. Pobiera ją samo urządzenie:
-klawisz **Mapa**, potem **Menu**, potem **„Pobierz z internetu”**. Szczegóły i wgrywanie z telefonu opisuje [`mapa/README.md`](mapa/README.md).
+klawisz **Mapa**, potem **Menu**, potem **„Pobierz z internetu”**. Szczegóły opisuje [`mapa/README.md`](mapa/README.md).
 
 ---
 
@@ -138,10 +140,17 @@ Kafelek Bateria pokazuje, jak spada napięcie i ile czasu zostało. Pierwsze osz
 
 - **Ustawienia** w ośmiu działach: Radio, Bluetooth, Pozycja i prywatność, Advert, Kontakty, Wiadomości, Ekran i dźwięk, System. Każdą wartość wybiera się z listy.
 - **Radio:** presety SF6 i EU/UK Narrow, własne parametry, moc nadawania, bajty trasy (1 / 2 / 3), limit nadawania.
-- **Blokada klawiszy:** włącza się z wygaszeniem ekranu. Odblokowanie: Wstecz, potem Enter.
+- **Blokada ekranu:** włącza się z wygaszeniem ekranu. Do wyboru zwykła (Wstecz, potem Enter) albo z **PIN-em** (opis niżej).
 - **Dźwięki:** wiadomości, adverty repeaterów (wszystkie albo tylko ulubione), wyciszenie całego urządzenia.
 - **Jasność ekranu** i podświetlenie klawiatury.
 - **Pasek stanu:** godzina, nieprzeczytane, GPS, Bluetooth, WiFi z zasięgiem, bateria.
+
+### Bezpieczeństwo
+
+- **Podpisane aktualizacje:** każdy build jest podpisywany kluczem Ed25519 trzymanym w sekretach repozytorium. Urządzenie ma wbudowany klucz publiczny i instaluje przez WiFi tylko podpisane pliki.
+- **Blokada ekranu z PIN-em** (Ustawienia › Ekran i dźwięk › Blokada ekranu): 4–8 cyfr. Ekran blokuje się po wygaszeniu i po każdym włączeniu urządzenia. Po 5 złych próbach rośnie przerwa (od 30 s do 15 min). Zapomniany PIN usuwa tylko wgranie firmware kablem z kasowaniem pamięci.
+- **Rozmowy prywatne należą do klucza kontaktu, nie do nazwy.** Drugi kontakt o tej samej nazwie dostaje osobną rozmowę z dopiskiem identyfikatora (np. „Marek ·A3F2”). Identyfikator rozmówcy jest w nagłówku rozmowy.
+- **Hasła WiFi i repeaterów** są zapisywane zaszyfrowane kluczem wyprowadzonym z tożsamości urządzenia i nie są pokazywane na ekranie.
 
 ---
 
@@ -168,6 +177,7 @@ Kafelek Bateria pokazuje, jak spada napięcie i ile czasu zostało. Pierwsze osz
 - WiFi i Bluetooth nie działają jednocześnie. Po użyciu WiFi (mapa, aktualizacja) Bluetooth wraca dopiero po restarcie.
 - Pomiar pasma w Widmie na chwilę przerywa odbiór pakietów, dlatego działa tylko przy otwartym ekranie.
 - Nazwy telefonu przez Bluetooth nie da się odczytać. Kafelek Sieć pokazuje nazwę aplikacji (np. „MeshSpeed”).
+- Blokada z PIN-em chroni ekran. Kto ma urządzenie w ręku i odczyta całą pamięć kablem, nadal może dostać się do danych (pamięć urządzenia nie jest szyfrowana).
 - Jeszcze nie ma: SOS.
 
 Błędy i pomysły zgłaszaj w zakładce **Issues** (najlepiej ze zdjęciem ekranu i numerem wersji).
@@ -178,6 +188,7 @@ Błędy i pomysły zgłaszaj w zakładce **Issues** (najlepiej ze zdjęciem ekra
 
 - **Budowanie:** GitHub Actions (`.github/workflows/build.yml`) pobiera MeshCore w przypiętej wersji (`MESHCORE_REF`), dokłada folder `m9_sf6` jako przykład
   i dopisuje `platformio-m9.ini` do wariantu `thinknode_m9`. Każdy push do `main` publikuje wydanie „Najnowszy build”.
+- **Podpis aktualizacji:** `tools/podpisz.py` tworzy `wersja.txt` (wersja, plik, rozmiar, MD5, SHA-256, podpis). Klucz prywatny jest w sekrecie `OTA_SIGNING_KEY`, publiczny w `m9_sf6/ui/OtaKey.h`. Własny fork potrzebuje własnej pary kluczy.
 - **Kod:** `m9_sf6/ui` zawiera interfejs. `UITask` obsługuje dane i klawisze, `UiView` rysuje (przenośny), `M9Radio` odpowiada za widmo i procesor, `M9PktLog` za log pakietów, a `M9Download` za mapę i aktualizacje.
   W `m9_sf6/companion` jest MyMesh z funkcjami dla ekranu.
 - **Symulator:** `tools/sym` uruchamia ten sam kod ekranów na komputerze z atrapami sieci i sprzętu, robi zrzuty ekranu i test losowych klawiszy.

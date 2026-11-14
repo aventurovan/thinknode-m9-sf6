@@ -104,6 +104,11 @@ public:
   int  uiAddHashtagChannel(const char* name);      // indeks kanału, -1 = brak miejsca, -2 = już jest
   bool uiRemoveChannel(const char* name);
   void uiSetGps(bool on);
+  uint8_t ui_rx_key[6] = {0};             // początek klucza nadawcy ostatniej wiadomości prywatnej
+  uint16_t uiSendDirectKey(const uint8_t* key6, const char* text);
+  int uiSeal(uint8_t* dest, const uint8_t* src, int len);
+  int uiUnseal(uint8_t* dest, const uint8_t* src, int len);
+  void uiPinHash(uint8_t* out32, const uint8_t* salt8, const char* pin);
   bool ui_rx_chan = false;                // ostatnio odebrana wiadomość przyszła z kanału (a nie od kontaktu)
   char ui_app_name[24] = "";              // nazwa aplikacji połączonej przez Bluetooth (z CMD_APP_START)
   bool uiDecodeGroup(const uint8_t* payload, int len, char* chan, int chan_n, char* who, int who_n);

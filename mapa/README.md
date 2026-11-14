@@ -6,7 +6,7 @@ Urządzenie rysuje mapę z plików `.mcm` w folderze **`/mapa`** na karcie SD.
 
 Karta w M9 jest wbudowana, dlatego pliki wgrywa samo urządzenie. Na M9: klawisz **Mapa**, potem **Menu** (mała wiadomość pod Home).
 
-**Z internetu, bez komputera i bez kopiowania przez telefon**
+**Z internetu, bez komputera**
 
 1. „Sieć WiFi” i „Hasło WiFi” — wpisz sieć domową albo hotspot z telefonu.
 2. „Pobierz z internetu” — urządzenie łączy się z WiFi, czyta `lista.txt` spod „Adresu mapy” i pobiera brakujące pliki na kartę.
@@ -19,17 +19,11 @@ Na M9 zapis na kartę przy włączonym WiFi nie działa, dlatego te dwie rzeczy 
 
 Pod adresem mapy muszą leżeć pliki `.mcm` i plik `lista.txt` (w każdym wierszu: nazwa pliku, spacja, rozmiar w bajtach).
 
-**Z telefonu**
-
-1. „Wgraj z telefonu” — urządzenie tworzy sieć WiFi **M9-MAPA** (hasło **mapa12345**).
-2. W telefonie połącz się z tą siecią i otwórz w przeglądarce **http://192.168.4.1**.
-3. „Wybierz pliki” i wskaż pliki `.mcm` zapisane w telefonie. Nie zamykaj strony do końca wgrywania.
-
 ## Mapa testowa (bez danych OSM)
 
 W wydaniu „Najnowszy build” jest `mapa-testowa.zip`: siatka z numerami kafelków i kilkanaście miast,
 Polska w zoomach 6–9 i okolice Bielska, Katowic i Krakowa w zoomach 10–13. Służy do sprawdzenia ekranu, karty i GPS.
-Rozpakuj ją i wgraj pliki `.mcm` jednym ze sposobów opisanych wyżej.
+Żeby jej użyć, wystaw pliki `.mcm` z plikiem `lista.txt` pod własnym adresem i wpisz go w „Adres mapy”.
 
 ## Prawdziwa mapa — na własnym serwerze
 

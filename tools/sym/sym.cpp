@@ -31,6 +31,7 @@ bool MyMesh::uiAdminStatus() { struct __attribute__((packed)) St { uint16_t mv, 
 bool MyMesh::uiAdminNeighbours(uint16_t offset) { uint16_t total = 15, n = offset == 0 ? 12 : 3; memcpy(ui_admin.nb, &total, 2); memcpy(ui_admin.nb + 2, &n, 2); memset(ui_admin.nb + 4, 0, 132);
   for (int i = 0; i < n; i++) { ui_admin.nb[4 + i * 11] = (uint8_t)(0x40 + offset + i); ui_admin.nb[4 + i * 11 + 10] = (uint8_t)(30 - 4 * (offset + i)); }
   ui_admin.nb[4] = 0x77; ui_admin.nb[5] = 0xc1; ui_admin.nb[6] = 0x11; ui_admin.nb_len = 4 + n * 11; ui_admin.nb_ready = true; return true; }
+bool sim_pin_any = false;
 MyMesh the_mesh;
 
 static mesh::MainBoard board; static MultiSerialInterface ser; static DisplayDriver disp; static SensorManager sens;
@@ -50,6 +51,7 @@ static void rx(const char* thread, const char* text, int hops) {
   the_mesh.ui_rx_hops = hops; the_mesh.ui_rx_hash_size = 2; the_mesh.ui_rx_path_bytes = hops * 2; the_mesh.ui_rx_direct = false;
   uint8_t p[6] = { 0xa3, 0xf2, 0x77, 0xc1, 0x55, 0x66 }; memcpy(the_mesh.ui_rx_path, p, 6);
   the_mesh.ui_rx_chan = the_mesh.uiChannelIndex(thread) >= 0;
+  memset(the_mesh.ui_rx_key, 0, 6); for (auto& c : the_mesh.cts) if (strcmp(c.name, thread) == 0) memcpy(the_mesh.ui_rx_key, c.id.pub_key, 6);
   ui.newMsg(0, thread, text, 0);
 }
 
@@ -78,6 +80,7 @@ static void pkt(int kind, int n) {
 
 int main(int argc, char** argv) {
   if (argc > 1 && strcmp(argv[1], "fuzz") == 0) {      // losowe klawisze: szukanie błędów pamięci i zawieszeń
+    sim_pin_any = true;
     mkdir("/tmp/symfs", 0777);
     ui.begin(&disp, &sens, &the_mesh.prefs);
     run(3000);
@@ -94,6 +97,15 @@ int main(int argc, char** argv) {
       if (i % 997 == 0) { sim_millis += 40000; ui.loop(); }
     }
     printf("fuzz ok, kontaktow %d, kanalow %d\n", (int)the_mesh.cts.size(), (int)the_mesh.chans.size());
+    return 0;
+  }
+  if (argc > 1 && strcmp(argv[1], "migr") == 0) {      // wczytanie plików w starszym formacie (wiadomości, hasła, WiFi)
+    ui.begin(&disp, &sens, &the_mesh.prefs);
+    run(3000);
+    keys({ M9K_MSG }); save("migr-wiadomosci");
+    keys({ M9K_ENTER }); save("migr-rozmowa");
+    keys({ M9K_HOME, M9K_MAP, M9K_F3 }); save("migr-wifi");
+    sim_millis += 120000; for (int i = 0; i < 400; i++) { sim_millis += 50; ui.loop(); }
     return 0;
   }
   if (argc > 1 && strcmp(argv[1], "logfuzz") == 0) {   // spreparowane pakiety: każdy oglądamy na liście i w szczegółach
@@ -183,6 +195,22 @@ int main(int argc, char** argv) {
   keys({ M9K_ENTER }); save("n-kod-qr");
   keys({ M9K_HOME, M9K_RIGHT, M9K_RIGHT }); keys({ M9K_HOME, M9K_DOWN, M9K_RIGHT, M9K_RIGHT, M9K_ENTER }); save("n-bateria");
   keys({ M9K_HOME, M9K_F3 }); save("n-menu-start");
+  // dwa kontakty o tej samej nazwie: osobne rozmowy; blokada z PIN-em
+  if (!the_mesh.cts.empty()) {
+    ContactInfo imp = the_mesh.cts[0]; for (int i = 0; i < 32; i++) imp.id.pub_key[i] = (uint8_t)(0xE0 + i); the_mesh.cts.push_back(imp);
+    the_mesh.ui_rx_chan = false; memcpy(the_mesh.ui_rx_key, the_mesh.cts[0].id.pub_key, 6); ui.newMsg(0, the_mesh.cts[0].name, "prawdziwy: cześć", 0);
+    memcpy(the_mesh.ui_rx_key, imp.id.pub_key, 6); ui.newMsg(0, imp.name, "podszywacz: podaj hasło", 0);
+    keys({ M9K_HOME, M9K_MSG }); save("p-dwie-rozmowy");
+    keys({ M9K_ENTER }); save("p-rozmowa-z-id");
+  }
+  keys({ M9K_HOME, M9K_LEFT, M9K_UP, M9K_UP, M9K_UP, M9K_LEFT, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("p-ekran-i-dzwiek");
+  keys({ M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("p-blokada-wybor");
+  keys({ M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("p-pin-nowy");
+  type("4821"); keys({ M9K_ENTER }); save("p-pin-ustawiony");
+  sim_millis += 400000; ui.loop(); keys({ M9K_ENTER }); save("p-blokada-pin");
+  type("111"); save("p-blokada-pin-wpisywanie"); keys({ M9K_ENTER }); save("p-blokada-zly-pin");
+  type("4821"); keys({ M9K_ENTER }); save("p-odblokowany");
+  keys({ M9K_HOME, M9K_MAP, M9K_F3 }); save("p-mapa-menu");
   printf("zrzutow: %d\n", shot);
   return 0;
 }

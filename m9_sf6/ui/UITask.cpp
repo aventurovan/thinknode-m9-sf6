@@ -1,7 +1,6 @@
 #include "UITask.h"
 #include "M9Lcd.h"
 #include "M9Ble.h"
-#include "M9Upload.h"
 #include "M9Download.h"
 #include "M9Radio.h"
 #include "M9PktLog.h"
@@ -21,6 +20,7 @@
 #define FILE_MSGS        "/m9ui.msg"
 #define FILE_MUTED       "/m9ui.mut"
 #define FILE_WIFI        "/m9ui.wifi"
+#define FILE_LOCK        "/m9ui.lck"
 #define MAP_URL_DEFAULT  "https://github.com/aventurovan/thinknode-m9-sf6/releases/download/mapa/"
 #define OTA_URL          "https://github.com/aventurovan/thinknode-m9-sf6/releases/download/latest-build/"
 #define MAP_URL_OLD      "https://github.com/aventurovan/m9-mapa/releases/download/mapa/"
@@ -43,6 +43,10 @@ static const uint16_t GPS_MIN[] = { 0, 5, 15, 30, 60 };
 static const char* const GPS_NAMES[] = { "włączony stale", "co 5 min", "co 15 min", "co 30 min", "co 60 min" };
 static const uint16_t BTA_MIN[] = { 0, 5, 15, 30, 60 };
 static const char* const BTA_NAMES[] = { "nigdy", "po 5 min", "po 15 min", "po 30 min", "po 60 min" };
+// zaszyfrowane hasła w plikach: 2 bajty kontroli + dane wyrównane do 16 bajtów
+#define WIFI_SEALED      (2 + 64)                               // hasło WiFi (64 B)
+#define PW_PLAIN         ((UI_PW_MAX * 22 + 15) / 16 * 16)      // hasła repeaterów: 12 × (klucz 6 B + hasło 16 B)
+#define PW_SEALED        (2 + PW_PLAIN)
 #define NOISE_SLOT_MS    2143UL         // 10 minut szumu w 280 punktach
 #define BATT_SAMPLE_MS   450000UL       // napięcie baterii co 7,5 min
 static const char* const FILTER_NAMES[] = { "wszystkie", "osoby", "repeatery", "pokoje", "czujniki", "ulubione" };
@@ -53,6 +57,11 @@ static const char* const CLI_CMDS[] = { "ver", "clock", "neighbors", "get radio"
 
 // ---------------- pomocnicze ----------------
 
+#ifdef ESP32
+  static uint32_t esp_random_m9() { return esp_random(); }
+#else
+  static uint32_t esp_random_m9() { return (uint32_t)rand() * 2654435761u; }
+#endif
 static void scopy(char* dest, size_t n, const char* src) { strncpy(dest, src, n - 1); dest[n - 1] = 0; }
 
 // czas lokalny dla Polski z czasu UTC (czas letni: ostatnia niedziela marca – ostatnia niedziela października)
@@ -139,7 +148,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   memset(&_cfg, 0, sizeof(_cfg));
   _cfg.magic = CFG_MAGIC; _cfg.show_path = 1; _cfg.sleep_idx = 1; _cfg.kb_light = 1;
   _pw_n = 0;
-  _cur[0] = 0; _cur_chan = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1;
+  _cur[0] = 0; _cur_chan = false; memset(_cur_key, 0, sizeof(_cur_key)); _msgs_old_format = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1;
   _nh_n = 0; _nh_next = _nh_slot_end = 0; _nh_min = 1; _bh_n = _bh_seg = 0; _bh_next = 30000; _bh_chg = false;
   _sp_tab = _sp_range = 0; _sp_pause = _sp_have = false; _sp_next = 0; _sp_ms = 0; _sp_wf_n = 0;
   memset(_sp_cur, -128, sizeof(_sp_cur)); memset(_sp_peak, -128, sizeof(_sp_peak)); memset(_sp_wf, -128, sizeof(_sp_wf));
@@ -161,6 +170,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   _muted_n = 0;
   _bar = false; _bar_sel = 0;
   _locked = false; _ul_first = _ul_last = 0; _ul_back = false;
+  _pin_in[0] = 0; _pin_have = false; _pin_fails = 0; _pin_wait = 0; memset(_pin_salt, 0, sizeof(_pin_salt)); memset(_pin_hash, 0, sizeof(_pin_hash));
   _nb_total = _nb_got = 0; _kv_more = false;
   _ble_conn_seen = _ble_auth_seen = 0; _ble_pin_at = 0; _pin_popup = false;
   _chas_pos = false; _clat = _clon = 0;
@@ -222,9 +232,21 @@ void UITask::loadAll() {
   f = SPIFFS.open(FILE_PW, "r");
   if (f) {
     uint8_t n = 0;
-    if (f.read(&n, 1) == 1 && n <= UI_PW_MAX && f.read((uint8_t*)_pw, sizeof(Pw) * n) == sizeof(Pw) * n) _pw_n = n;
+    // nowy format „P2”: liczba haseł i zaszyfrowany blok; stary (jawny) wczytujemy raz i od razu zapisujemy zaszyfrowany
+    uint8_t h[3]; bool old = false;
+    uint8_t sealed[PW_SEALED];
+    if (f.size() == 3 + PW_SEALED && f.read(h, 3) == 3 && h[0] == 'P' && h[1] == '2' && h[2] <= UI_PW_MAX && f.read(sealed, PW_SEALED) == PW_SEALED) {
+      uint8_t plain[PW_PLAIN];
+      if (the_mesh.uiUnseal(plain, sealed, PW_SEALED) >= (int)sizeof(_pw)) { memcpy(_pw, plain, sizeof(_pw)); _pw_n = h[2]; }
+      memset(plain, 0, sizeof(plain));
+    } else {
+      f.seek(0);
+      uint8_t n = 0;
+      if (f.read(&n, 1) == 1 && n <= UI_PW_MAX && f.read((uint8_t*)_pw, sizeof(Pw) * n) == sizeof(Pw) * n) { _pw_n = n; old = true; }
+    }
     for (int i = 0; i < _pw_n; i++) _pw[i].pw[sizeof(_pw[0].pw) - 1] = 0;
     f.close();
+    if (old) savePw();
   }
 
   // wiadomości: główny plik, a gdy go nie ma albo jest niepełny — kopia sprzed podmiany albo plik tymczasowy
@@ -243,15 +265,48 @@ void UITask::loadAll() {
     if (m.rep_hs > 3) m.rep_hs = 0;
     m.chan = m.chan ? 1 : 0; m.out = m.out ? 1 : 0;
   }
+  if (_msgs_old_format) {                                      // starszy plik: rozmowom prywatnym dopisz klucz kontaktu o tej nazwie
+    ContactInfo c;
+    int total = the_mesh.getTotalContactSlots();
+    for (int i = 0; i < _msg_n; i++) {
+      UiMsg& m = _msgs[i];
+      if (m.chan) continue;
+      if (i > 0 && !_msgs[i - 1].chan && strcmp(_msgs[i - 1].thread, m.thread) == 0) { memcpy(m.key, _msgs[i - 1].key, 6); continue; }
+      for (int k = MAX_ANON_CONTACTS; k < total; k++) if (the_mesh.getContactByIdx(k, c) && c.type != ADV_TYPE_NONE && strcmp(c.name, m.thread) == 0) { memcpy(m.key, c.id.pub_key, 6); break; }
+    }
+    _msgs_old_format = false;
+    if (_msg_n > 0) { _msgs_dirty = true; _save_at = millis() + 10000; }
+  }
   _msg_loaded = _msg_n;
 
   f = SPIFFS.open(FILE_WIFI, "r");
   if (f) {
-    WifiCfg w;
-    if (f.read((uint8_t*)&w, sizeof(w)) == sizeof(w)) { w.ssid[32] = 0; w.pass[63] = 0; w.url[127] = 0; _wifi = w; }
+    // nowy format „W2”: nazwa sieci i adres jawnie, hasło zaszyfrowane; stary (jawny) wczytujemy raz i zapisujemy od nowa
+    WifiCfg w; memset(&w, 0, sizeof(w));
+    uint8_t h[2], sealed[WIFI_SEALED]; bool old = false;
+    if (f.size() == 2 + sizeof(w.ssid) + sizeof(w.url) + WIFI_SEALED && f.read(h, 2) == 2 && h[0] == 'W' && h[1] == '2'
+        && f.read((uint8_t*)w.ssid, sizeof(w.ssid)) == sizeof(w.ssid) && f.read((uint8_t*)w.url, sizeof(w.url)) == sizeof(w.url) && f.read(sealed, WIFI_SEALED) == WIFI_SEALED) {
+      uint8_t plain[sizeof(w.pass)];
+      if (the_mesh.uiUnseal(plain, sealed, WIFI_SEALED) >= (int)sizeof(w.pass)) memcpy(w.pass, plain, sizeof(w.pass));
+      memset(plain, 0, sizeof(plain));
+      w.ssid[32] = 0; w.pass[63] = 0; w.url[127] = 0; _wifi = w;
+    } else if (f.size() == sizeof(w)) {
+      f.seek(0);
+      if (f.read((uint8_t*)&w, sizeof(w)) == sizeof(w)) { w.ssid[32] = 0; w.pass[63] = 0; w.url[127] = 0; _wifi = w; old = true; }
+    }
     f.close();
+    if (old) saveWifi();
   }
   if (!_wifi.url[0] || strcmp(_wifi.url, MAP_URL_OLD) == 0) strcpy(_wifi.url, MAP_URL_DEFAULT);
+
+  f = SPIFFS.open(FILE_LOCK, "r");
+  if (f) {
+    if (f.read(_pin_salt, 8) == 8 && f.read(_pin_hash, 32) == 32 && f.read(&_pin_fails, 1) == 1) _pin_have = true;
+    f.close();
+  }
+  if (_cfg.lock > 2) _cfg.lock = 0;
+  if (_cfg.lock == 2 && !_pin_have) _cfg.lock = 1;             // brak pliku z PIN-em: zostaje zwykła blokada klawiszy
+  if (_cfg.lock == 2) { _locked = true; pinPenalty(millis()); }   // z PIN-em urządzenie startuje zablokowane
 
   f = SPIFFS.open(FILE_MUTED, "r");
   if (f) {
@@ -262,10 +317,34 @@ void UITask::loadAll() {
   }
 }
 
+// PIN blokady ekranu: sól, skrót PIN-u (nie sam PIN) i licznik złych prób
+void UITask::savePin() {
+  File f = SPIFFS.open(FILE_LOCK, "w");
+  if (!f) return;
+  f.write(_pin_salt, 8); f.write(_pin_hash, 32); f.write(&_pin_fails, 1);
+  f.close();
+}
+
+// po 5 złych próbach przerwa: 30 s, 1 min, 2 min… najwyżej 15 minut
+void UITask::pinPenalty(unsigned long now) {
+  if (_pin_fails < 5) { _pin_wait = 0; return; }
+  uint32_t s = 30; for (int i = 5; i < _pin_fails && s < 900; i++) s *= 2;
+  if (s > 900) s = 900;
+  _pin_wait = now + s * 1000UL; if (!_pin_wait) _pin_wait = 1;
+}
+
 void UITask::saveWifi() {
+  uint8_t plain[sizeof(_wifi.pass)], sealed[WIFI_SEALED + 16];
+  memset(plain, 0, sizeof(plain)); memcpy(plain, _wifi.pass, strnlen(_wifi.pass, sizeof(plain) - 1));
+  int n = the_mesh.uiSeal(sealed, plain, sizeof(plain));
+  memset(plain, 0, sizeof(plain));
+  if (n != WIFI_SEALED) return;
   File f = SPIFFS.open(FILE_WIFI, "w");
   if (!f) return;
-  f.write((const uint8_t*)&_wifi, sizeof(_wifi));
+  f.write((const uint8_t*)"W2", 2);
+  f.write((const uint8_t*)_wifi.ssid, sizeof(_wifi.ssid));
+  f.write((const uint8_t*)_wifi.url, sizeof(_wifi.url));
+  f.write(sealed, WIFI_SEALED);
   f.close();
 }
 
@@ -294,18 +373,47 @@ void UITask::toggleMute(const char* name) {
   saveMuted();
 }
 
+// Wiadomość w formacie sprzed wersji 0.20 (bez klucza kontaktu) — tylko do jednorazowego przeniesienia starego pliku.
+struct UiMsgV1 {
+  char thread[32]; char who[24]; char text[164];
+  uint32_t ts;
+  uint8_t chan, out, unread, hops;
+  uint16_t sent_id;
+  uint8_t repeats, delivered;
+  uint8_t direct, hash_size, path_bytes;
+  uint8_t path[24];
+  int8_t snr_x4; int16_t rssi;
+  uint8_t rep_n, rep_hs; uint8_t rep_id[6][3]; int8_t rep_snr[6];
+};
+
 // czyta plik wiadomości; -1 = brak albo uszkodzony (zła długość)
+// Formaty: „MB” — bieżący (z kluczem kontaktu); „MA” i „M9” — starsze, przenoszone przy wczytaniu.
 int UITask::readMsgFile(const char* path) {
   File f = SPIFFS.open(path, "r");
   if (!f) return -1;
   uint8_t h[6];
   int n = -1;
-  if (f.read(h, 4) == 4 && h[2] == (uint8_t)(sizeof(UiMsg) & 0xFF)) {
-    if (h[0] == 'M' && h[1] == '9') n = h[3];                                        // starszy format: liczba w jednym bajcie
-    else if (h[0] == 'M' && h[1] == 'A' && f.read(h + 4, 2) == 2) n = h[4] | (h[5] << 8);
+  bool old = false;
+  if (f.read(h, 4) == 4) {
+    if (h[0] == 'M' && h[1] == 'B' && h[2] == (uint8_t)(sizeof(UiMsg) & 0xFF) && f.read(h + 4, 2) == 2) n = h[4] | (h[5] << 8);
+    else if (h[2] == (uint8_t)(sizeof(UiMsgV1) & 0xFF)) {
+      old = true;
+      if (h[0] == 'M' && h[1] == '9') n = h[3];
+      else if (h[0] == 'M' && h[1] == 'A' && f.read(h + 4, 2) == 2) n = h[4] | (h[5] << 8);
+    }
   }
   if (n > UI_MSG_MAX) n = -1;
-  if (n > 0 && f.read((uint8_t*)_msgs, sizeof(UiMsg) * n) != sizeof(UiMsg) * n) n = -1;
+  if (n > 0 && !old && f.read((uint8_t*)_msgs, sizeof(UiMsg) * n) != sizeof(UiMsg) * n) n = -1;
+  if (n > 0 && old) {
+    UiMsgV1 o;
+    size_t keep = offsetof(UiMsg, key) < sizeof(o) ? offsetof(UiMsg, key) : sizeof(o);
+    for (int i = 0; i < n; i++) {
+      if (f.read((uint8_t*)&o, sizeof(o)) != sizeof(o)) { n = -1; break; }
+      memset(&_msgs[i], 0, sizeof(UiMsg));
+      memcpy(&_msgs[i], &o, keep);
+    }
+    if (n > 0) _msgs_old_format = true;                // po wczytaniu uzupełnimy klucze kontaktów i zapiszemy w nowym formacie
+  }
   f.close();
   return n;
 }
@@ -325,11 +433,16 @@ void UITask::saveCfg() {
 }
 
 void UITask::savePw() {
+  uint8_t plain[PW_PLAIN], sealed[PW_SEALED + 16];
+  memset(plain, 0, sizeof(plain)); memcpy(plain, _pw, sizeof(_pw));
+  int n = the_mesh.uiSeal(sealed, plain, sizeof(plain));
+  memset(plain, 0, sizeof(plain));
+  if (n != PW_SEALED) return;
   File f = SPIFFS.open(FILE_PW, "w");
   if (!f) return;
-  uint8_t n = (uint8_t)_pw_n;
-  f.write(&n, 1);
-  f.write((const uint8_t*)_pw, sizeof(Pw) * _pw_n);
+  uint8_t h[3] = { 'P', '2', (uint8_t)_pw_n };
+  f.write(h, 3);
+  f.write(sealed, PW_SEALED);
   f.close();
 }
 
@@ -348,7 +461,7 @@ bool UITask::saveStep() {
     // tylko oznaczają, że potrzebny będzie następny
     sv_n = _msg_n; sv_idx = 0;
     memcpy(_snap, _msgs, sizeof(UiMsg) * sv_n);
-    uint8_t h[6] = { 'M', 'A', (uint8_t)(sizeof(UiMsg) & 0xFF), 0, (uint8_t)(sv_n & 0xFF), (uint8_t)(sv_n >> 8) };
+    uint8_t h[6] = { 'M', 'B', (uint8_t)(sizeof(UiMsg) & 0xFF), 0, (uint8_t)(sv_n & 0xFF), (uint8_t)(sv_n >> 8) };
     if (sv_file.write(h, 6) != 6) { sv_file.close(); SPIFFS.remove(FILE_MSGS_TMP); _save_at = millis() + SAVE_DELAY_MS; return false; }
     sv_active = true;
     _msgs_dirty = false;
@@ -374,7 +487,7 @@ void UITask::saveMsgs() {
   if (_msgs == NULL) return;
   File f = SPIFFS.open(FILE_MSGS_TMP, "w");
   if (!f) return;
-  uint8_t h[6] = { 'M', 'A', (uint8_t)(sizeof(UiMsg) & 0xFF), 0, (uint8_t)(_msg_n & 0xFF), (uint8_t)(_msg_n >> 8) };
+  uint8_t h[6] = { 'M', 'B', (uint8_t)(sizeof(UiMsg) & 0xFF), 0, (uint8_t)(_msg_n & 0xFF), (uint8_t)(_msg_n >> 8) };
   bool ok = f.write(h, 6) == 6 && f.write((const uint8_t*)_msgs, sizeof(UiMsg) * _msg_n) == sizeof(UiMsg) * _msg_n;
   f.close();
   if (!ok) { SPIFFS.remove(FILE_MSGS_TMP); return; }  // brak miejsca: zostaje poprzedni plik
@@ -441,8 +554,13 @@ void UITask::newMsg(uint8_t path_len, const char* from_name, const char* text, i
       body = sep + 2;
     }
   }
+  char tname[32];
+  if (chan) scopy(tname, sizeof(tname), from_name);
+  else dmThreadName(the_mesh.ui_rx_key, from_name, tname, sizeof(tname));   // rozmowa należy do klucza kontaktu, nie do nazwy
+  from_name = tname;
   UiMsg* m = addMsg(from_name, who, body, chan, false, the_mesh.ui_rx_hops);
   if (m) {
+    if (!chan) memcpy(m->key, the_mesh.ui_rx_key, 6);
     m->direct = the_mesh.ui_rx_direct;
     m->hash_size = the_mesh.ui_rx_hash_size;
     m->path_bytes = the_mesh.ui_rx_path_bytes > sizeof(m->path) ? sizeof(m->path) : the_mesh.ui_rx_path_bytes;
@@ -514,9 +632,57 @@ void UITask::markRead(const char* name, bool chan) {
   for (int i = 0; i < _msg_n; i++) if (_msgs[i].unread && _msgs[i].chan == chan && strcmp(_msgs[i].thread, name) == 0) { _msgs[i].unread = 0; _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS; }
 }
 
-void UITask::openThread(const char* name, bool chan) {
+static bool keySet(const uint8_t* k) { for (int i = 0; i < 6; i++) if (k[i]) return true; return false; }
+
+bool UITask::ctByPrefix(const uint8_t* key6, ContactInfo& c) {
+  int total = the_mesh.getTotalContactSlots();
+  for (int i = MAX_ANON_CONTACTS; i < total; i++) {
+    if (the_mesh.getContactByIdx(i, c) && c.type != ADV_TYPE_NONE && memcmp(c.id.pub_key, key6, 6) == 0) return true;
+  }
+  return false;
+}
+
+// Nazwa rozmowy prywatnej dla kontaktu o danym kluczu. Rozmowę wyznacza klucz: drugi kontakt o tej samej nazwie
+// (pomyłka albo podszywanie się) dostaje osobną rozmowę z dopiskiem identyfikatora, np. „Marek ·A3F2”.
+void UITask::dmThreadName(const uint8_t* key, const char* name, char* out, size_t n) {
+  char cur[32]; cur[0] = 0;
+  bool have = false, taken = false;
+  if (keySet(key)) {
+    for (int i = _msg_n - 1; i >= 0; i--) if (!_msgs[i].chan && memcmp(_msgs[i].key, key, 6) == 0) { scopy(cur, sizeof(cur), _msgs[i].thread); have = true; break; }
+  }
+  // czy tę nazwę zajmuje rozmowa z kimś o innym kluczu
+  for (int i = 0; i < _msg_n && !taken; i++) {
+    const UiMsg& m = _msgs[i];
+    if (!m.chan && strcmp(m.thread, name) == 0 && keySet(m.key) && keySet(key) && memcmp(m.key, key, 6) != 0) taken = true;
+  }
+  char want[32];
+  if (!taken) scopy(want, sizeof(want), name);
+  else snprintf(want, sizeof(want), "%.22s ·%02X%02X", name, key[0], key[1]);
+  if (have && strcmp(cur, want) != 0) {              // kontakt zmienił nazwę: jego rozmowa idzie za nim
+    for (int i = 0; i < _msg_n; i++) if (!_msgs[i].chan && memcmp(_msgs[i].key, key, 6) == 0) scopy(_msgs[i].thread, sizeof(_msgs[i].thread), want);
+    if (!_cur_chan && strcmp(_cur, cur) == 0) scopy(_cur, sizeof(_cur), want);
+    _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS;
+  }
+  if (keySet(key)) {                                 // starsze wiadomości tej rozmowy bez klucza dostają go teraz
+    for (int i = 0; i < _msg_n; i++) if (!_msgs[i].chan && !keySet(_msgs[i].key) && strcmp(_msgs[i].thread, want) == 0) memcpy(_msgs[i].key, key, 6);
+  }
+  scopy(out, n, want);
+}
+
+void UITask::openThread(const char* name, bool chan, const uint8_t* key) {
   scopy(_cur, sizeof(_cur), name);
   _cur_chan = chan;
+  memset(_cur_key, 0, sizeof(_cur_key));
+  if (!chan) {                                     // klucz rozmówcy: podany, z wiadomości tej rozmowy, a na końcu z kontaktu o tej nazwie
+    if (key && keySet(key)) memcpy(_cur_key, key, 6);
+    else {
+      for (int i = _msg_n - 1; i >= 0; i--) if (!_msgs[i].chan && strcmp(_msgs[i].thread, name) == 0 && keySet(_msgs[i].key)) { memcpy(_cur_key, _msgs[i].key, 6); break; }
+      if (!keySet(_cur_key)) {
+        ContactInfo c; int total = the_mesh.getTotalContactSlots();
+        for (int i = MAX_ANON_CONTACTS; i < total; i++) if (the_mesh.getContactByIdx(i, c) && c.type != ADV_TYPE_NONE && strcmp(c.name, name) == 0) { memcpy(_cur_key, c.id.pub_key, 6); break; }
+      }
+    }
+  }
   scrollReset();
   _scroll_unread = -1;                             // pierwsza nieprzeczytana: po wejściu rozmowa ustawi się na niej
   for (int i = 0; i < _msg_n; i++) if (_msgs[i].unread && _msgs[i].chan == chan && strcmp(_msgs[i].thread, name) == 0) { _scroll_unread = i; break; }
@@ -538,10 +704,11 @@ void UITask::openInput(uint8_t mode, const char* initial) {
 bool UITask::sendText(const char* text) {
   uint16_t id;
   if (_cur_chan) { int idx = the_mesh.uiChannelIndex(_cur); id = idx >= 0 ? the_mesh.uiSendChannelText(idx, text) : 0; }
-  else id = the_mesh.uiSendDirectText(_cur, text);
+  else if (keySet(_cur_key)) id = the_mesh.uiSendDirectKey(_cur_key, text);      // do kontaktu o tym kluczu, nie „o tej nazwie”
+  else { popup("Nie znam tego kontaktu", "dodaj go do kontaktów i napisz z jego menu", true); return false; }
   if (!id) { popup("Nie udało się wysłać", "spróbuj jeszcze raz", true); return false; }
   UiMsg* m = addMsg(_cur, "", text, _cur_chan, true, 0);
-  if (m) m->sent_id = id;
+  if (m) { m->sent_id = id; if (!_cur_chan) memcpy(m->key, _cur_key, 6); }
   scrollReset();
   return true;
 }
@@ -679,7 +846,7 @@ void UITask::pop() {
 void UITask::back() {
   if (scr() == S_THREAD && _input_mode != IN_MSG) _input_mode = IN_MSG;   // anulowane pole do wpisania
   if (scr() == S_ADMIN) the_mesh.uiAdminLogout();
-  if (scr() == S_MAP_NET && (m9uploadActive() || m9dlActive())) { m9uploadStop(); m9dlStop(); _map.scan(); }
+  if (scr() == S_MAP_NET && m9dlActive()) { m9dlStop(); _map.scan(); }
   if (scr() == S_MAP && _route_n) _route_n = 0;     // koniec oglądania trasy
   if (scr() == S_OTA && m9otaState() == 4) { popup("Trwa instalacja", "poczekaj do końca"); return; }
   if (scr() == S_OTA && m9otaActive()) m9dlStop();
@@ -938,7 +1105,7 @@ void UITask::doAct(uint8_t act) {
   }
   ContactInfo c;
   switch (act) {
-    case A_WRITE: pop(); openThread(_cname, false); break;
+    case A_WRITE: { char tn[32]; dmThreadName(_ck, _cname, tn, sizeof(tn)); pop(); openThread(tn, false, _ck); break; }
     case A_FAV: {
       int r = the_mesh.uiToggleFavourite(_ck);
       if (r >= 0) { _cfav = r == 1; popup(r == 1 ? "Dodano do ulubionych" : "Usunięto z ulubionych", _cname); }
@@ -987,21 +1154,14 @@ void UITask::doConfirm(uint8_t what) {
     case C_RPT_REBOOT: adminCli("reboot"); break;
     case C_WIFI_DL:
       wifiPrepare();
-      m9uploadStop(); m9dlStart(_wifi.ssid, _wifi.pass, _wifi.url, 13);
+      m9dlStart(_wifi.ssid, _wifi.pass, _wifi.url, 13);
       break;
-    case C_WIFI_AP: {
-      wifiPrepare();
-      m9dlStop();
-      if (m9uploadStart()) popup("WiFi: " M9UP_SSID, "hasło " M9UP_PASS " · w telefonie otwórz 192.168.4.1", false, 8000);
-      else { char t[48]; snprintf(t, sizeof(t), "wolna pamięć: %u kB", m9FreeHeapKB()); popup("Nie udało się uruchomić WiFi", t, true, 8000); }
-      break;
-    }
     case C_WIFI_OTA:
       wifiPrepare();
-      m9uploadStop();
       m9otaCheck(_wifi.ssid, _wifi.pass, OTA_URL, M9_FW_VERSION);
       break;
     case C_OTA_INSTALL: m9otaInstall(); break;
+    case C_WIFI_FORGET: memset(_wifi.ssid, 0, sizeof(_wifi.ssid)); memset(_wifi.pass, 0, sizeof(_wifi.pass)); saveWifi(); popup("Sieć WiFi zapomniana"); break;
     case C_BT_RESTART: if (_msgs_dirty || true) saveMsgs(); the_mesh.uiReboot(); break;
     case C_CLEAR_MSGS: _msg_n = 0; _msg_idx = -1; saveMsgs(); popup("Wiadomości usunięte"); break;
     case C_CLEAR_PW: _pw_n = 0; savePw(); popup("Hasła repeaterów usunięte"); break;
@@ -1198,8 +1358,22 @@ void UITask::submitInput() {
       return;
     }
     case IN_WIFI_SSID: scopy(_wifi.ssid, sizeof(_wifi.ssid), _input); saveWifi(); _input_mode = IN_MSG; pop(); return;
-    case IN_WIFI_PASS: scopy(_wifi.pass, sizeof(_wifi.pass), _input); saveWifi(); _input_mode = IN_MSG; pop(); return;
+    case IN_WIFI_PASS:
+      if (_input[0]) { scopy(_wifi.pass, sizeof(_wifi.pass), _input); saveWifi(); }
+      memset(_input, 0, sizeof(_input));               // hasło nie zostaje w polu pisania
+      _input_mode = IN_MSG; pop(); return;
     case IN_MAP_URL: scopy(_wifi.url, sizeof(_wifi.url), _input); saveWifi(); _input_mode = IN_MSG; pop(); return;
+    case IN_LOCKPIN: {
+      if (strlen(_input) < 4) { popup("PIN ma mieć 4–8 cyfr", "", true); return; }
+      for (int i = 0; i < 8; i++) _pin_salt[i] = (uint8_t)(esp_random_m9() >> (i % 3 * 8));
+      the_mesh.uiPinHash(_pin_hash, _pin_salt, _input);
+      _pin_have = true; _pin_fails = 0; savePin();
+      _cfg.lock = 2; saveCfg();
+      memset(_input, 0, sizeof(_input));
+      _input_mode = IN_MSG; pop();
+      popup("PIN blokady ustawiony", "blokada po wygaszeniu i po włączeniu", false, 5000);
+      return;
+    }
     case IN_PIN: {
       long pin = atol(_input);
       if (strlen(_input) != 6 || pin < 100000) { popup("PIN ma mieć 6 cyfr", "pierwsza cyfra nie może być zerem", true); return; }
@@ -1258,6 +1432,7 @@ void UITask::keyThread(uint8_t k) {
     case IN_CLI: limit = 46; break;
     case IN_LAT: case IN_LON: limit = 11; digits = true; break;
     case IN_PIN: limit = 6; if (k < '0' || k > '9') return; break;
+    case IN_LOCKPIN: limit = 8; if (k < '0' || k > '9') return; break;
     case IN_WIFI_SSID: limit = 32; break;
     case IN_WIFI_PASS: limit = 63; break;
     case IN_MAP_URL: limit = 120; if (k == ' ') return; break;
@@ -1302,13 +1477,13 @@ int UITask::listCount(uint8_t s) {
     case S_RADIO: return 9;
     case S_SET_BT: return 7;
     case S_PICK: return _pick_n;
-    case S_MAP_NET: return 7;
-    case S_OTA: return 3;
+    case S_MAP_NET: return 7;      // wyśrodkuj, pobierz, sieć, hasło, zapomnij sieć, adres, karta
+    case S_OTA: return 4;
     case S_SET_POS: return 10;
     case S_SET_ADV: return 3;
     case S_SET_CT: return 6;
     case S_SET_MSG: return 3;
-    case S_SET_SCR: return 10;
+    case S_SET_SCR: return 11;
     case S_SET_SYS: return 7;
   }
   return 0;
@@ -1348,9 +1523,8 @@ void UITask::listHead(uint8_t s) {
     case S_MAP_NET:
       strcpy(v.title, "Mapa");
       if (m9dlStatus()[0]) scopy(v.title_right, sizeof(v.title_right), m9dlStatus());
-      else if (m9uploadActive()) snprintf(v.title_right, sizeof(v.title_right), "WiFi %s · telefonów: %d", M9UP_SSID, m9uploadClients());
       else strcpy(v.title_right, "pobieranie i pliki");
-      hint("Enter", "wybierz"); hint("Wstecz", m9uploadActive() || m9dlActive() ? "zatrzymaj" : "");
+      hint("Enter", "wybierz"); hint("Wstecz", m9dlActive() ? "zatrzymaj" : "");
       break;
     case S_PICK: scopy(v.title, sizeof(v.title), _pick_title); strcpy(v.title_right, "wybierz wartość"); hint("Enter", "wybierz"); hint("Wstecz", "bez zmian"); break;
     case S_QUICK: strcpy(v.title, "Szybkie odpowiedzi"); snprintf(v.title_right, sizeof(v.title_right), "do: %s", _cur); hint("Enter", "wyślij"); hint("Wstecz", ""); break;
@@ -1468,7 +1642,8 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
         }
       }
       else if (i == 1) setRow(r, "Sieć WiFi", _wifi.ssid[0] ? _wifi.ssid : "nie ustawiona");
-      else setRow(r, "Hasło WiFi", _wifi.pass[0] ? "zapisane" : "brak");
+      else if (i == 2) setRow(r, "Hasło WiFi", _wifi.pass[0] ? "zapisane (zaszyfrowane)" : "brak", UII_LOCK);
+      else setRow(r, "Zapomnij sieć WiFi", "kasuje nazwę i hasło");
       return;
     }
     case S_MAP_NET:
@@ -1476,13 +1651,9 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       switch (i) {
         case 0: setRow(r, "Wyśrodkuj na mojej pozycji", "", UII_GPS); break;
         case 1: scopy(t, sizeof(t), m9dlStatus()[0] ? m9dlDetail() : "przez sieć WiFi poniżej"); setRow(r, m9dlActive() ? "Przerwij" : "Pobierz z internetu", t, UII_SIGNAL, m9dlActive()); break;
-        case 2:
-          if (m9uploadActive()) { if (m9uploadFile()[0]) snprintf(t, sizeof(t), "%s · %lu MB", m9uploadFile(), (unsigned long)(m9uploadBytes() >> 20)); else strcpy(t, "hasło " M9UP_PASS " · 192.168.4.1"); }
-          else strcpy(t, "przez WiFi urządzenia");
-          setRow(r, m9uploadActive() ? "Wyłącz wgrywanie" : "Wgraj z telefonu", t, UII_SD, m9uploadActive());
-          break;
-        case 3: setRow(r, "Sieć WiFi", _wifi.ssid[0] ? _wifi.ssid : "nie ustawiona"); break;
-        case 4: setRow(r, "Hasło WiFi", _wifi.pass[0] ? "zapisane" : "brak"); break;
+        case 2: setRow(r, "Sieć WiFi", _wifi.ssid[0] ? _wifi.ssid : "nie ustawiona"); break;
+        case 3: setRow(r, "Hasło WiFi", _wifi.pass[0] ? "zapisane (zaszyfrowane)" : "brak", UII_LOCK); break;
+        case 4: setRow(r, "Zapomnij sieć WiFi", "kasuje nazwę i hasło"); break;
         case 5: {
           const char* u = _wifi.url; if (strncmp(u, "https://", 8) == 0) u += 8;
           int n = strlen(u);
@@ -1618,13 +1789,14 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       if (i == 0) setRow(r, "Wygaszanie ekranu", SLEEP_NAMES[_cfg.sleep_idx], UII_SCREEN);
       else if (i == 1) setRow(r, "Podświetlenie klawiatury", _cfg.kb_light ? "świeci, gdy ekran świeci" : "wyłączone");
       else if (i == 2) setRow(r, "Nowa wiadomość budzi ekran", yesNo(!_cfg.no_wake));
-      else if (i == 3) setRow(r, "Blokada klawiszy", _cfg.lock ? "po wygaszeniu ekranu" : "wyłączona", UII_LOCK);
+      else if (i == 3) setRow(r, "Blokada ekranu", _cfg.lock == 2 ? "po wygaszeniu, z PIN-em" : _cfg.lock ? "po wygaszeniu (Wstecz, Enter)" : "wyłączona", UII_LOCK);
       else if (i == 4) { snprintf(t, sizeof(t), "%d%%", brightPercent()); setRow(r, "Jasność ekranu", t, UII_SCREEN); }
       else if (i == 5) setRow(r, "Dźwięki urządzenia", _prefs->buzzer_quiet ? "wyciszone (wszystkie)" : "włączone", UII_MUTE, _prefs->buzzer_quiet);
       else if (i == 6) setRow(r, "Dźwięk wiadomości", _cfg.no_msg_snd ? "wyłączony" : "włączony");
       else if (i == 7) setRow(r, "Dźwięk advertu repeatera", _cfg.adv_snd == 0 ? "wyłączony" : _cfg.adv_snd == 1 ? "każdy repeater" : "tylko ulubione");
       else if (i == 8) setRow(r, "Przyciemnianie", DIM_NAMES[_cfg.dim_idx], UII_BATT);
-      else setRow(r, "Procesor po wygaszeniu", _cfg.cpu_full ? "pełna moc (240 MHz)" : "oszczędny (80 MHz)", UII_BATT);
+      else if (i == 9) setRow(r, "Procesor po wygaszeniu", _cfg.cpu_full ? "pełna moc (240 MHz)" : "oszczędny (80 MHz)", UII_BATT);
+      else setRow(r, "PIN blokady ekranu", _pin_have ? "ustawiony · Enter: zmień" : "brak · Enter: ustaw", UII_LOCK);
       return;
     case S_SET_SYS: {
       if (i == 0) setRow(r, "Informacje", "wersja, pamięć, klucz");
@@ -1670,17 +1842,13 @@ void UITask::listEnter(uint8_t s, int i) {
         else if (!_wifi.ssid[0]) popup("Najpierw ustaw sieć WiFi", "pozycje niżej: sieć i hasło");
         else if (!_bt_killed) ask(C_WIFI_DL, "WiFi wyłączy Bluetooth do restartu", "");
         else doConfirm(C_WIFI_DL);
-      } else if (i == 2) {
-        if (m9uploadActive()) { m9uploadStop(); _map.scan(); }
-        else if (!_map.sdOk()) popup("Brak karty SD", "", true);
-        else if (!_bt_killed) ask(C_WIFI_AP, "WiFi wyłączy Bluetooth do restartu", "");
-        else doConfirm(C_WIFI_AP);
       }
-      else if (i == 3) openInput(IN_WIFI_SSID, _wifi.ssid);
-      else if (i == 4) openInput(IN_WIFI_PASS, _wifi.pass);
+      else if (i == 2) openInput(IN_WIFI_SSID, _wifi.ssid);
+      else if (i == 3) openInput(IN_WIFI_PASS, "");   // zapisanego hasła nie pokazujemy; puste pole = bez zmian
+      else if (i == 4) ask(C_WIFI_FORGET, "Zapomnieć sieć WiFi?", _wifi.ssid);
       else if (i == 5) openInput(IN_MAP_URL, _wifi.url);
       else if (i == 6) {                              // test karty: zapis próbny, zawartość, wolne miejsce
-        if (m9dlActive() || m9uploadActive()) popup("Najpierw zatrzymaj przesyłanie", "");
+        if (m9dlActive()) popup("Najpierw zatrzymaj pobieranie", "");
         else { _sd_pending = false; popup("Sprawdzam kartę SD…", "to potrwa do minuty, ekran stoi", false, 120000); _sd_test_at = millis() + 500; }
       }
       return;
@@ -1691,7 +1859,8 @@ void UITask::listEnter(uint8_t s, int i) {
         else if (os == 2 || os == 3) { char t[48]; snprintf(t, sizeof(t), os == 2 ? "Zainstalować wersję %s?" : "Wgrać ponownie %s?", m9otaVersion()); ask(C_OTA_INSTALL, t, ""); }
       }
       else if (i == 1) openInput(IN_WIFI_SSID, _wifi.ssid);
-      else if (i == 2) openInput(IN_WIFI_PASS, _wifi.pass);
+      else if (i == 2) openInput(IN_WIFI_PASS, "");
+      else if (i == 3) ask(C_WIFI_FORGET, "Zapomnieć sieć WiFi?", _wifi.ssid);
       return;
     }
     case S_QUICK: {
@@ -1780,6 +1949,10 @@ void UITask::listEnter(uint8_t s, int i) {
       else if (i == 5) ask(C_REBOOT, "Zrestartować urządzenie?", "");
       else ask(C_FACTORY, "Skasować WSZYSTKO?", "");
       return;
+    case S_SET_SCR:
+      if (i == 10) openInput(IN_LOCKPIN, "");
+      else settingPick(s, i);
+      return;
     default: settingPick(s, i); return;               // pozostałe ustawienia: lista wartości do wyboru
   }
 }
@@ -1856,13 +2029,14 @@ bool UITask::settingPick(uint8_t s, int i) {
       if (i == 0) { pickBegin(P_SLEEP, "Wygaszanie ekranu"); for (int q = 0; q < 4; q++) pickAdd(SLEEP_NAMES[q]); pickOpen(_cfg.sleep_idx); }
       else if (i == 1) two(P_KBLIGHT, "Podświetlenie klawiatury", "świeci, gdy ekran świeci", "wyłączone", _cfg.kb_light ? 0 : 1);
       else if (i == 2) two(P_WAKE, "Nowa wiadomość budzi ekran", "tak", "nie", _cfg.no_wake ? 1 : 0);
-      else if (i == 3) two(P_LOCK, "Blokada klawiszy", "wyłączona", "po wygaszeniu ekranu", _cfg.lock ? 1 : 0);
+      else if (i == 3) { pickBegin(P_LOCK, "Blokada ekranu"); pickAdd("wyłączona"); pickAdd("po wygaszeniu (Wstecz, potem Enter)"); pickAdd("po wygaszeniu i włączeniu, z PIN-em"); pickOpen(_cfg.lock > 2 ? 0 : _cfg.lock); }
       else if (i == 4) { pickBegin(P_BRIGHT, "Jasność ekranu"); for (int q = 0; q < 5; q++) { snprintf(t, sizeof(t), "%d%%", BRIGHT_STEPS[q]); pickAdd(t); } pickOpen((_cfg.bright >= 1 && _cfg.bright <= 5) ? _cfg.bright - 1 : 4); }
       else if (i == 5) two(P_SOUND, "Dźwięki urządzenia", "włączone", "wyciszone (wszystkie)", _prefs->buzzer_quiet ? 1 : 0);
       else if (i == 6) two(P_MSGSND, "Dźwięk wiadomości", "włączony", "wyłączony", _cfg.no_msg_snd ? 1 : 0);
       else if (i == 7) { pickBegin(P_ADVSND, "Dźwięk advertu repeatera"); pickAdd("wyłączony"); pickAdd("każdy repeater"); pickAdd("tylko ulubione"); pickOpen(_cfg.adv_snd < 3 ? _cfg.adv_snd : 0); }
       else if (i == 8) { pickBegin(P_DIM, "Przyciemnianie ekranu"); for (int q = 0; q < 4; q++) pickAdd(DIM_NAMES[q]); pickOpen(_cfg.dim_idx); }
-      else two(P_CPU, "Procesor po wygaszeniu ekranu", "oszczędny (80 MHz)", "pełna moc (240 MHz)", _cfg.cpu_full ? 1 : 0);
+      else if (i == 9) two(P_CPU, "Procesor po wygaszeniu ekranu", "oszczędny (80 MHz)", "pełna moc (240 MHz)", _cfg.cpu_full ? 1 : 0);
+      else return false;
       return true;
   }
   return false;
@@ -1929,7 +2103,12 @@ void UITask::applyPick(uint8_t id, int i) {
     case P_ADVSND: _cfg.adv_snd = i; saveCfg(); if (i > 0 && !_prefs->buzzer_quiet) _buzzer.play("adv:d=32,o=7,b=160:g,p,g"); break;
     case P_MAPRANGE: _cfg.map_range = i; saveCfg(); break;
     case P_BRIGHT: _cfg.bright = i + 1; saveCfg(); m9lcdBacklight(brightPercent()); break;
-    case P_LOCK: _cfg.lock = i == 1; saveCfg(); if (i == 1) popup("Blokada włączona", "odblokowanie: Wstecz, potem Enter", false, 5000); break;
+    case P_LOCK:
+      if (i == 2 && !_pin_have) { openInput(IN_LOCKPIN, ""); break; }      // najpierw trzeba ustawić PIN
+      _cfg.lock = (uint8_t)i; saveCfg();
+      if (i == 1) popup("Blokada włączona", "odblokowanie: Wstecz, potem Enter", false, 5000);
+      if (i == 2) popup("Blokada z PIN-em włączona", "także po włączeniu urządzenia", false, 5000);
+      break;
   }
   _dirty = true;
 }
@@ -1978,6 +2157,28 @@ bool UITask::gridKey(uint8_t k, int count, int cols) {
 // ekran blokady: odblokowuje Wstecz, a zaraz po nim Enter
 void UITask::lockKey(uint8_t k) {
   unsigned long now = millis();
+  _dirty = true;
+  if (_cfg.lock == 2 && _pin_have) {                 // blokada z PIN-em: cyfry, Del kasuje, Enter sprawdza
+    int n = strlen(_pin_in);
+    if (k >= '0' && k <= '9') { if (n < 8) { _pin_in[n] = (char)k; _pin_in[n + 1] = 0; } return; }
+    if (k == M9K_BKSP || k == M9K_BKSP_LONG || k == M9K_BACK) { if (k == M9K_BKSP && n > 0) _pin_in[n - 1] = 0; else _pin_in[0] = 0; return; }
+    if (k != M9K_ENTER || n == 0) return;
+    if (_pin_wait && (long)(now - _pin_wait) < 0) { _pin_in[0] = 0; return; }      // kara za złe próby jeszcze trwa
+    uint8_t h[32];
+    the_mesh.uiPinHash(h, _pin_salt, _pin_in);
+    memset(_pin_in, 0, sizeof(_pin_in));
+    uint8_t diff = 0; for (int i = 0; i < 32; i++) diff |= h[i] ^ _pin_hash[i];
+    if (diff == 0) {
+      _locked = false; _pin_wait = 0;
+      if (_pin_fails) { _pin_fails = 0; savePin(); }
+      _kb.setBacklight(_cfg.kb_light != 0);
+    } else {
+      if (_pin_fails < 250) _pin_fails++;
+      savePin();                                       // licznik złych prób przeżywa restart
+      pinPenalty(now);
+    }
+    return;
+  }
   if (k == M9K_BACK) { _ul_back = true; _ul_last = now; }
   else if (k == M9K_ENTER && _ul_back && now - _ul_last < 4000) {
     _locked = false; _ul_back = false;
@@ -2611,10 +2812,10 @@ void UITask::fillThread() {
   UiView& v = *_v;
   v.screen = UIS_THREAD; v.tab = -1;
   if (_input_mode != IN_MSG) {                       // pole do wpisania czegoś innego niż wiadomość
-    static const char* const T[13] = { "", "Nowy kanał", "Częstotliwość", "Nazwa urządzenia", "Data i godzina", "Hasło repeatera", "Komenda", "Szerokość geograficzna", "Długość geograficzna", "PIN Bluetooth",
-                                       "Sieć WiFi", "Hasło WiFi", "Adres mapy" };
-    static const char* const R[13] = { "", "kanał z hasztagiem", "MHz", "do 22 znaków", "czas polski", "", "konsola repeatera", "stopnie", "stopnie", "6 cyfr", "nazwa sieci", "", "internet" };
-    static const char* const N[13] = { "", "Wpisz nazwę, np. #beskidy. Kto wpisze tę samą nazwę, ten jest na kanale.", "Wpisz częstotliwość w MHz, np. 869.618",
+    static const char* const T[14] = { "", "Nowy kanał", "Częstotliwość", "Nazwa urządzenia", "Data i godzina", "Hasło repeatera", "Komenda", "Szerokość geograficzna", "Długość geograficzna", "PIN Bluetooth",
+                                       "Sieć WiFi", "Hasło WiFi", "Adres mapy", "PIN blokady ekranu" };
+    static const char* const R[14] = { "", "kanał z hasztagiem", "MHz", "do 22 znaków", "czas polski", "", "konsola repeatera", "stopnie", "stopnie", "6 cyfr", "nazwa sieci", "puste = bez zmian", "internet", "4–8 cyfr" };
+    static const char* const N[14] = { "", "Wpisz nazwę, np. #beskidy. Kto wpisze tę samą nazwę, ten jest na kanale.", "Wpisz częstotliwość w MHz, np. 869.618",
       "Pod tą nazwą widzą Cię inni w sieci. Polskie litery: ctrl, potem litera.",
       "Format: RRRR-MM-DD GG:MM. Zegar ustawia się też sam po połączeniu z aplikacją w telefonie i z GPS po złapaniu pozycji.",
       "Hasło administratora albo gościa. Po udanym logowaniu zostanie zapamiętane w urządzeniu. Puste = gość.",
@@ -2622,8 +2823,9 @@ void UITask::fillThread() {
       "Szerokość w stopniach, np. 49.82250 (ujemna = południowa).", "Długość w stopniach, np. 19.04690 (ujemna = zachodnia).",
       "Nowy PIN do parowania. Zacznie działać po restarcie. W telefonie trzeba będzie sparować urządzenie od nowa.",
       "Nazwa sieci WiFi, przez którą urządzenie pobierze mapę: domowa albo hotspot z telefonu. Wielkość liter ma znaczenie.",
-      "Hasło do tej sieci WiFi. Zostanie zapisane w urządzeniu.",
-      "Adres w internecie, spod którego urządzenie pobiera pliki mapy (musi tam być plik lista.txt)." };
+      "Hasło do tej sieci WiFi. Zapisane hasło jest zaszyfrowane i nie jest tu pokazywane; wpisz nowe albo zostaw puste pole.",
+      "Adres w internecie, spod którego urządzenie pobiera pliki mapy (musi tam być plik lista.txt).",
+      "Nowy PIN do odblokowania ekranu. Zapamiętaj go: bez PIN-u pomoże tylko wgranie firmware kablem z kasowaniem pamięci." };
     strcpy(v.title, T[_input_mode]); strcpy(v.title_right, R[_input_mode]); strcpy(v.line1, N[_input_mode]);
     scopy(v.input, sizeof(v.input), _input);
     v.input_chars = _input_chars;
@@ -2662,7 +2864,9 @@ void UITask::fillThread() {
   }
   if (_scroll_tgt > maxs) _scroll_tgt = maxs;
   if (_scroll_px > maxs) _scroll_px = maxs;
-  snprintf(v.title_right, sizeof(v.title_right), "%s · %d", _cur_chan ? "kanał" : "prywatna", _th_n);
+  if (_cur_chan) snprintf(v.title_right, sizeof(v.title_right), "kanał · %d", _th_n);
+  else if (keySet(_cur_key)) snprintf(v.title_right, sizeof(v.title_right), "prywatna %02X%02X · %d", _cur_key[0], _cur_key[1], _th_n);   // identyfikator kontaktu
+  else snprintf(v.title_right, sizeof(v.title_right), "prywatna · %d", _th_n);
 
   // które dymki są widoczne: od pierwszego, który sięga w okno [_scroll_px, _scroll_px + viewH)
   int first = 0, pos = 0;
@@ -2734,6 +2938,17 @@ void UITask::fillLock() {
   snprintf(v.line1, sizeof(v.line1), "%s · %s, %d.%02d", _prefs->node_name, DNI[lt.tm_wday % 7], lt.tm_mday, lt.tm_mon + 1);
   if (_popup_until && _pin_popup) snprintf(v.line2, sizeof(v.line2), "Bluetooth: %s", _pop2);
   else if (v.unread > 0) snprintf(v.line2, sizeof(v.line2), v.unread == 1 ? "1 nowa wiadomość" : "nowe wiadomości: %d", v.unread);
+  if (_cfg.lock == 2 && _pin_have) {
+    unsigned long now = millis();
+    if (_popup_until && _pin_popup) strcpy(v.line2, "Bluetooth: odblokuj, żeby sparować");   // PIN parowania nie na zablokowanym ekranie
+    if (_pin_wait && (long)(now - _pin_wait) < 0) { snprintf(v.footer, sizeof(v.footer), "Zły PIN (%d). Poczekaj %lu s", _pin_fails, (unsigned long)((_pin_wait - now) / 1000 + 1)); }
+    else if (_pin_fails) snprintf(v.footer, sizeof(v.footer), "Zły PIN (%d). Wpisz PIN i naciśnij Enter", _pin_fails);
+    else strcpy(v.footer, "Wpisz PIN i naciśnij Enter");
+    int n = strlen(_pin_in); char* d = v.popup1;
+    for (int i = 0; i < n; i++) { *d++ = '*'; *d++ = ' '; }
+    *d = 0;
+    return;
+  }
   strcpy(v.footer, "Odblokowanie: Wstecz, potem Enter");
   if (_ul_back && millis() - _ul_last < 4000) strcpy(v.popup1, "teraz naciśnij Enter");
 }
@@ -2771,7 +2986,6 @@ void UITask::loop() {
     if (_map.mount()) _map.scan();
     _dirty = true;
   }
-  if (m9uploadActive()) { m9uploadLoop(); if (m9uploadChanged()) _map.scan(); }
   m9dlLoop();
   if (m9dlChanged()) _map.scan();
   if (_sd_test_at && (long)(now - _sd_test_at) >= 0) {
@@ -2805,7 +3019,7 @@ void UITask::loop() {
     kvText(m9dlDiag());
     if (scr() != S_KV) push(S_KV);
   }
-  if (m9uploadActive() || m9dlActive() || m9otaActive()) { uint32_t ms = SLEEP_STEPS[_cfg.sleep_idx]; if (ms) _sleep_at = now + ms; }     // przy przesyłaniu mapy ekran nie gaśnie
+  if (m9dlActive() || m9otaActive()) { uint32_t ms = SLEEP_STEPS[_cfg.sleep_idx]; if (ms) _sleep_at = now + ms; }     // przy przesyłaniu mapy ekran nie gaśnie
 
   adminLoop();
   if (_disc_until && (long)(now - _disc_until) >= 0) { _disc_until = 0; _dirty = true; }
@@ -2814,7 +3028,7 @@ void UITask::loop() {
 
   if (_awake && _sleep_at && (long)(now - _sleep_at) >= 0) {    // wygaszenie: gaśnie ekran i klawiatura, radio i Bluetooth działają
     _awake = false;
-    if (_cfg.lock) { _locked = true; _ul_first = 0; _ul_back = false; }
+    if (_cfg.lock) { _locked = true; _ul_first = 0; _ul_back = false; _pin_in[0] = 0; }
     if (_msgs_dirty) _save_at = now;                 // ekran zgasł: dobry moment na zapis
     m9lcdBacklight(0);
     if (_display) _display->turnOff();
@@ -2941,7 +3155,7 @@ void UITask::sampleLoop(unsigned long now) {
 void UITask::powerLoop(unsigned long now) {
   // przyciemnienie ekranu po bezczynności (przed wygaszeniem); na ekranie Widmo nie przyciemniamy
   uint32_t dm = DIM_STEPS[_cfg.dim_idx];
-  bool busyNet = m9uploadActive() || m9dlActive() || m9otaActive();
+  bool busyNet = m9dlActive() || m9otaActive();
   if (_awake && !_dimmed && dm && now - _last_key >= dm && !busyNet && scr() != S_SPEC && !_locked) {
     _dimmed = true;
     int b = brightPercent();

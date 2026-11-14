@@ -37,17 +37,18 @@ struct UiMsg {
   uint8_t path[24];
   int8_t snr_x4; int16_t rssi;             // odbiór
   uint8_t rep_n, rep_hs; uint8_t rep_id[6][3]; int8_t rep_snr[6];   // kto powtórzył naszą wiadomość
+  uint8_t key[6];         // rozmowa prywatna: początek klucza kontaktu (same zera = nieznany, starsze wiadomości)
 };
 
 class UITask : public AbstractUITask {
   enum Scr { S_START = 0, S_MSGS = 1, S_CONTACTS = 2, S_RPTS = 3, S_SETTINGS = 4,
              S_THREAD, S_KV, S_BOOT, S_MENU, S_HEARD, S_QUICK, S_DISC, S_LOGIN, S_ADMIN, S_ADMIN_ACT, S_ADMIN_CLI,
              S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS, S_PICK, S_MAP, S_MAP_NET, S_TIME, S_OTA, S_SPEC, S_LOG, S_CHINFO, S_QR };
-  enum InputMode { IN_MSG = 0, IN_CHANNEL, IN_FREQ, IN_NAME, IN_TIME, IN_PASS, IN_CLI, IN_LAT, IN_LON, IN_PIN, IN_WIFI_SSID, IN_WIFI_PASS, IN_MAP_URL };
+  enum InputMode { IN_MSG = 0, IN_CHANNEL, IN_FREQ, IN_NAME, IN_TIME, IN_PASS, IN_CLI, IN_LAT, IN_LON, IN_PIN, IN_WIFI_SSID, IN_WIFI_PASS, IN_MAP_URL, IN_LOCKPIN };
   enum Act { A_WRITE, A_FAV, A_DETAIL, A_MANAGE, A_DELETE, A_REPLY, A_RESEND, A_COPY, A_DELMSG, A_OPEN, A_MUTE, A_MARKREAD, A_DELCHAN, A_DELTHREAD, A_REPLY_ACK, A_SHOWMAP, A_ROUTE, A_ADDCHAN, A_CHINFO, A_SPEC, A_LOG, A_PKTMAP };
   enum Pick { P_PRESET, P_BW, P_SF, P_CR, P_TX, P_HASH, P_AIR, P_BT, P_GPS, P_ADVLOC, P_TEL0, P_TEL1, P_TEL2, P_AUTOADV, P_AA_MODE, P_AA_T0, P_AA_T1, P_AA_T2, P_AA_T3,
               P_AA_FULL, P_AA_HOPS, P_SHOWPATH, P_MULTIACK, P_SOUND, P_SLEEP, P_KBLIGHT, P_WAKE, P_LOCK, P_RPTSORT, P_BRIGHT, P_MSGSND, P_ADVSND, P_MAPRANGE, P_GPSMODE, P_DIM, P_CPU, P_BTAUTO };
-  enum Confirm { C_NONE = 0, C_DEL_CHANNEL, C_DEL_CONTACT, C_REBOOT, C_FACTORY, C_RPT_REBOOT, C_RPT_SF6, C_CLEAR_MSGS, C_CLEAR_PW, C_CLEAR_BONDS, C_DEL_THREAD, C_WIFI_DL, C_WIFI_AP, C_BT_RESTART, C_WIFI_OTA, C_OTA_INSTALL };
+  enum Confirm { C_NONE = 0, C_DEL_CHANNEL, C_DEL_CONTACT, C_REBOOT, C_FACTORY, C_RPT_REBOOT, C_RPT_SF6, C_CLEAR_MSGS, C_CLEAR_PW, C_CLEAR_BONDS, C_DEL_THREAD, C_WIFI_DL, C_WIFI_FORGET, C_BT_RESTART, C_WIFI_OTA, C_OTA_INSTALL };
   struct Thread { char name[32]; uint8_t chan; uint8_t unread; uint32_t last; int16_t last_msg; };
   struct Nav { uint8_t scr; int16_t sel, top; };
   struct Cfg { uint32_t magic; uint8_t show_path, sleep_idx, kb_light, adv_idx, ct_filter, rpt_sort, no_wake, lock, bright, no_msg_snd, adv_snd, map_range, bt_off, gps_mode, dim_idx, cpu_full, bt_auto; };   // gps_mode 0 = stale; dim_idx 0 = po 10 s; cpu_full 0 = 80 MHz po wygaszeniu; bt_auto 0 = nigdy   // map_range: 0 = cała mapa, 1 = bez zoomu 15, 2 = do zoomu 13;   // bright: 0 = nie ustawiono (pełna jasność), 1..5 = poziom
@@ -72,7 +73,8 @@ class UITask : public AbstractUITask {
   Pw _pw[UI_PW_MAX]; int _pw_n;
 
   // rozmowa i pole pisania
-  char _cur[32]; bool _cur_chan; int _scroll_unread;   // pierwsza nieprzeczytana (indeks w _msgs) do pokazania po wejściu, -1 = dół
+  char _cur[32]; bool _cur_chan; uint8_t _cur_key[6];   // _cur_key: klucz kontaktu otwartej rozmowy prywatnej
+  int _scroll_unread;   // pierwsza nieprzeczytana (indeks w _msgs) do pokazania po wejściu, -1 = dół
   int _scroll_px, _scroll_tgt;           // przewinięcie rozmowy od dołu w pikselach: bieżące i docelowe (animacja)
   unsigned long _scroll_next;            // następna klatka animacji
   int _th_total, _th_n, _th_sel;         // wysokość całej rozmowy, liczba wiadomości, wybrana (indeks w _msgs)
@@ -117,6 +119,8 @@ class UITask : public AbstractUITask {
   // dolny pasek, blokada, sąsiedzi repeatera
   bool _bar; int8_t _bar_sel;
   bool _locked; unsigned long _ul_first, _ul_last; bool _ul_back;
+  // blokada z PIN-em: wpisywane cyfry, skrót PIN-u z solą, złe próby i przerwa po nich
+  char _pin_in[10]; bool _pin_have; uint8_t _pin_salt[8], _pin_hash[32], _pin_fails; unsigned long _pin_wait;
   uint16_t _nb_total, _nb_got; bool _kv_more;
   uint32_t _ble_conn_seen, _ble_auth_seen; unsigned long _ble_pin_at; bool _pin_popup;
   char _search[16];
@@ -149,7 +153,9 @@ class UITask : public AbstractUITask {
   void buildContacts();
   void buildRpts();
   void sortList(bool by_dist);
-  void openThread(const char* name, bool chan);
+  void openThread(const char* name, bool chan, const uint8_t* key = NULL);
+  void dmThreadName(const uint8_t* key, const char* name, char* out, size_t n);
+  bool ctByPrefix(const uint8_t* key6, ContactInfo& c);
   void openInput(uint8_t mode, const char* initial);
   void markRead(const char* name, bool chan);
   int  unreadTotal();
@@ -186,6 +192,7 @@ class UITask : public AbstractUITask {
   void savePw();
   void saveMsgs();
   int  readMsgFile(const char* path);
+  bool _msgs_old_format;
   int _msg_loaded, _msg_src, _msg_saved; uint32_t _msg_saved_at;   // diagnostyka zapisu wiadomości
   bool saveStep();
 
@@ -212,6 +219,7 @@ class UITask : public AbstractUITask {
   void drawMap();
   void keyMap(uint8_t k);
   void saveWifi();
+  void savePin(); void pinPenalty(unsigned long now);
   void openTime();
   bool buildRoute(int idx);
   void fitRoute();

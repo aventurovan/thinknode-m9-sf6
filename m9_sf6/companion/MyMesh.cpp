@@ -507,6 +507,7 @@ void MyMesh::queueMessage(const ContactInfo &from, uint8_t txt_type, mesh::Packe
   if (should_display && _ui) {
     uiNotePath(pkt);
     ui_rx_chan = false;                               // wiadomość prywatna (ekran nie zgaduje tego po nazwie)
+    memcpy(ui_rx_key, from.id.pub_key, sizeof(ui_rx_key));
     _ui->newMsg(path_len, from.name, text, offline_queue_len);
     if (!_serial->isConnected()) {
       _ui->notify(UIEventType::contactMessage);
@@ -2418,6 +2419,20 @@ bool MyMesh::uiAdminCli(const char* cmd) {
   ui_admin.est_timeout = est;
   return true;
 }
+// wiadomość prywatna do kontaktu o danym początku klucza (6 bajtów)
+uint16_t MyMesh::uiSendDirectKey(const uint8_t* key6, const char* text) {
+  ContactInfo* p = lookupContactByPubKey(key6, 6);
+  if (!p) return 0;
+  uint32_t ack = 0, timeout;
+  if (sendMessage(*p, getRTCClock()->getCurrentTimeUnique(), 0, text, ack, timeout) == MSG_SEND_FAILED) return 0;
+  UiSent& u = ui_sent[ui_sent_next];
+  ui_sent_next = (ui_sent_next + 1) % UI_SENT_MAX;
+  memset(&u, 0, sizeof(u));
+  u.kind = 2; u.ack = ack;
+  if (++ui_sent_seq == 0) ui_sent_seq = 1;
+  u.id = ui_sent_seq;
+  return u.id;
+}
 uint16_t MyMesh::uiSendDirectText(const char* contact_name, const char* text) {
   ContactInfo c;
   for (int i = MAX_ANON_CONTACTS; i < getTotalContactSlots(); i++) {   // pierwsze 8 miejsc to „anon”
@@ -2614,4 +2629,32 @@ bool MyMesh::uiNameByHash(uint8_t h, char* dest, int n) {
   int total = getTotalContactSlots();
   for (int i = MAX_ANON_CONTACTS; i < total; i++) if (getContactByIdx(i, c) && c.type != ADV_TYPE_NONE && c.id.pub_key[0] == h) { snprintf(dest, n, "%s", c.name); return true; }
   return false;
+}
+
+// Hasła zapisywane przez ekran (WiFi, repeatery) są szyfrowane kluczem wyprowadzonym z tożsamości urządzenia:
+// podpis stałego tekstu kluczem prywatnym, skrócony SHA-256. Plik skopiowany z pamięci bez tożsamości jest nieczytelny.
+static void uiSealKey(const mesh::LocalIdentity& id, uint8_t* key32) {
+  static const char M[] = "M9 MeshSpeed: sekrety ekranu v1";
+  uint8_t sig[SIGNATURE_SIZE];
+  id.sign(sig, (const uint8_t*)M, sizeof(M) - 1);
+  mesh::Utils::sha256(key32, 32, sig, SIGNATURE_SIZE);
+  memset(sig, 0, sizeof(sig));
+}
+int MyMesh::uiSeal(uint8_t* dest, const uint8_t* src, int len) {      // dest: 2 B kontroli + len zaokrąglone w górę do 16 B
+  uint8_t key[32]; uiSealKey(self_id, key);
+  int n = mesh::Utils::encryptThenMAC(key, dest, src, len);
+  memset(key, 0, sizeof(key));
+  return n;
+}
+int MyMesh::uiUnseal(uint8_t* dest, const uint8_t* src, int len) {    // 0 = zły klucz albo uszkodzone dane
+  uint8_t key[32]; uiSealKey(self_id, key);
+  int n = mesh::Utils::MACThenDecrypt(key, dest, src, len);
+  memset(key, 0, sizeof(key));
+  return n;
+}
+
+// skrót PIN-u blokady ekranu: SHA-256 z soli i PIN-u, powtórzony 2000 razy (utrudnia zgadywanie z kopii pamięci)
+void MyMesh::uiPinHash(uint8_t* out32, const uint8_t* salt8, const char* pin) {
+  mesh::Utils::sha256(out32, 32, salt8, 8, (const uint8_t*)pin, (int)strlen(pin));
+  for (int i = 0; i < 2000; i++) { uint8_t t[32]; memcpy(t, out32, 32); mesh::Utils::sha256(out32, 32, t, 32, salt8, 8); }
 }

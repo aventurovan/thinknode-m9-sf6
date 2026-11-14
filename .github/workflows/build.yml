@@ -15,17 +15,22 @@ env:
 permissions:
   contents: write   # publikacja plików .bin w wydaniu „Najnowszy build”
 
+# jeden build naraz: dwa równoległe nadpisywałyby sobie pliki w wydaniu „Najnowszy build”
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Pobierz nasz kod
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4
         with:
           path: m9
 
       - name: Pobierz MeshCore
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4
         with:
           repository: meshcore-dev/MeshCore
           ref: ${{ env.MESHCORE_REF }}
@@ -44,12 +49,12 @@ jobs:
           python3 m9/tools/patch_main.py MeshCore/examples/m9_sf6/companion/main.cpp
           cat m9/platformio-m9.ini >> MeshCore/variants/thinknode_m9/platformio.ini
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065   # v5
         with:
           python-version: '3.11'
 
       - name: Cache PlatformIO
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830   # v4
         with:
           path: ~/.platformio
           key: pio-esp32-${{ runner.os }}-${{ env.MESHCORE_REF }}
@@ -74,18 +79,19 @@ jobs:
           cd ../../mapa-testowa && zip -q -r ../mapa-testowa.zip mapa
 
       - name: Zbierz pliki
+        env:
+          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}    # klucz prywatny do podpisu aktualizacji (tylko w sekretach repozytorium)
         run: |
           VER=$(grep -oP 'M9_FW_VERSION\s+"\K[^"]+' m9/m9_sf6/Version.h)
           mkdir -p out
           cp MeshCore/.pio/build/$PIO_ENV/firmware-merged.bin out/MC-SF6-ThinkNode-M9-$VER-pelny.bin
           cp MeshCore/.pio/build/$PIO_ENV/firmware.bin out/MC-SF6-ThinkNode-M9-$VER-aktualizacja.bin
           cp mapa-testowa.zip out/mapa-testowa.zip
-          # dla aktualizacji przez WiFi z urządzenia: wersja, plik, rozmiar, suma MD5
-          F=MC-SF6-ThinkNode-M9-$VER-aktualizacja.bin
-          echo "$VER $F $(stat -c %s out/$F) $(md5sum out/$F | cut -d' ' -f1)" > out/wersja.txt
-          cat out/wersja.txt
+          # dla aktualizacji przez WiFi z urządzenia: wersja, plik, rozmiar, MD5, SHA-256 i podpis Ed25519
+          pip install -q cryptography
+          python3 m9/tools/podpisz.py "$VER" out/MC-SF6-ThinkNode-M9-$VER-aktualizacja.bin m9/m9_sf6/ui/OtaKey.h out/wersja.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4
         with:
           name: MC-SF6-ThinkNode-M9
           path: out/
@@ -98,7 +104,7 @@ jobs:
         run: |
           cd m9
           VER=$(grep -oP 'M9_FW_VERSION\s+"\K[^"]+' m9_sf6/Version.h)
-          NOTES="Automatyczny build z gałęzi main (wersja $VER, commit ${GITHUB_SHA::7}). Plik „pelny” wgraj od adresu 0x0 przy pierwszym wgraniu; plik „aktualizacja” służy do późniejszych aktualizacji. mapa-testowa.zip rozpakuj na komputerze i wgraj pliki .mcm przez WiFi (strona 4 na urządzeniu)."
+          NOTES="Automatyczny build z gałęzi main (wersja $VER, commit ${GITHUB_SHA::7}). Plik „pelny” wgraj od adresu 0x0 przy pierwszym wgraniu; plik „aktualizacja” służy do późniejszych aktualizacji. Aktualizacja przez WiFi z urządzenia korzysta z podpisanego pliku wersja.txt."
           if ! gh release view latest-build >/dev/null 2>&1; then
             gh release create latest-build --prerelease --title "Najnowszy build ($VER)" --notes "$NOTES" --target "$GITHUB_SHA"
           else

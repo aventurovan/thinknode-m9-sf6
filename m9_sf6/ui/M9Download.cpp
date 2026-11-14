@@ -10,6 +10,9 @@
 #include <esp_heap_caps.h>
 #include <mbedtls/platform.h>
 #include <Update.h>
+#include <mbedtls/sha256.h>
+#include <Identity.h>
+#include "OtaKey.h"
 
 // Szyfrowanie połączenia (TLS) potrzebuje ok. 40 kB pamięci naraz, a w pamięci wewnętrznej zostaje ok. 30 kB.
 // Dlatego jego bufory kierujemy do dużej pamięci dodatkowej (PSRAM); gdyby jej zabrakło — do wewnętrznej.
@@ -56,6 +59,24 @@ static bool ota_mode = false;
 static volatile bool req_ota = false;
 static volatile uint32_t ota_got = 0;
 static char ota_cur[16] = "", ota_ver[16] = "", ota_file[72] = "", ota_md5[40] = "", ota_err[64] = "";
+static uint8_t ota_sha[32];                            // oczekiwany skrót SHA-256 pliku (z podpisanego wersja.txt)
+
+static int hexVal(char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1; }
+static bool hexBytes(const char* hex, uint8_t* out, int n) {
+  if ((int)strlen(hex) != n * 2) return false;
+  for (int i = 0; i < n; i++) { int a = hexVal(hex[i * 2]), b = hexVal(hex[i * 2 + 1]); if (a < 0 || b < 0) return false; out[i] = (uint8_t)(a << 4 | b); }
+  return true;
+}
+// podpis Ed25519 wiersza „wersja plik rozmiar md5 sha256” kluczem z OtaKey.h; 0 = dobry, 1 = brak klucza w firmware, 2 = zły podpis
+static int checkSignature(const char* msg, const char* sig_hex) {
+  uint8_t pub[32], sig[64];
+  if (!hexBytes(M9_OTA_PUBKEY_HEX, pub, 32)) return 1;
+  bool zero = true; for (int i = 0; i < 32; i++) if (pub[i]) zero = false;
+  if (zero) return 1;
+  if (!hexBytes(sig_hex, sig, 64)) return 2;
+  mesh::Identity id(pub);
+  return id.verify(sig, (const uint8_t*)msg, (int)strlen(msg)) ? 0 : 2;
+}
 static uint32_t ota_size = 0;
 static char list_body[4096];
 // diagnostyka ostatniej nieudanej próby
@@ -158,6 +179,7 @@ static void netTask(void* arg) {
       if (!Update.begin(ota_size, U_FLASH)) snprintf(ota_err, sizeof(ota_err), "nie mogę zacząć zapisu (%s)", Update.errorString());
       else {
         Update.setMD5(ota_md5);
+        mbedtls_sha256_context sha; mbedtls_sha256_init(&sha); mbedtls_sha256_starts(&sha, 0);
         WiFiClient* s = http->getStreamPtr();
         static uint8_t ob[4096];
         unsigned long t_last = millis();
@@ -171,11 +193,16 @@ static void netTask(void* arg) {
           }
           int n = s->read(ob, av > (int)sizeof(ob) ? sizeof(ob) : av);
           if (n <= 0) { vTaskDelay(2 / portTICK_PERIOD_MS); continue; }
+          if (ota_got + (uint32_t)n > ota_size) n = (int)(ota_size - ota_got);     // nic ponad podpisany rozmiar
+          mbedtls_sha256_update(&sha, ob, n);
           if (Update.write(ob, n) != (size_t)n) { snprintf(ota_err, sizeof(ota_err), "błąd zapisu (%s)", Update.errorString()); break; }
           ota_got = ota_got + n; t_last = millis();
         }
+        uint8_t got[32]; mbedtls_sha256_finish(&sha, got); mbedtls_sha256_free(&sha);
         if (!ota_err[0] && ota_got >= ota_size) {
-          if (Update.end(true)) good = true;           // sprawdza sumę MD5 i ustawia nową wersję do uruchomienia
+          // plik musi mieć dokładnie ten skrót SHA-256, który podpisano w wersja.txt; dopiero wtedy nowa wersja jest uruchamiana
+          if (memcmp(got, ota_sha, 32) != 0) { snprintf(ota_err, sizeof(ota_err), "plik nie zgadza się z podpisem"); Update.abort(); }
+          else if (Update.end(true)) good = true;      // sprawdza jeszcze sumę MD5 i ustawia nową wersję do uruchomienia
           else snprintf(ota_err, sizeof(ota_err), "plik uszkodzony (%s)", Update.errorString());
         } else Update.abort();
       }
@@ -286,6 +313,7 @@ void m9otaCheck(const char* ssid, const char* pass, const char* base_url, const 
 
 void m9otaInstall() {
   if (st != ST_OTA_READY) return;
+  if (verNum(ota_ver) < verNum(ota_cur)) { fail("na serwerze jest starsza wersja — nie cofam"); return; }   // podpisanej starej wersji też nie wgrywamy
   char url[220]; snprintf(url, sizeof(url), "%s%s", base, ota_file);
   ota_got = 0;
   req_ota = true;
@@ -415,12 +443,18 @@ void m9dlLoop() {
       if (net != N_DONE) break;
       net = N_IDLE;
       {
-        char fn[72] = "", md[40] = "", ver[16] = ""; unsigned long sz = 0;
-        // wymagane wszystkie cztery pola; bez sumy MD5 (32 znaki szesnastkowe) nie instalujemy
-        bool okf = sscanf(list_body, "%15s %71s %lu %39s", ver, fn, &sz, md) == 4 && sz >= 100000 && sz < 16UL * 1024 * 1024 && strlen(md) == 32;
+        char fn[72] = "", md[40] = "", ver[16] = "", sh[72] = "", sg[136] = ""; unsigned long sz = 0;
+        // wiersz: wersja, plik, rozmiar, MD5, SHA-256 i podpis Ed25519 pięciu pierwszych pól; bez dobrego podpisu nie instalujemy
+        bool okf = sscanf(list_body, "%15s %71s %lu %39s %71s %135s", ver, fn, &sz, md, sh, sg) == 6 && sz >= 100000 && sz < 16UL * 1024 * 1024 && strlen(md) == 32 && hexBytes(sh, ota_sha, 32);
         for (const char* c = md; okf && *c; c++) if (!isxdigit((unsigned char)*c)) okf = false;
         for (const char* c = fn; okf && *c; c++) if (!(isalnum((unsigned char)*c) || *c == '.' || *c == '_' || *c == '-')) okf = false;   // sama nazwa pliku, bez ścieżki
-        if (!okf) { fail("zły plik wersja.txt"); break; }
+        if (!okf) { fail("zły plik wersja.txt (brak podpisu?)"); break; }
+        {
+          char msg[240]; snprintf(msg, sizeof(msg), "%s %s %lu %s %s", ver, fn, sz, md, sh);
+          int sc = checkSignature(msg, sg);
+          if (sc == 1) { fail("aktualizacje przez WiFi wyłączone: firmware bez klucza podpisu"); break; }
+          if (sc != 0) { fail("zły podpis aktualizacji — nie instaluję"); break; }
+        }
         snprintf(ota_ver, sizeof(ota_ver), "%s", ver); snprintf(ota_file, sizeof(ota_file), "%s", fn); snprintf(ota_md5, sizeof(ota_md5), "%s", md); ota_size = sz;
       }
       st = ST_OTA_READY;
