@@ -348,7 +348,8 @@ static void home6(const char* file, const Tile6* T, int selIdx, const UiView& st
       g.text(x + 23, y + 45, w, F_BOLD, wifiDbm ? C_TXT : C_DIM, tw - 28);
       continue;
     }
-    int vw = g.text(x + 7, y + 23, t.val, F_BIG, t.vc, tw - 14);
+    bool fits = Gfx::textWidth(t.val, F_BIG) <= tw - 14;
+    int vw = g.text(x + 7, y + (fits ? 23 : 26), t.val, fits ? F_BIG : F_BOLD, t.vc, tw - 14);
     if (t.kind == K_SPARK) sparkline(x + vw + 13, y + 26, tw - vw - 20, 15);
     if (t.kind == K_BATT) {
       int bx = x + vw + 13, bw = tw - vw - 21;
@@ -387,7 +388,33 @@ static void screensHome6() {
   home6("10-home6-B.ppm", B, 4, st, true, true, -62, "Dom_5G");
 }
 
+static void screensHomeFinal() {
+  UiView st; memset(&st, 0, sizeof(st));
+  strcpy(st.time, "12:14"); st.batt = 78; st.bt = 2; st.gps_on = true; st.sats = 7; st.unread = 2; st.tab = 0; st.wifi = 4;
+  // 1. rząd: Wiadomości, Kontakty, Radio (częstotliwość, preset); 2. rząd: Łączność, Widmo, Bateria
+  const Tile6 F[6] = {
+    { IC_MAIL, "Wiadomości", "2 nowe", "#bot · BBot", C_ACC, K_PLAIN, 0 },
+    { IC_USER, "Kontakty", "38", "usłyszane: 12", C_TXT, K_PLAIN, 0 },
+    { IC_SIGNAL, "Radio", "SF6", "869,618 MHz", C_TXT, K_PLAIN, 0 },
+    { IC_BT, "Łączność", "", "", C_TXT, K_LINK, 0 },
+    { IC_SPEC, "Widmo", "-114", "zajęte 7 %", C_TXT, K_SPARK, 0 },
+    { IC_BATT, "Bateria", "78 %", "zostało ok. 14 h", C_TXT, K_BATT, 78 },
+  };
+  home6("11-home-final.ppm", F, 0, st, true, true, -62, "Dom_5G");
+  st.wifi = 0; st.bt = 0; st.unread = 0; st.charging = true; st.batt = 64;
+  const Tile6 G[6] = {
+    { IC_MAIL, "Wiadomości", "brak nowych", "rozmów: 6", C_TXT, K_PLAIN, 0 },
+    { IC_USER, "Kontakty", "38", "usłyszane: 12", C_TXT, K_PLAIN, 0 },
+    { IC_SIGNAL, "Radio", "SF8", "869,618 MHz", C_TXT, K_PLAIN, 0 },
+    { IC_BT, "Łączność", "", "", C_TXT, K_LINK, 0 },
+    { IC_SPEC, "Widmo", "-109", "zajęte 12 %", C_TXT, K_SPARK, 0 },
+    { IC_BATT, "Bateria", "64 %", "pełna za 1 h", C_ACC, K_BATT, 64 },
+  };
+  home6("12-home-final-inne.ppm", G, 5, st, false, false, 0, "");
+}
+
 int main() {
+  screensHomeFinal();
   screensHome6();
   screensHome();
   screenSpectrumBand();
