@@ -6,7 +6,7 @@ i oglądasz mapę bez telefonu. Przez Bluetooth łączy się z aplikacjami **Mes
 
 Domyślny preset radia: **SF6 — 869,618 MHz · BW 62,5 kHz · SF6 · CR 4/8**. Do wyboru jest też **EU/UK Narrow (SF8)**.
 
-Aktualna wersja: **0.20.1** (numer jest też na ekranie startowym i w Ustawieniach).
+Aktualna wersja: **0.20.2** (numer jest też na ekranie startowym i w Ustawieniach).
 
 ---
 
@@ -84,7 +84,7 @@ Menu (mała wiadomość pod Home) na ekranie Start otwiera **Widmo** i **Log pak
 
 - **Lista:** kanały i rozmowy prywatne, nieprzeczytane są na górze. Menu na liście: otwórz, info o kanale, wycisz, oznacz jako przeczytane, usuń, **dodaj kanał** (z hasztagiem, np. `#beskidy`).
 - **Rozmowa:**
-  - dymki, płynne przewijanie ▲▼ z suwakiem; po wejściu widok staje na pierwszej nieprzeczytanej;
+  - dymki, płynne przewijanie ▲▼ z suwakiem; po wejściu widok staje na pierwszej nieprzeczytanej, a kreska „nowe wiadomości” oddziela ją od starszych;
   - pod wysłaną wiadomością na kanale licznik powtórzeń i identyfikator pierwszego repeatera, przy prywatnej „Doręczono”;
   - pod odebraną liczba hopów i trasa z identyfikatorami repeaterów (4 znaki).
 - **Opcje wiadomości** (Menu albo ►): Odpowiedz @, Odpowiedz ack (z liczbą hopów), Szczegóły (trasa, SNR, RSSI, bajty), Trasa na mapie, Wyślij ponownie, Kopiuj, Usuń.

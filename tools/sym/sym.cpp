@@ -203,6 +203,8 @@ int main(int argc, char** argv) {
     keys({ M9K_HOME, M9K_MSG }); save("p-dwie-rozmowy");
     keys({ M9K_ENTER }); save("p-rozmowa-z-id");
   }
+  for (int i = 0; i < 3; i++) rx("Public", i == 1 ? "Ania: druga nowa, trochę dłuższa wiadomość na kanale" : "Ania: nowa po przerwie", 2);
+  keys({ M9K_HOME, M9K_MSG }); for (int i = 0; i < 8; i++) keys({ M9K_UP }); keys({ M9K_ENTER }); save("s-nowe-wiadomosci"); keys({ M9K_UP }); save("s-nowe-przewiniete");
   keys({ M9K_HOME, M9K_LEFT, M9K_UP, M9K_UP, M9K_UP, M9K_LEFT, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("p-ekran-i-dzwiek");
   keys({ M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("p-blokada-wybor");
   keys({ M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("p-pin-nowy");

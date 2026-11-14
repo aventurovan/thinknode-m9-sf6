@@ -77,6 +77,7 @@ class UITask : public AbstractUITask {
   int _scroll_unread;   // pierwsza nieprzeczytana (indeks w _msgs) do pokazania po wejściu, -1 = dół
   int _scroll_px, _scroll_tgt;           // przewinięcie rozmowy od dołu w pikselach: bieżące i docelowe (animacja)
   unsigned long _scroll_next;            // następna klatka animacji
+  int _th_new;                           // pierwsza nowa wiadomość po wejściu w rozmowę (indeks w _msgs): nad nią kreska „nowe wiadomości”; -1 = brak
   int _th_total, _th_n, _th_sel;         // wysokość całej rozmowy, liczba wiadomości, wybrana (indeks w _msgs)
   int16_t* _th_idx; uint16_t* _th_h;     // wiadomości rozmowy od najnowszej i wysokości ich dymków
   char _input[UI_INPUT_MAX * 2 + 4]; int _input_chars; bool _polish; uint8_t _input_mode;

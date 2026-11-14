@@ -148,7 +148,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   memset(&_cfg, 0, sizeof(_cfg));
   _cfg.magic = CFG_MAGIC; _cfg.show_path = 1; _cfg.sleep_idx = 1; _cfg.kb_light = 1;
   _pw_n = 0;
-  _cur[0] = 0; _cur_chan = false; memset(_cur_key, 0, sizeof(_cur_key)); _msgs_old_format = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1;
+  _cur[0] = 0; _cur_chan = false; memset(_cur_key, 0, sizeof(_cur_key)); _msgs_old_format = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_new = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1;
   _nh_n = 0; _nh_next = _nh_slot_end = 0; _nh_min = 1; _bh_n = _bh_seg = 0; _bh_next = 30000; _bh_chg = false;
   _sp_tab = _sp_range = 0; _sp_pause = _sp_have = false; _sp_next = 0; _sp_ms = 0; _sp_wf_n = 0;
   memset(_sp_cur, -128, sizeof(_sp_cur)); memset(_sp_peak, -128, sizeof(_sp_peak)); memset(_sp_wf, -128, sizeof(_sp_wf));
@@ -525,6 +525,7 @@ UiMsg* UITask::addMsg(const char* thread, const char* who, const char* text, boo
     memmove(&_msgs[0], &_msgs[1], sizeof(UiMsg) * (UI_MSG_MAX - 1));
     _msg_n--;
     if (_msg_idx >= 0) _msg_idx--;
+    if (_th_new >= 0) _th_new--;
   }
   UiMsg& m = _msgs[_msg_n++];
   memset(&m, 0, sizeof(m));
@@ -684,8 +685,13 @@ void UITask::openThread(const char* name, bool chan, const uint8_t* key) {
     }
   }
   scrollReset();
+  _th_new = -1;
   _scroll_unread = -1;                             // pierwsza nieprzeczytana: po wejściu rozmowa ustawi się na niej
-  for (int i = 0; i < _msg_n; i++) if (_msgs[i].unread && _msgs[i].chan == chan && strcmp(_msgs[i].thread, name) == 0) { _scroll_unread = i; break; }
+  for (int i = 0; i < _msg_n; i++) if (_msgs[i].unread && _msgs[i].chan == chan && strcmp(_msgs[i].thread, name) == 0) {
+    _scroll_unread = i;
+    for (int k = 0; k < i; k++) if (_msgs[k].chan == chan && strcmp(_msgs[k].thread, name) == 0) { _th_new = i; break; }   // kreska tylko, gdy wyżej są starsze wiadomości
+    break;
+  }
   _input[0] = 0; _input_chars = 0; _polish = false;
   _input_mode = IN_MSG;
   markRead(name, chan);
@@ -1096,7 +1102,7 @@ void UITask::doAct(uint8_t act) {
       case A_COPY: pop(); scopy(_input, sizeof(_input), m.text); _input_chars = 0; for (const char* p = _input; *p; p++) if (((uint8_t)*p & 0xC0) != 0x80) _input_chars++; break;
       case A_RESEND: { char t[164]; scopy(t, sizeof(t), m.text); pop(); sendText(t); break; }
       case A_DELMSG:
-        memmove(&_msgs[_msg_idx], &_msgs[_msg_idx + 1], sizeof(UiMsg) * (_msg_n - _msg_idx - 1)); _msg_n--;
+        memmove(&_msgs[_msg_idx], &_msgs[_msg_idx + 1], sizeof(UiMsg) * (_msg_n - _msg_idx - 1)); _th_new = -1; _msg_n--;
         _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS; scrollReset(); _msg_idx = -1;
         pop();
         break;
@@ -1123,7 +1129,7 @@ void UITask::doConfirm(uint8_t what) {
     case C_DEL_CHANNEL: {
       bool ok = the_mesh.uiRemoveChannel(_confirm_name);
       for (int i = 0; i < _msg_n; ) {                 // razem z kanałem znikają jego wiadomości
-        if (_msgs[i].chan && strcmp(_msgs[i].thread, _confirm_name) == 0) { memmove(&_msgs[i], &_msgs[i + 1], sizeof(UiMsg) * (_msg_n - i - 1)); _msg_n--; }
+        if (_msgs[i].chan && strcmp(_msgs[i].thread, _confirm_name) == 0) { memmove(&_msgs[i], &_msgs[i + 1], sizeof(UiMsg) * (_msg_n - i - 1)); _th_new = -1; _msg_n--; }
         else i++;
       }
       _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS;
@@ -1133,7 +1139,7 @@ void UITask::doConfirm(uint8_t what) {
     }
     case C_DEL_THREAD:
       for (int i = 0; i < _msg_n; ) {
-        if (!_msgs[i].chan && strcmp(_msgs[i].thread, _confirm_name) == 0) { memmove(&_msgs[i], &_msgs[i + 1], sizeof(UiMsg) * (_msg_n - i - 1)); _msg_n--; }
+        if (!_msgs[i].chan && strcmp(_msgs[i].thread, _confirm_name) == 0) { memmove(&_msgs[i], &_msgs[i + 1], sizeof(UiMsg) * (_msg_n - i - 1)); _th_new = -1; _msg_n--; }
         else i++;
       }
       _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS;
@@ -2783,6 +2789,7 @@ void UITask::makeBubble(const UiMsg& m, UiBubble& b) {
   scopy(b.who, sizeof(b.who), m.who[0] ? m.who : (m.out ? "" : _cur));
   scopy(b.text, sizeof(b.text), m.text);
   b.out = m.out;
+  b.sep = _th_new >= 0 && &m == &_msgs[_th_new];
   char t[8]; fmtClock(t, sizeof(t), m.ts, false);
   char h[24]; hopsTxt(h, sizeof(h), m.hops, m.direct);
   if (m.out && m.chan && m.repeats) snprintf(b.meta, sizeof(b.meta), "%s · Powtórzone ×%d", t, m.repeats);

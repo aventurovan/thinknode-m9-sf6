@@ -304,7 +304,7 @@ static void drawGrid(Gfx& g, const UiView& v) {
 }
 
 static const int TH_TOP = STATUS_H + HEADER_H + 2, TH_INPUT_H = 26, TH_BOTTOM = GFX_H - BOTTOM_H - TH_INPUT_H - 4;
-static const int TH_MAXW = 232, TH_LH = 15;
+static const int TH_MAXW = 232, TH_LH = 15, TH_SEP_H = 18;   // TH_SEP_H: wysokość kreski „nowe wiadomości”
 
 int uiThreadViewH() { return TH_BOTTOM - TH_TOP; }
 
@@ -327,7 +327,7 @@ static void bubLayout(const UiBubble& b, BubLayout& L) {
   L.bw = tw + 14; L.bh = L.headLine + L.n * TH_LH + L.metaLine + L.pathLine + 6;
 }
 
-int uiBubbleHeight(const UiBubble& b) { BubLayout L; bubLayout(b, L); return L.bh; }
+int uiBubbleHeight(const UiBubble& b) { BubLayout L; bubLayout(b, L); return L.bh + (b.sep ? TH_SEP_H : 0); }
 
 static void drawThread(Gfx& g, const UiView& v) {
   drawHeader(g, v, STATUS_H);
@@ -355,6 +355,16 @@ static void drawThread(Gfx& g, const UiView& v) {
       for (int k = 0; k < n; k++, ty += lh) g.textN(bx + 7, ty, b.text + L.ln[k].start, L.ln[k].len, F_NORMAL, C_TXT);
       if (L.metaLine) { g.textRight(bx + bw - 7, ty, b.meta, F_SMALL, C_DIM); ty += L.metaLine; }
       if (L.pathLine) { if (b.out) g.textRight(bx + bw - 7, ty, b.path, F_SMALL, C_ACC); else g.text(bx + 7, ty, b.path, F_SMALL, C_ACC, maxW); }
+    }
+    if (b.sep) {                                     // granica: wyżej wiadomości już przeczytane, niżej nowe
+      int sy = by - TH_SEP_H;
+      if (sy < bottom && sy + TH_SEP_H > top) {
+        int tw = Gfx::textWidth("nowe wiadomości", F_SMALL);
+        g.fillRect(8, sy + 9, (GFX_W - 16 - tw) / 2 - 8, 1, C_ACC);
+        g.fillRect((GFX_W + tw) / 2 + 8, sy + 9, (GFX_W - 16 - tw) / 2 - 8, 1, C_ACC);
+        g.textCenter(GFX_W / 2, sy + 2, "nowe wiadomości", F_SMALL, C_ACC);
+      }
+      by -= TH_SEP_H;
     }
     y = by - 4;
   }

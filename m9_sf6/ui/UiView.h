@@ -13,7 +13,7 @@ enum UiScreen { UIS_START, UIS_LIST, UIS_THREAD, UIS_INFO, UIS_BOOT, UIS_LOCK, U
 enum UiIcon { UII_NONE, UII_MAIL, UII_TOWER, UII_USER, UII_HASH, UII_STAR, UII_GPS, UII_BT, UII_LOCK, UII_BOLT, UII_SD, UII_ROOM, UII_HOME, UII_GEAR, UII_SCREEN, UII_SHIELD, UII_CHECK, UII_MUTE, UII_SIGNAL, UII_NET, UII_SPEC, UII_BATT, UII_WIFI };
 
 struct UiRow { char text[44]; char sub[80]; char right[64]; uint8_t icon; uint8_t badge; bool icon_accent; };
-struct UiBubble { char who[24]; char meta[32]; char text[168]; char path[72]; bool out; bool sel; };
+struct UiBubble { char who[24]; char meta[32]; char text[168]; char path[72]; bool out; bool sel; bool sep; };   // sep: nad dymkiem kreska „nowe wiadomości”
 struct UiKV { char k[64]; char v[52]; };
 struct UiHint { char key[14]; char txt[32]; };
 struct UiTile { char label[24]; char value[36]; char sub[72]; uint8_t icon; bool accent; uint8_t kind; };   // kind: UIT_*
