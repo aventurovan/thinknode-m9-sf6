@@ -127,7 +127,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   memset(&_cfg, 0, sizeof(_cfg));
   _cfg.magic = CFG_MAGIC; _cfg.show_path = 1; _cfg.sleep_idx = 1; _cfg.kb_light = 1;
   _pw_n = 0;
-  _cur[0] = 0; _cur_chan = false; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1;
+  _cur[0] = 0; _cur_chan = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1;
   _input[0] = 0; _input_chars = 0; _polish = false; _input_mode = IN_MSG;
   memset(_ck, 0, sizeof(_ck)); _cname[0] = 0; _ctype = 0; _cfav = false;
   _msg_idx = -1; _menu_n = 0; _menu_title[0] = 0; _menu_msg = false; _search[0] = 0;
@@ -490,6 +490,8 @@ void UITask::openThread(const char* name, bool chan) {
   scopy(_cur, sizeof(_cur), name);
   _cur_chan = chan;
   scrollReset();
+  _scroll_unread = -1;                             // pierwsza nieprzeczytana: po wejściu rozmowa ustawi się na niej
+  for (int i = 0; i < _msg_n; i++) if (_msgs[i].unread && _msgs[i].chan == chan && strcmp(_msgs[i].thread, name) == 0) { _scroll_unread = i; break; }
   _input[0] = 0; _input_chars = 0; _polish = false;
   _input_mode = IN_MSG;
   markRead(name, chan);
@@ -831,14 +833,16 @@ void UITask::openMenuContact() {
 }
 
 void UITask::openMenuThread(int idx) {
-  if (idx < 0 || idx >= _thread_n) return;
-  scopy(_tname, sizeof(_tname), _threads[idx].name); _tchan = _threads[idx].chan;
   _menu_n = 0; _menu_msg = false; _menu_thread = true;
-  snprintf(_menu_title, sizeof(_menu_title), "%s%s", _tchan ? "# " : "", _tname);
-  _menu_act[_menu_n++] = A_OPEN;
-  _menu_act[_menu_n++] = A_MUTE;
-  _menu_act[_menu_n++] = A_MARKREAD;
-  _menu_act[_menu_n++] = _tchan ? A_DELCHAN : A_DELTHREAD;
+  if (idx >= 0 && idx < _thread_n) {
+    scopy(_tname, sizeof(_tname), _threads[idx].name); _tchan = _threads[idx].chan;
+    snprintf(_menu_title, sizeof(_menu_title), "%s%s", _tchan ? "# " : "", _tname);
+    _menu_act[_menu_n++] = A_OPEN;
+    _menu_act[_menu_n++] = A_MUTE;
+    _menu_act[_menu_n++] = A_MARKREAD;
+    _menu_act[_menu_n++] = _tchan ? A_DELCHAN : A_DELTHREAD;
+  } else { _tname[0] = 0; _tchan = false; strcpy(_menu_title, "Wiadomości"); }
+  _menu_act[_menu_n++] = A_ADDCHAN;
   push(S_MENU);
 }
 
@@ -863,6 +867,7 @@ void UITask::doAct(uint8_t act) {
   if (_menu_thread) {
     switch (act) {
       case A_OPEN: pop(); openThread(_tname, _tchan); break;
+      case A_ADDCHAN: pop(); openInput(IN_CHANNEL, "#"); break;
       case A_MUTE: toggleMute(_tname); popup(isMuted(_tname) ? "Wyciszono" : "Dźwięk włączony", _tname); break;
       case A_MARKREAD: markRead(_tname, _tchan); pop(); break;
       case A_DELCHAN: ask(C_DEL_CHANNEL, "Usunąć kanał?", _tname); break;
@@ -1248,7 +1253,7 @@ static const char* const TELEM_NAMES[] = { "nikomu", "wybranym kontaktom", "każ
 
 int UITask::listCount(uint8_t s) {
   switch (s) {
-    case S_MSGS: return _thread_n + 1;
+    case S_MSGS: return _thread_n;
     case S_CONTACTS: return 1 + (_cfg.ct_filter == FILTER_HEARD ? the_mesh.ui_heard_n : _list_n);   // wiersz 0 = filtry
     case S_RPTS: return _list_n + 1;
     case S_HEARD: return the_mesh.ui_heard_n;
@@ -1282,6 +1287,7 @@ void UITask::listHead(uint8_t s) {
     case S_MSGS:
       strcpy(v.title, "Wiadomości");
       if (v.unread > 0) snprintf(v.title_right, sizeof(v.title_right), "nieprzeczytane: %d · Menu: opcje", v.unread); else strcpy(v.title_right, "Menu: opcje rozmowy");
+      strcpy(v.empty, "Brak rozmów. Kanał dodasz klawiszem Menu.");
       break;
     case S_CONTACTS: {
       strcpy(v.title, "Kontakty");
@@ -1390,7 +1396,7 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       switch (_menu_act[i]) {
         case A_WRITE: setRow(r, "Napisz", "", UII_MAIL); break;
         case A_FAV: setRow(r, "Ulubiony", yesNo(_cfav), UII_STAR, _cfav); break;
-        case A_DETAIL: setRow(r, "Szczegóły", _menu_msg ? "trasa, sygnał, czas" : "pozycja, droga, klucz"); break;
+        case A_DETAIL: setRow(r, "Szczegóły", _menu_msg ? "trasa, sygnał, czas" : "pozycja, droga, klucz", _menu_msg ? UII_SIGNAL : UII_USER); break;
         case A_MANAGE: setRow(r, "Zarządzaj", pwGet(_ck) ? "hasło zapamiętane" : "logowanie", UII_LOCK); break;
         case A_SHOWMAP: setRow(r, "Pokaż na mapie", "", UII_GPS); break;
         case A_ROUTE: setRow(r, "Trasa na mapie", _menu_msg && _msg_idx >= 0 && _msgs[_msg_idx].out ? "kto powtórzył" : "skąd przyszła", UII_GPS); break;
@@ -1405,6 +1411,7 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
         case A_MARKREAD: setRow(r, "Oznacz jako przeczytane"); break;
         case A_DELCHAN: setRow(r, "Usuń kanał", "z wiadomościami"); break;
         case A_DELTHREAD: setRow(r, "Usuń rozmowę", "wiadomości z tego urządzenia"); break;
+        case A_ADDCHAN: setRow(r, "Dodaj kanał", "z hasztagiem, np. #beskidy", UII_HASH); break;
       }
       return;
     case S_QUICK: setRow(r, QUICK[i], "", i >= N_QUICK_TEXT ? UII_GPS : UII_NONE); return;
@@ -1591,7 +1598,7 @@ void UITask::listEnter(uint8_t s, int i) {
   ContactInfo c;
   switch (s) {
     case S_MSGS:
-      if (i < _thread_n) openThread(_threads[i].name, _threads[i].chan); else openInput(IN_CHANNEL, "#");
+      if (i < _thread_n) openThread(_threads[i].name, _threads[i].chan);
       return;
     case S_CONTACTS:
       if (i == 0) { sel() = 1; return; }              // Enter na filtrach: przejdź do listy
@@ -1878,7 +1885,7 @@ bool UITask::listKey(uint8_t s, int i, uint8_t k) {
   int dir = k == M9K_LEFT ? -1 : k == M9K_RIGHT ? 1 : 0;
   switch (s) {
     case S_MSGS:
-      if (k == M9K_F3 && i < _thread_n) { openMenuThread(i); return true; }
+      if (k == M9K_F3) { openMenuThread(i < _thread_n ? i : -1); return true; }
       if ((k == M9K_BKSP || k == M9K_BKSP_LONG) && i < _thread_n && _threads[i].chan) { ask(C_DEL_CHANNEL, "Usunąć kanał?", _threads[i].name); return true; }
       return false;
     case S_CONTACTS:
@@ -2544,6 +2551,14 @@ void UITask::fillThread() {
     }
   }
   int maxs = _th_total - viewH; if (maxs < 0) maxs = 0;
+  if (_scroll_unread >= 0) {                       // po wejściu: pierwsza nieprzeczytana na górze ekranu
+    int p = 0;
+    for (int j = 0; j < _th_n; j++) {
+      if (_th_idx[j] == _scroll_unread) { int sp = p + _th_h[j] - viewH; _scroll_px = _scroll_tgt = sp < 0 ? 0 : sp; break; }
+      p += _th_h[j] + 4;
+    }
+    _scroll_unread = -1;
+  }
   if (_scroll_tgt > maxs) _scroll_tgt = maxs;
   if (_scroll_px > maxs) _scroll_px = maxs;
   snprintf(v.title_right, sizeof(v.title_right), "%s · %d", _cur_chan ? "kanał" : "prywatna", _th_n);
@@ -2574,7 +2589,7 @@ void UITask::fillThread() {
   v.input_chars = _input_chars;
   v.polish_next = _polish;
   strcpy(v.hint[0].key, "Enter"); strcpy(v.hint[0].txt, _input[0] ? "wyślij" : "szybkie");
-  strcpy(v.hint[1].key, "ctrl"); strcpy(v.hint[1].txt, "ą ę ł…");
+  strcpy(v.hint[1].key, "ctrl"); strcpy(v.hint[1].txt, "ąęł");
   strcpy(v.hint[2].key, "▲▼"); strcpy(v.hint[2].txt, "przewiń");
   strcpy(v.hint[3].key, "Menu"); strcpy(v.hint[3].txt, "opcje");
   v.nhints = 4;

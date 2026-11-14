@@ -177,6 +177,8 @@ static void drawList(Gfx& g, const UiView& v) {
     for (int i = 0; i < n; i++) g.textN(16, y + 14 + i * 17, v.empty + ln[i].start, ln[i].len, F_NORMAL, C_DIM);
     return;
   }
+  bool anyIcon = false;                            // gdy część wierszy ma ikonę, pozostałe wyrównaj do tego samego miejsca
+  for (int i = 0; i < v.nrows; i++) if (iconRows(v.rows[i].icon)) anyIcon = true;
   for (int i = 0; i < v.nrows; i++, y += ROW_H) {
     const UiRow& r = v.rows[i];
     bool sel = i == v.sel && !v.chip_focus && !v.bar_focus;
@@ -185,6 +187,7 @@ static void drawList(Gfx& g, const UiView& v) {
     int x = 8;
     const char* const* ic = iconRows(r.icon);
     if (ic) { g.icon(x, y + 4, ic, sel ? C_INK : (r.icon_accent ? C_ACC : C_DIM)); x += 17; }
+    else if (anyIcon) x += 17;
     int right = GFX_W - 8;
     if (r.badge) {
       char t[6]; snprintf(t, sizeof(t), "%d", r.badge);

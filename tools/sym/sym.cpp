@@ -120,6 +120,8 @@ int main(int argc, char** argv) {
   for (int i = 0; i < 40; i++) keys({ M9K_UP }); save("przewijanie-gora");
   keys({ M9K_F3 }); save("przewijanie-menu");
   extern int sim_wifi; sim_wifi = 3; keys({ M9K_BACK, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_F3 }); save("menu-odebranej-wifi");
+  keys({ M9K_BACK, M9K_BACK, M9K_HOME, M9K_MSG, M9K_F3 }); save("menu-rozmow");
+  keys({ M9K_BACK, M9K_BACK, M9K_HOME, M9K_MSG }); for (int i = 0; i < 6; i++) rx("Public", "Ania: nowa wiadomość po przerwie, nieprzeczytana", 2); keys({ M9K_UP, M9K_UP, M9K_UP, M9K_UP, M9K_UP, M9K_UP, M9K_UP, M9K_UP, M9K_ENTER }); save("wejscie-nieprzeczytane");
   sim_wifi = 1; save("wifi-slabe"); sim_wifi = 0; save("wifi-laczy"); sim_wifi = 5; save("wifi-ap");
   printf("zrzutow: %d\n", shot);
   return 0;
