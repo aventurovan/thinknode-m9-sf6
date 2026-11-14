@@ -173,22 +173,26 @@ static void drawPopup(Gfx& g, const UiView& v) {
 }
 
 // ---------- ekrany ----------
+// wiersz filtrów / kart: aktywny wypełniony, zaznaczony (gdy chodzimy po wierszu) w ramce; zwraca zajętą wysokość
+static int drawFilterRow(Gfx& g, const UiView& v, int y) {
+  if (v.nchips <= 0) return 0;
+  int x = 3;
+  for (int i = 0; i < v.nchips; i++) {
+    int w = Gfx::textWidth(v.chips[i], F_SMALL) + 7;
+    bool act = i == v.chip_active;
+    if (v.chip_focus && act && !v.bar_focus) { g.fillRound(x - 1, y + 1, w + 2, 19, 9, C_TXT); g.fillRound(x + 1, y + 3, w - 2, 15, 7, C_ACC); }
+    else if (act) g.fillRound(x, y + 2, w, 17, 8, v.chip_focus ? C_ACC : GFX_RGB(0x6B, 0x4A, 0x10));
+    else { g.fillRound(x, y + 2, w, 17, 8, C_LINE); g.fillRound(x + 1, y + 3, w - 2, 15, 7, C_BG); }
+    g.text(x + 4, y + 4, v.chips[i], F_SMALL, act ? (v.chip_focus ? C_INK : C_TXT) : C_DIM);
+    x += w + 2;
+  }
+  return 22;
+}
+
 static void drawList(Gfx& g, const UiView& v) {
   drawHeader(g, v, STATUS_H);
   int y = STATUS_H + HEADER_H;
-  if (v.nchips > 0) {                                 // wiersz filtrów: aktywny wypełniony, zaznaczony (gdy chodzimy po wierszu) w ramce
-    int x = 3;
-    for (int i = 0; i < v.nchips; i++) {
-      int w = Gfx::textWidth(v.chips[i], F_SMALL) + 7;
-      bool act = i == v.chip_active;
-      if (v.chip_focus && act && !v.bar_focus) { g.fillRound(x - 1, y + 1, w + 2, 19, 9, C_TXT); g.fillRound(x + 1, y + 3, w - 2, 15, 7, C_ACC); }
-      else if (act) g.fillRound(x, y + 2, w, 17, 8, v.chip_focus ? C_ACC : GFX_RGB(0x6B, 0x4A, 0x10));
-      else { g.fillRound(x, y + 2, w, 17, 8, C_LINE); g.fillRound(x + 1, y + 3, w - 2, 15, 7, C_BG); }
-      g.text(x + 4, y + 4, v.chips[i], F_SMALL, act ? (v.chip_focus ? C_INK : C_TXT) : C_DIM);
-      x += w + 2;
-    }
-    y += 22;
-  }
+  y += drawFilterRow(g, v, y);
   if (v.nrows == 0) {
     GfxLine ln[5];
     int n = Gfx::wrap(v.empty, F_NORMAL, GFX_W - 32, ln, 5);
@@ -265,16 +269,18 @@ static void drawGrid(Gfx& g, const UiView& v) {
   bool start = v.screen == UIS_START;                // Start: w nagłówku nazwa i data (godzina jest na pasku stanu)
   drawHeader(g, v, STATUS_H);
   top = STATUS_H + HEADER_H + 4;
+  if (!start && v.nchips > 0) top = STATUS_H + HEADER_H + drawFilterRow(g, v, STATUS_H + HEADER_H) + 2;   // karty (Ustawienia / Narzędzia)
   int cols = v.grid_cols > 0 ? v.grid_cols : 2;
   int rows = (v.ntiles + cols - 1) / cols;
   if (rows < 1) return;
   const int gap = 4;
   int tw = (GFX_W - 12 - (cols - 1) * gap) / cols;
   int th = (GFX_H - BOTTOM_H - top - 4 - (rows - 1) * gap) / rows;
+  if (!start && th > 40) th = 40;                    // kafelki ustawień nie rosną, gdy jest ich mniej
   for (int i = 0; i < v.ntiles; i++) {
     const UiTile& t = v.tile[i];
     int x = 6 + (i % cols) * (tw + gap), y = top + (i / cols) * (th + gap);
-    bool sel = i == v.sel && !v.bar_focus;
+    bool sel = i == v.sel && !v.bar_focus && !v.chip_focus;
     if (sel) { g.fillRound(x - 1, y - 1, tw + 2, th + 2, 7, C_ACC); g.fillRound(x + 1, y + 1, tw - 2, th - 2, 5, C_SELT); }
     else g.fillRound(x, y, tw, th, 6, C_TILE);
     const char* const* ic = iconRows(t.icon);

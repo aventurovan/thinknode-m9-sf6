@@ -218,7 +218,8 @@ class UITask : public AbstractUITask {
   uint32_t _adv_sent_at; int8_t _tile_slot;
   // pasek stanu: radio słucha, mignięcia strzałek nadawania i odbioru; wymuszany stan podświetlenia klawiatury
   unsigned long _radio_ok_at, _tx_until, _rx_until, _kb_next; uint32_t _tx_seen, _rx_seen;
-  void kbLight();   // kiedy ostatnio wysłaliśmy advert z ekranu; miejsce, w którym zmieniamy kafelek
+  void kbLight();
+  uint8_t _set_page; bool _set_chip;      // Ustawienia: karta (0 ustawienia, 1 narzędzia) i czy kursor jest na wierszu kart   // kiedy ostatnio wysłaliśmy advert z ekranu; miejsce, w którym zmieniamy kafelek
   void fillSpec(); void keySpec(uint8_t k); void sweepRange(float& f0, float& step);
   void buildLog(); void fillLog(); void keyLog(uint8_t k); void detailPkt(uint32_t seq);
   void fillChInfo(); void fillQR();

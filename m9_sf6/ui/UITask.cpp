@@ -154,6 +154,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   for (int i = 0; i < 6; i++) _cfg.tiles[i] = (uint8_t)i;
   _adv_sent_at = 0; _tile_slot = 0;
   _radio_ok_at = _tx_until = _rx_until = _kb_next = 0; _tx_seen = _rx_seen = 0;
+  _set_page = 0; _set_chip = false;
   _pw_n = 0;
   _cur[0] = 0; _cur_chan = false; memset(_cur_key, 0, sizeof(_cur_key)); _msgs_old_format = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_new = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1;
   _nh_n = 0; _nh_next = _nh_slot_end = 0; _nh_min = 1; _bh_n = _bh_seg = 0; _bh_next = 30000; _bh_chg = false;
@@ -840,7 +841,8 @@ void UITask::prepare(uint8_t s) {
 
 void UITask::tab(uint8_t s) {
   if (_depth >= 1 && _nav[0].scr < 5) _tabsel[_nav[0].scr] = _nav[0].sel;
-  if (s != S_CONTACTS) { _search[0] = 0; _sel_mode = false; }     // zaznaczanie kończy się po wyjściu z Kontaktów
+  if (s != S_CONTACTS) { _search[0] = 0; _sel_mode = false; }
+  _set_chip = false;     // zaznaczanie kończy się po wyjściu z Kontaktów
   _depth = 1;
   _bar = false;
   _nav[0].scr = s; _nav[0].sel = _tabsel[s]; _nav[0].top = 0;
@@ -2669,14 +2671,32 @@ void UITask::key(uint8_t k) {
     return;
   }
   if (s == S_SETTINGS) {
-    if (gridKey(k, 8, 2)) return;
+    int n = _set_page ? 6 : 8;
+    if (k == M9K_F3) { _set_page ^= 1; sel() = 0; _set_chip = false; return; }      // Menu: druga karta
+    if (_set_chip) {                                   // chodzenie po kartach „Ustawienia / Narzędzia”
+      if (k == M9K_LEFT) { if (_set_page == 1) { _set_page = 0; sel() = 0; } else { _set_chip = false; tab(S_RPTS); } }
+      else if (k == M9K_RIGHT) { if (_set_page == 0) { _set_page = 1; sel() = 0; } else { _set_chip = false; tab(S_START); } }
+      else if (k == M9K_DOWN || k == M9K_ENTER) _set_chip = false;
+      return;
+    }
+    if (k == M9K_UP && sel() < 2) { _set_chip = true; return; }      // z górnego rzędu ▲ wchodzi na karty
+    if (gridKey(k, n, 2)) return;
     if (k == M9K_DOWN) { _bar = true; _bar_sel = S_SETTINGS; return; }
     if (k == M9K_LEFT) { tab(S_RPTS); return; }
     if (k == M9K_RIGHT) { tab(S_START); return; }
-    if (k == M9K_ENTER) {
+    if (k == M9K_ENTER && _set_page == 0) {
       static const uint8_t TO[8] = { S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS };
       if (sel() == 0) radioLoad();
-      push(TO[sel()]);
+      push(TO[sel() < 8 ? sel() : 0]);
+    } else if (k == M9K_ENTER) {
+      switch (sel()) {
+        case 0: push(S_SPEC); break;
+        case 1: push(S_LOG); break;
+        case 2: push(S_DISC); break;
+        case 3: push(S_MAP_NET); break;
+        case 4: push(S_OTA); break;
+        case 5: detailBattery(); break;
+      }
     }
     return;
   }
@@ -2929,8 +2949,39 @@ void UITask::tileEnter(uint8_t id) {
 void UITask::fillSettings() {
   UiView& v = *_v;
   v.screen = UIS_GRID; v.tab = 4;
-  v.grid_cols = 2; v.ntiles = 8; v.sel = sel();
+  v.grid_cols = 2; v.ntiles = _set_page ? 6 : 8;
+  if (sel() >= v.ntiles) sel() = v.ntiles - 1;
+  v.sel = sel();
   strcpy(v.title, "Ustawienia"); snprintf(v.title_right, sizeof(v.title_right), "wersja %s", M9_FW_VERSION);
+  strcpy(v.chips[0], "Ustawienia"); strcpy(v.chips[1], "Narzędzia");      // dwie karty, przełączane jak filtry w Kontaktach
+  v.nchips = 2; v.chip_active = _set_page; v.chip_focus = _set_chip;
+  if (_set_page == 1) {                                // Narzędzia
+    static const char* const N[6] = { "Widmo", "Log pakietów", "Discovery", "Mapa z internetu", "Aktualizacja", "Bateria" };
+    static const uint8_t IC[6] = { UII_SPEC, UII_CHECK, UII_PING, UII_SD, UII_BOLT, UII_BATT };
+    static const uint8_t COL[6] = { UIC_VIOLET, UIC_BLUE, UIC_VIOLET, UIC_GREEN, UIC_AMBER, UIC_GREEN };
+    for (int i = 0; i < 6; i++) {
+      UiTile& t = v.tile[i];
+      strcpy(t.label, N[i]); t.icon = IC[i]; t.icol = COL[i];
+      switch (i) {
+        case 0: snprintf(t.sub, sizeof(t.sub), "szum %d dBm", m9radioNoiseFloor()); break;
+        case 1: {
+          unsigned long now = millis(); int perMin = 0;
+          for (int k = 0; k < m9logCount(); k++) { if (now - m9logGet(k)->ms > 60000UL) break; perMin++; }
+          snprintf(t.sub, sizeof(t.sub), "%d/min · razem %lu", perMin, (unsigned long)m9logTotal());
+          break;
+        }
+        case 2: if (the_mesh.ui_disc_tag) snprintf(t.sub, sizeof(t.sub), "odpowiedzi: %d", the_mesh.ui_disc_n); else strcpy(t.sub, "kto mnie słyszy?"); break;
+        case 3:
+          if (!_map.sdOk()) strcpy(t.sub, _sd_pending ? "sprawdzam kartę…" : "brak karty SD");
+          else if (_map.numPacks() == 0) strcpy(t.sub, "brak mapy · pobierz");
+          else snprintf(t.sub, sizeof(t.sub), "z%d–%d · plików: %d", _map.minZoom(), _map.maxZoom(), _map.numPacks());
+          break;
+        case 4: snprintf(t.sub, sizeof(t.sub), "masz %s", M9_FW_VERSION); break;
+        case 5: { char e[40]; battEstimate(e, sizeof(e)); snprintf(t.sub, sizeof(t.sub), "%d %% · %s", battPercent(getBattMilliVolts()), e); break; }
+      }
+    }
+    return;
+  }
   static const char* const N[8] = { "Radio", "Bluetooth", "Pozycja", "Advert", "Kontakty", "Wiadomości", "Ekran i dźwięk", "System" };
   static const uint8_t IC[8] = { UII_SIGNAL, UII_BT, UII_GPS, UII_TOWER, UII_USER, UII_MAIL, UII_SCREEN, UII_GEAR };
   for (int i = 0; i < 8; i++) {

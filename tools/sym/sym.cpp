@@ -213,6 +213,13 @@ int main(int argc, char** argv) {
   keys({ M9K_HOME }); save("k-nowe-kafelki");
   for (int q = 0; q < 6; q++) { keys({ M9K_HOME }); for (int m = 0; m < q; m++) keys({ M9K_RIGHT }); keys({ M9K_F3, M9K_ENTER }); for (int m = 0; m < 12; m++) keys({ M9K_UP }); for (int m = 0; m < q; m++) keys({ M9K_DOWN }); keys({ M9K_ENTER }); }
   keys({ M9K_HOME }); save("k-z-powrotem");
+  // Ustawienia: karty Ustawienia / Narzędzia
+  keys({ M9K_HOME, M9K_LEFT }); save("u-ustawienia");
+  keys({ M9K_UP, M9K_UP, M9K_UP, M9K_UP, M9K_UP }); save("u-kursor-na-kartach");
+  keys({ M9K_RIGHT }); save("u-narzedzia-karty"); keys({ M9K_DOWN, M9K_RIGHT }); save("u-narzedzia");
+  keys({ M9K_DOWN, M9K_ENTER }); save("u-mapa-z-internetu"); keys({ M9K_BACK });
+  keys({ M9K_DOWN, M9K_LEFT, M9K_ENTER }); save("u-aktualizacja"); keys({ M9K_BACK });
+  keys({ M9K_F3 }); save("u-menu-wraca");
   // zaznaczanie wielu kontaktów
   keys({ M9K_HOME }); save("z-start");
   keys({ M9K_HOME, M9K_RIGHT, M9K_ENTER }); keys({ M9K_ENTER }); save("z-menu-kontaktu");
