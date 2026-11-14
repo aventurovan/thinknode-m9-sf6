@@ -40,6 +40,7 @@ bool m9radioSweep(float f0, float step, int n, int8_t* out) {
   }
   return true;
 }
+bool m9radioListening() { return true; }
 int m9radioNoiseFloor() { return -114; }
 uint32_t m9radioAirtime(int len) { return 60 + len * 3; }
 void m9cpuSave(bool) { }

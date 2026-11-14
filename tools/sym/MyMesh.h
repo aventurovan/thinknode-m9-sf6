@@ -59,6 +59,7 @@ public:
   int uiSeal(uint8_t* d, const uint8_t* s, int n) { int m = (n + 15) / 16 * 16; d[0] = 0x5A; d[1] = 0xA5; for (int i = 0; i < m; i++) d[2 + i] = (uint8_t)((i < n ? s[i] : 0) ^ 0x77); return m + 2; }
   int uiUnseal(uint8_t* d, const uint8_t* s, int n) { if (n < 3 || s[0] != 0x5A || s[1] != 0xA5) return 0; for (int i = 0; i < n - 2; i++) d[i] = (uint8_t)(s[2 + i] ^ 0x77); return n - 2; }
   void uiPinHash(uint8_t* o, const uint8_t* salt, const char* pin) { for (int i = 0; i < 32; i++) o[i] = (uint8_t)(salt[i % 8] * 31 + i); if (sim_pin_any) return; for (int i = 0; pin[i]; i++) o[i % 32] = (uint8_t)(o[i % 32] * 131 + pin[i]); }
+  uint32_t ui_tx_count = 0; uint32_t ui_disc_tag = 0;
   bool ui_rx_chan = false;
   char ui_app_name[24] = "MeshSpeed";
   bool uiDecodeGroup(const uint8_t* p, int len, char* chan, int cn, char* who, int wn) { if (len < 4 || len > 184) { chan[0] = who[0] = 0; return false; } { uint8_t data[200]; memcpy(data, p + 1, len - 1); (void)data; } for (auto& c : chans) if (c.channel.hash[0] == p[0]) { snprintf(chan, cn, "%s", c.name); snprintf(who, wn, "BBot"); return true; } snprintf(chan, cn, "%s", ""); who[0] = 0; return false; }

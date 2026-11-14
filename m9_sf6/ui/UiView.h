@@ -10,13 +10,15 @@
 #define UI_INPUT_MAX  140
 
 enum UiScreen { UIS_START, UIS_LIST, UIS_THREAD, UIS_INFO, UIS_BOOT, UIS_LOCK, UIS_GRID, UIS_TIME, UIS_SPEC, UIS_LOG, UIS_CHINFO, UIS_QR };
-enum UiIcon { UII_NONE, UII_MAIL, UII_TOWER, UII_USER, UII_HASH, UII_STAR, UII_GPS, UII_BT, UII_LOCK, UII_BOLT, UII_SD, UII_ROOM, UII_HOME, UII_GEAR, UII_SCREEN, UII_SHIELD, UII_CHECK, UII_MUTE, UII_SIGNAL, UII_NET, UII_SPEC, UII_BATT, UII_WIFI };
+enum UiIcon { UII_NONE, UII_MAIL, UII_TOWER, UII_USER, UII_HASH, UII_STAR, UII_GPS, UII_BT, UII_LOCK, UII_BOLT, UII_SD, UII_ROOM, UII_HOME, UII_GEAR, UII_SCREEN, UII_SHIELD, UII_CHECK, UII_MUTE, UII_SIGNAL, UII_NET, UII_SPEC, UII_BATT, UII_WIFI, UII_PING };
+// kolor ikony kafelka (0 = domyślny szary)
+enum UiIconColor { UIC_DEF, UIC_AMBER, UIC_BLUE, UIC_GREEN, UIC_PINK, UIC_RED, UIC_VIOLET, UIC_TEAL };
 
 struct UiRow { char text[44]; char sub[80]; char right[64]; uint8_t icon; uint8_t badge; bool icon_accent; };
 struct UiBubble { char who[24]; char meta[32]; char text[168]; char path[72]; bool out; bool sel; bool sep; };   // sep: nad dymkiem kreska „nowe wiadomości”
 struct UiKV { char k[64]; char v[52]; };
 struct UiHint { char key[14]; char txt[32]; };
-struct UiTile { char label[24]; char value[36]; char sub[72]; uint8_t icon; bool accent; uint8_t kind; char side[16]; char sub2[48]; };   // side: drobny dopisek z prawej strony wartości   // kind: UIT_*
+struct UiTile { char label[24]; char value[36]; char sub[72]; uint8_t icon; bool accent; uint8_t kind; char side[16]; char sub2[48]; uint8_t icol; };   // icol: UIC_*   // side: drobny dopisek z prawej strony wartości   // kind: UIT_*
 enum UiTileKind { UIT_PLAIN, UIT_NOISE, UIT_BATT, UIT_NET };
 
 #define UI_SPARK_N    48        // punkty małych wykresów na kafelkach
@@ -32,6 +34,7 @@ struct UiLogRow { char t[10]; char type[8]; uint8_t col; char hop[6]; char who[6
 struct UiView {
   // pasek stanu
   char time[6]; int unread; int sats; bool gps_on; uint8_t bt; uint8_t wifi; int batt; bool charging; bool status;
+  char radio[6]; bool radio_ok; bool tx_now, rx_now;      // pasek: preset radia (np. SF6), czy radio słucha, mignięcie przy nadaniu / odbiorze
   // ekran
   uint8_t screen;
   int8_t tab;                       // 0..4 = zakładka na dolnym pasku, -1 = podpowiedzi klawiszy

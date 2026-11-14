@@ -205,8 +205,7 @@ int main(int argc, char** argv) {
   }
   // nowy Start i wymiana kafelków
   keys({ M9K_HOME }); save("k-start");
-  keys({ M9K_RIGHT, M9K_F3 }); save("k-menu");
-  keys({ M9K_ENTER }); save("k-lista");
+  keys({ M9K_RIGHT, M9K_F3 }); save("k-lista");
   for (int i = 0; i < 5; i++) keys({ M9K_DOWN }); keys({ M9K_ENTER }); save("k-repeatery-zamiast-kontaktow");
   keys({ M9K_DOWN, M9K_F3, M9K_ENTER, M9K_UP, M9K_UP, M9K_ENTER }); save("k-zamiana-miejsc");
   static const int EXTRA[6] = { 7, 8, 9, 10, 11, 6 };

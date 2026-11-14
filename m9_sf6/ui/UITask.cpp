@@ -37,8 +37,9 @@ static const uint32_t SLEEP_STEPS[] = { 30000UL, 60000UL, 300000UL, 0 };        
 static const char* const SLEEP_NAMES[] = { "30 s", "1 min", "5 min", "nigdy" };
 static const uint8_t ADV_HOURS[] = { 0, 1, 3, 6, 12, 24 };
 // Start: 12 kafelków do wyboru w 6 miejscach
-enum { T_MSG, T_CT, T_RADIO, T_NET, T_SPEC, T_BATT, T_RPT, T_POS, T_MAP, T_LOG, T_ADV, T_DEV, T_COUNT };
-static const char* const TILE_NAMES[T_COUNT] = { "Wiadomości", "Kontakty", "Radio", "Sieć", "Widmo", "Bateria", "Repeatery", "Pozycja", "Mapa", "Log pakietów", "Advert", "Urządzenie" };
+enum { T_MSG, T_CT, T_RADIO, T_NET, T_SPEC, T_BATT, T_RPT, T_POS, T_MAP, T_LOG, T_ADV, T_DEV, T_DISC, T_COUNT };
+static const char* const TILE_NAMES[T_COUNT] = { "Wiadomości", "Kontakty", "Radio", "Sieć", "Widmo", "Bateria", "Repeatery", "Pozycja", "Mapa", "Log pakietów", "Advert", "Urządzenie", "Discovery" };
+static const uint8_t TILE_COL[T_COUNT] = { UIC_AMBER, UIC_BLUE, UIC_PINK, UIC_TEAL, UIC_VIOLET, UIC_GREEN, UIC_AMBER, UIC_RED, UIC_GREEN, UIC_BLUE, UIC_AMBER, UIC_TEAL, UIC_VIOLET };
 // oszczędzanie energii
 static const uint32_t DIM_STEPS[] = { 10000UL, 20000UL, 30000UL, 0 };
 static const char* const DIM_NAMES[] = { "po 10 s", "po 20 s", "po 30 s", "wyłączone" };
@@ -152,6 +153,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   _cfg.magic = CFG_MAGIC; _cfg.show_path = 1; _cfg.sleep_idx = 1; _cfg.kb_light = 1;
   for (int i = 0; i < 6; i++) _cfg.tiles[i] = (uint8_t)i;
   _adv_sent_at = 0; _tile_slot = 0;
+  _radio_ok_at = _tx_until = _rx_until = _kb_next = 0; _tx_seen = _rx_seen = 0;
   _pw_n = 0;
   _cur[0] = 0; _cur_chan = false; memset(_cur_key, 0, sizeof(_cur_key)); _msgs_old_format = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_new = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1;
   _nh_n = 0; _nh_next = _nh_slot_end = 0; _nh_min = 1; _bh_n = _bh_seg = 0; _bh_next = 30000; _bh_chg = false;
@@ -207,6 +209,7 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
 
   loadAll();
   _kb.begin();
+  kbLight();                                       // od razu według ustawień (klawiatura sama włącza podświetlenie przy starcie)
   _buzzer.begin();
   _buzzer.quiet(_prefs->buzzer_quiet);
   if (_display) _display->turnOn();
@@ -915,7 +918,7 @@ void UITask::wake() {
     m9lcdBacklight(brightPercent());
   } else if (_dimmed) m9lcdBacklight(brightPercent());
   _dimmed = false;
-  _kb.setBacklight(_cfg.kb_light != 0 && !_locked);
+  kbLight();
   _dirty = true;
 }
 
@@ -1100,18 +1103,6 @@ void UITask::openMenuMsg(int idx) {
 void UITask::doAct(uint8_t act) {
   if (act == A_SPEC) { pop(); push(S_SPEC); return; }
   if (act == A_LOG) { pop(); push(S_LOG); return; }
-  if (act == A_TILE) {                                // lista 12 kafelków; przy tych, które są na ekranie, numer miejsca
-    pop();
-    pickBegin(P_TILE, "Zmień kafelek");
-    for (int q = 0; q < T_COUNT; q++) {
-      char t[48]; int at = -1;
-      for (int k = 0; k < 6; k++) if (_cfg.tiles[k] == q) at = k;
-      if (at < 0) scopy(t, sizeof(t), TILE_NAMES[q]); else snprintf(t, sizeof(t), "%s · miejsce %d", TILE_NAMES[q], at + 1);
-      pickAdd(t);
-    }
-    pickOpen(_cfg.tiles[_tile_slot]);
-    return;
-  }
   if (act == A_MULTI) { pop(); _sel_mode = true; _sel_n = 0; selAdd(_ck); return; }
   if (act == A_SELNONE) { _sel_n = 0; pop(); return; }
   if (act == A_SELALL) {                              // wszystko z bieżącego filtra oprócz ulubionych
@@ -1441,14 +1432,14 @@ void UITask::submitInput() {
       _input_mode = IN_MSG; pop(); return;
     case IN_MAP_URL: scopy(_wifi.url, sizeof(_wifi.url), _input); saveWifi(); _input_mode = IN_MSG; pop(); return;
     case IN_LOCKPIN: {
-      if (strlen(_input) < 4) { popup("PIN ma mieć 4–8 cyfr", "", true); return; }
+      if (strlen(_input) < 4) { popup("Kod ma mieć 4–8 znaków", "litery lub cyfry", true); return; }
       for (int i = 0; i < 8; i++) _pin_salt[i] = (uint8_t)(esp_random_m9() >> (i % 3 * 8));
       the_mesh.uiPinHash(_pin_hash, _pin_salt, _input);
       _pin_have = true; _pin_fails = 0; savePin();
       _cfg.lock = 2; saveCfg();
       memset(_input, 0, sizeof(_input));
       _input_mode = IN_MSG; pop();
-      popup("PIN blokady ustawiony", "blokada po wygaszeniu i po włączeniu", false, 5000);
+      popup("Kod blokady ustawiony", "blokada po wygaszeniu i po włączeniu", false, 5000);
       return;
     }
     case IN_PIN: {
@@ -1509,7 +1500,7 @@ void UITask::keyThread(uint8_t k) {
     case IN_CLI: limit = 46; break;
     case IN_LAT: case IN_LON: limit = 11; digits = true; break;
     case IN_PIN: limit = 6; if (k < '0' || k > '9') return; break;
-    case IN_LOCKPIN: limit = 8; if (k < '0' || k > '9') return; break;
+    case IN_LOCKPIN: limit = 8; if (k >= 'A' && k <= 'Z') k = (uint8_t)(k + 32); if (!((k >= 'a' && k <= 'z') || (k >= '0' && k <= '9'))) return; break;   // kod: litery i cyfry, bez rozróżniania wielkości
     case IN_WIFI_SSID: limit = 32; break;
     case IN_WIFI_PASS: limit = 63; break;
     case IN_MAP_URL: limit = 120; if (k == ' ') return; break;
@@ -1706,7 +1697,6 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
         case A_DELTHREAD: setRow(r, "Usuń rozmowę", "wiadomości z tego urządzenia"); break;
         case A_ADDCHAN: setRow(r, "Dodaj kanał", "z hasztagiem, np. #beskidy", UII_HASH); break;
         case A_CHINFO: setRow(r, "Info o kanale", "statystyki, kod QR", UII_HASH); break;
-        case A_TILE: setRow(r, "Zmień ten kafelek", "wybierz jeden z 12", UII_HOME, true); break;
         case A_SPEC: setRow(r, "Widmo", "pasmo i szum na naszym kanale", UII_SPEC); break;
         case A_LOG: setRow(r, "Log pakietów", "wszystko, co odebrało radio", UII_SIGNAL); break;
       }
@@ -1874,14 +1864,14 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       if (i == 0) setRow(r, "Wygaszanie ekranu", SLEEP_NAMES[_cfg.sleep_idx], UII_SCREEN);
       else if (i == 1) setRow(r, "Podświetlenie klawiatury", _cfg.kb_light ? "świeci, gdy ekran świeci" : "wyłączone");
       else if (i == 2) setRow(r, "Nowa wiadomość budzi ekran", yesNo(!_cfg.no_wake));
-      else if (i == 3) setRow(r, "Blokada ekranu", _cfg.lock == 2 ? "po wygaszeniu, z PIN-em" : _cfg.lock ? "po wygaszeniu (Wstecz, Enter)" : "wyłączona", UII_LOCK);
+      else if (i == 3) setRow(r, "Blokada ekranu", _cfg.lock == 2 ? "po wygaszeniu, z kodem" : _cfg.lock ? "po wygaszeniu (Wstecz, Enter)" : "wyłączona", UII_LOCK);
       else if (i == 4) { snprintf(t, sizeof(t), "%d%%", brightPercent()); setRow(r, "Jasność ekranu", t, UII_SCREEN); }
       else if (i == 5) setRow(r, "Dźwięki urządzenia", _prefs->buzzer_quiet ? "wyciszone (wszystkie)" : "włączone", UII_MUTE, _prefs->buzzer_quiet);
       else if (i == 6) setRow(r, "Dźwięk wiadomości", _cfg.no_msg_snd ? "wyłączony" : "włączony");
       else if (i == 7) setRow(r, "Dźwięk advertu repeatera", _cfg.adv_snd == 0 ? "wyłączony" : _cfg.adv_snd == 1 ? "każdy repeater" : "tylko ulubione");
       else if (i == 8) setRow(r, "Przyciemnianie", DIM_NAMES[_cfg.dim_idx], UII_BATT);
       else if (i == 9) setRow(r, "Procesor po wygaszeniu", _cfg.cpu_full ? "pełna moc (240 MHz)" : "oszczędny (80 MHz)", UII_BATT);
-      else setRow(r, "PIN blokady ekranu", _pin_have ? "ustawiony · Enter: zmień" : "brak · Enter: ustaw", UII_LOCK);
+      else setRow(r, "Kod blokady ekranu", _pin_have ? "ustawiony · Enter: zmień" : "brak · Enter: ustaw", UII_LOCK);
       return;
     case S_SET_SYS: {
       if (i == 0) setRow(r, "Informacje", "wersja, pamięć, klucz");
@@ -2115,7 +2105,7 @@ bool UITask::settingPick(uint8_t s, int i) {
       if (i == 0) { pickBegin(P_SLEEP, "Wygaszanie ekranu"); for (int q = 0; q < 4; q++) pickAdd(SLEEP_NAMES[q]); pickOpen(_cfg.sleep_idx); }
       else if (i == 1) two(P_KBLIGHT, "Podświetlenie klawiatury", "świeci, gdy ekran świeci", "wyłączone", _cfg.kb_light ? 0 : 1);
       else if (i == 2) two(P_WAKE, "Nowa wiadomość budzi ekran", "tak", "nie", _cfg.no_wake ? 1 : 0);
-      else if (i == 3) { pickBegin(P_LOCK, "Blokada ekranu"); pickAdd("wyłączona"); pickAdd("po wygaszeniu (Wstecz, potem Enter)"); pickAdd("po wygaszeniu i włączeniu, z PIN-em"); pickOpen(_cfg.lock > 2 ? 0 : _cfg.lock); }
+      else if (i == 3) { pickBegin(P_LOCK, "Blokada ekranu"); pickAdd("wyłączona"); pickAdd("po wygaszeniu (Wstecz, potem Enter)"); pickAdd("po wygaszeniu i włączeniu, z kodem"); pickOpen(_cfg.lock > 2 ? 0 : _cfg.lock); }
       else if (i == 4) { pickBegin(P_BRIGHT, "Jasność ekranu"); for (int q = 0; q < 5; q++) { snprintf(t, sizeof(t), "%d%%", BRIGHT_STEPS[q]); pickAdd(t); } pickOpen((_cfg.bright >= 1 && _cfg.bright <= 5) ? _cfg.bright - 1 : 4); }
       else if (i == 5) two(P_SOUND, "Dźwięki urządzenia", "włączone", "wyciszone (wszystkie)", _prefs->buzzer_quiet ? 1 : 0);
       else if (i == 6) two(P_MSGSND, "Dźwięk wiadomości", "włączony", "wyłączony", _cfg.no_msg_snd ? 1 : 0);
@@ -2198,7 +2188,7 @@ void UITask::applyPick(uint8_t id, int i) {
       if (!_prefs->buzzer_quiet) _buzzer.play("dm:d=16,o=6,b=200:e,g,c7");
       break;
     case P_SLEEP: _cfg.sleep_idx = i; saveCfg(); wake(); break;
-    case P_KBLIGHT: _cfg.kb_light = i == 0; saveCfg(); _kb.setBacklight(_cfg.kb_light != 0); break;
+    case P_KBLIGHT: _cfg.kb_light = i == 0; saveCfg(); kbLight(); break;
     case P_WAKE: _cfg.no_wake = i == 1; saveCfg(); break;
     case P_RPTSORT: _cfg.rpt_sort = i; saveCfg(); break;
     case P_MSGSND: _cfg.no_msg_snd = i == 1; saveCfg(); if (i == 0 && !_prefs->buzzer_quiet) _buzzer.play("dm:d=16,o=6,b=200:e,g,c7"); break;
@@ -2209,7 +2199,7 @@ void UITask::applyPick(uint8_t id, int i) {
       if (i == 2 && !_pin_have) { openInput(IN_LOCKPIN, ""); break; }      // najpierw trzeba ustawić PIN
       _cfg.lock = (uint8_t)i; saveCfg();
       if (i == 1) popup("Blokada włączona", "odblokowanie: Wstecz, potem Enter", false, 5000);
-      if (i == 2) popup("Blokada z PIN-em włączona", "także po włączeniu urządzenia", false, 5000);
+      if (i == 2) popup("Blokada z kodem włączona", "także po włączeniu urządzenia", false, 5000);
       break;
   }
   _dirty = true;
@@ -2270,7 +2260,8 @@ void UITask::lockKey(uint8_t k) {
   _dirty = true;
   if (_cfg.lock == 2 && _pin_have) {                 // blokada z PIN-em: cyfry, Del kasuje, Enter sprawdza
     int n = strlen(_pin_in);
-    if (k >= '0' && k <= '9') { if (n < 8) { _pin_in[n] = (char)k; _pin_in[n + 1] = 0; } return; }
+    if (k >= 'A' && k <= 'Z') k = (uint8_t)(k + 32);
+    if ((k >= 'a' && k <= 'z') || (k >= '0' && k <= '9')) { if (n < 8) { _pin_in[n] = (char)k; _pin_in[n + 1] = 0; } return; }
     if (k == M9K_BKSP || k == M9K_BKSP_LONG || k == M9K_BACK) { if (k == M9K_BKSP && n > 0) _pin_in[n - 1] = 0; else _pin_in[0] = 0; return; }
     if (k != M9K_ENTER || n == 0) return;
     if (_pin_wait && (long)(now - _pin_wait) < 0) { _pin_in[0] = 0; return; }      // kara za złe próby jeszcze trwa
@@ -2281,7 +2272,7 @@ void UITask::lockKey(uint8_t k) {
     if (diff == 0) {
       _locked = false; _pin_wait = 0;
       if (_pin_fails) { _pin_fails = 0; savePin(); }
-      _kb.setBacklight(_cfg.kb_light != 0);
+      kbLight();
     } else {
       if (_pin_fails < 250) _pin_fails++;
       savePin();                                       // licznik złych prób przeżywa restart
@@ -2292,7 +2283,7 @@ void UITask::lockKey(uint8_t k) {
   if (k == M9K_BACK) { _ul_back = true; _ul_last = now; }
   else if (k == M9K_ENTER && _ul_back && now - _ul_last < 4000) {
     _locked = false; _ul_back = false;
-    _kb.setBacklight(_cfg.kb_light != 0);
+    kbLight();
   } else _ul_back = false;
   _dirty = true;
 }
@@ -2662,11 +2653,17 @@ void UITask::key(uint8_t k) {
     if (k == M9K_DOWN) { _bar = true; _bar_sel = S_START; return; }
     if (k == M9K_LEFT) { tab(S_SETTINGS); return; }
     if (k == M9K_RIGHT) { tab(S_MSGS); return; }
-    if (k == M9K_F3) {                                 // Menu na kafelku: wymiana kafelka, Widmo, log pakietów
+    if (k == M9K_F3) {                                 // Menu na kafelku: wymiana kafelka na jeden z listy
       _tile_slot = (int8_t)(sel() >= 0 && sel() < 6 ? sel() : 0);
-      _menu_n = 0; _menu_msg = _menu_thread = false; snprintf(_menu_title, sizeof(_menu_title), "Kafelek: %s", TILE_NAMES[_cfg.tiles[_tile_slot] % T_COUNT]);
-      _menu_act[_menu_n++] = A_TILE; _menu_act[_menu_n++] = A_SPEC; _menu_act[_menu_n++] = A_LOG;
-      push(S_MENU); return;
+      pickBegin(P_TILE, "Zmień kafelek");
+      for (int q = 0; q < T_COUNT; q++) {
+        char t[48]; int at = -1;
+        for (int j = 0; j < 6; j++) if (_cfg.tiles[j] == q) at = j;
+        if (at < 0) scopy(t, sizeof(t), TILE_NAMES[q]); else snprintf(t, sizeof(t), "%s · miejsce %d", TILE_NAMES[q], at + 1);
+        pickAdd(t);
+      }
+      pickOpen(_cfg.tiles[_tile_slot]);
+      return;
     }
     if (k == M9K_ENTER && sel() >= 0 && sel() < 6) tileEnter(_cfg.tiles[sel()]);
     return;
@@ -2747,6 +2744,20 @@ void UITask::fillStatus() {
   v.wifi = (uint8_t)(m9wifiBars() + 1);
   v.batt = battPercent(getBattMilliVolts());
   v.charging = digitalRead(M9_PIN_EXT_PWR) == LOW;
+  // preset radia i potwierdzenie, że radio słucha (chwilowe nadawanie nie gasi napisu)
+  unsigned long now = millis();
+  bool narrow = fabsf(_prefs->freq - 869.618f) < 0.005f && fabsf(_prefs->bw - 62.5f) < 0.1f && _prefs->sf == 8 && _prefs->cr == 8;
+  if (the_mesh.uiRadioIsSF6()) strcpy(v.radio, "SF6"); else if (narrow) strcpy(v.radio, "SF8"); else snprintf(v.radio, sizeof(v.radio), "SF%d", _prefs->sf);
+  if (m9radioListening()) _radio_ok_at = now ? now : 1;
+  v.radio_ok = _radio_ok_at && now - _radio_ok_at < 3000;
+  v.tx_now = _tx_until && (long)(now - _tx_until) < 0;
+  v.rx_now = _rx_until && (long)(now - _rx_until) < 0;
+}
+
+// Podświetlenie klawiatury: świeci tylko przy włączonym, nieprzyciemnionym i odblokowanym ekranie, jeśli jest włączone w ustawieniach.
+// Stan jest wymuszany co chwilę, żeby nic (start urządzenia, blokada, inne kody) nie zostawiło go inaczej.
+void UITask::kbLight() {
+  _kb.setBacklight(_awake && !_dimmed && !_locked && _cfg.kb_light != 0);
 }
 
 // ---------------- Start: 6 miejsc, 12 kafelków do wyboru ----------------
@@ -2768,6 +2779,7 @@ void UITask::fillTile(UiTile& t, uint8_t id) {
   ContactInfo c;
   char ago[16];
   scopy(t.label, sizeof(t.label), TILE_NAMES[id < T_COUNT ? id : 0]);
+  t.icol = TILE_COL[id < T_COUNT ? id : 0];
   switch (id) {
     case T_MSG: {
       int unread = v.unread;
@@ -2778,22 +2790,25 @@ void UITask::fillTile(UiTile& t, uint8_t id) {
       snprintf(t.sub2, sizeof(t.sub2), "rozmów: %d", _thread_n);
       break;
     }
-    case T_CT: case T_RPT: {                         // kontakty (wszystkie bez czujników) albo same repeatery
-      int all = 0, rpts = 0, fav = 0;
+    case T_CT: case T_RPT: {                         // Kontakty: wszystkie (bez czujników), ostatnio słyszana osoba; Repeatery: same RPT, ostatnio słyszany RPT
+      int all = 0, rpts = 0;
       int total = the_mesh.getTotalContactSlots();
       for (int i = MAX_ANON_CONTACTS; i < total; i++) {
         if (!the_mesh.getContactByIdx(i, c) || c.type == ADV_TYPE_NONE || c.type == ADV_TYPE_SENSOR) continue;
         all++;
         if (c.type == ADV_TYPE_REPEATER) rpts++;
-        if ((c.flags & 1) && (id == T_CT || c.type == ADV_TYPE_REPEATER)) fav++;
       }
       t.icon = id == T_CT ? UII_USER : UII_TOWER;
       snprintf(t.value, sizeof(t.value), "%d", id == T_CT ? all : rpts);
-      int h = -1;                                    // ostatnio usłyszany węzeł (dla Repeaterów: ostatni repeater)
-      for (int i = 0; i < the_mesh.ui_heard_n; i++) if (id == T_CT || the_mesh.ui_heard[i].type == ADV_TYPE_REPEATER) { h = i; break; }
+      int h = -1;
+      for (int i = 0; i < the_mesh.ui_heard_n; i++) if ((the_mesh.ui_heard[i].type == ADV_TYPE_REPEATER) == (id == T_RPT)) { h = i; break; }
       if (h >= 0) { fmtAgo(t.side, sizeof(t.side), the_mesh.ui_heard_at[h]); scopy(t.sub, sizeof(t.sub), the_mesh.ui_heard[h].name); }
-      else strcpy(t.sub, "nikogo nie słychać");
-      snprintf(t.sub2, sizeof(t.sub2), "ulubionych: %d", fav);
+      else strcpy(t.sub, id == T_CT ? "nikogo nie słychać" : "żadnego nie słychać");
+      if (id == T_CT) snprintf(t.sub2, sizeof(t.sub2), "w tym RPT: %d", rpts);
+      else if (h >= 0) {                             // odległość do ostatnio słyszanego repeatera
+        const ContactInfo& q = the_mesh.ui_heard[h]; double lat, lon; int sats;
+        if ((q.gps_lat || q.gps_lon) && gpsFix(&lat, &lon, &sats)) { snprintf(t.sub2, sizeof(t.sub2), "%.1f km stąd", distKm(lat, lon, q.gps_lat / 1e6, q.gps_lon / 1e6)); comma(t.sub2); }
+      }
       break;
     }
     case T_RADIO: {
@@ -2870,6 +2885,16 @@ void UITask::fillTile(UiTile& t, uint8_t id) {
       if (_adv_sent_at) { fmtAgo(ago, sizeof(ago), _adv_sent_at); snprintf(t.sub, sizeof(t.sub), "ostatni: %s", ago); } else strcpy(t.sub, "Enter: do sąsiadów");
       if (ADV_HOURS[_cfg.adv_idx]) snprintf(t.sub2, sizeof(t.sub2), "sam co %d godz.", ADV_HOURS[_cfg.adv_idx]); else strcpy(t.sub2, "automat wyłączony");
       break;
+    case T_DISC:                                     // ping do sąsiadów: ilu odpowiedziało ostatnio
+      t.icon = UII_PING;
+      if (the_mesh.ui_disc_tag == 0) { strcpy(t.value, "ping"); strcpy(t.sub, "kto mnie słyszy?"); strcpy(t.sub2, "Enter: zapytaj"); }
+      else {
+        snprintf(t.value, sizeof(t.value), "%d", the_mesh.ui_disc_n);
+        int best = -128; for (int i = 0; i < the_mesh.ui_disc_n; i++) if (the_mesh.ui_disc[i].snr_rx > best) best = the_mesh.ui_disc[i].snr_rx;
+        strcpy(t.sub, the_mesh.ui_disc_n ? "odpowiedziało" : "nikt nie odpowiedział");
+        if (the_mesh.ui_disc_n) { snprintf(t.sub2, sizeof(t.sub2), "najlepszy SNR %.1f", best / 4.0f); comma(t.sub2); } else strcpy(t.sub2, "Enter: jeszcze raz");
+      }
+      break;
     case T_DEV:
       t.icon = UII_SCREEN;
       scopy(t.value, sizeof(t.value), M9_FW_VERSION);
@@ -2885,11 +2910,11 @@ void UITask::tileEnter(uint8_t id) {
     case T_MSG: tab(S_MSGS); break;
     case T_CT: tab(S_CONTACTS); break;
     case T_RPT: tab(S_RPTS); break;
-    case T_RADIO: tab(S_SETTINGS); sel() = 0; radioLoad(); push(S_RADIO); break;
-    case T_NET: tab(S_SETTINGS); sel() = 1; push(S_SET_BT); break;
+    case T_RADIO: radioLoad(); push(S_RADIO); break;      // prosto z kafelka: Wstecz wraca na Start
+    case T_NET: push(S_SET_BT); break;
     case T_SPEC: push(S_SPEC); break;
     case T_BATT: detailBattery(); break;
-    case T_POS: tab(S_SETTINGS); sel() = 2; push(S_SET_POS); break;
+    case T_POS: push(S_SET_POS); break;
     case T_MAP: openMap(); break;
     case T_LOG: push(S_LOG); break;
     case T_ADV:
@@ -2897,6 +2922,7 @@ void UITask::tileEnter(uint8_t id) {
       else popup("Błąd advertu", "", true);
       break;
     case T_DEV: detailInfo(); break;
+    case T_DISC: push(S_DISC); break;
   }
 }
 
@@ -2909,7 +2935,8 @@ void UITask::fillSettings() {
   static const uint8_t IC[8] = { UII_SIGNAL, UII_BT, UII_GPS, UII_TOWER, UII_USER, UII_MAIL, UII_SCREEN, UII_GEAR };
   for (int i = 0; i < 8; i++) {
     UiTile& t = v.tile[i];
-    strcpy(t.label, N[i]); t.icon = IC[i];
+    static const uint8_t COL[8] = { UIC_PINK, UIC_BLUE, UIC_RED, UIC_AMBER, UIC_BLUE, UIC_AMBER, UIC_TEAL, UIC_VIOLET };
+    strcpy(t.label, N[i]); t.icon = IC[i]; t.icol = COL[i];
     switch (i) {
       case 0: if (the_mesh.uiRadioIsSF6()) snprintf(t.sub, sizeof(t.sub), "SF6 · %d dBm", _prefs->tx_power_dbm); else { snprintf(t.sub, sizeof(t.sub), "%.3f · SF%d", _prefs->freq, _prefs->sf); comma(t.sub); } break;
       case 1: if (!isBluetoothEnabled()) strcpy(t.sub, "wyłączony"); else if (hasConnection()) strcpy(t.sub, "połączony"); else snprintf(t.sub, sizeof(t.sub), "PIN %06lu", (unsigned long)the_mesh.getBLEPin()); break;
@@ -2998,8 +3025,8 @@ void UITask::fillThread() {
   v.screen = UIS_THREAD; v.tab = -1;
   if (_input_mode != IN_MSG) {                       // pole do wpisania czegoś innego niż wiadomość
     static const char* const T[14] = { "", "Nowy kanał", "Częstotliwość", "Nazwa urządzenia", "Data i godzina", "Hasło repeatera", "Komenda", "Szerokość geograficzna", "Długość geograficzna", "PIN Bluetooth",
-                                       "Sieć WiFi", "Hasło WiFi", "Adres mapy", "PIN blokady ekranu" };
-    static const char* const R[14] = { "", "kanał z hasztagiem", "MHz", "do 22 znaków", "czas polski", "", "konsola repeatera", "stopnie", "stopnie", "6 cyfr", "nazwa sieci", "puste = bez zmian", "internet", "4–8 cyfr" };
+                                       "Sieć WiFi", "Hasło WiFi", "Adres mapy", "Kod blokady ekranu" };
+    static const char* const R[14] = { "", "kanał z hasztagiem", "MHz", "do 22 znaków", "czas polski", "", "konsola repeatera", "stopnie", "stopnie", "6 cyfr", "nazwa sieci", "puste = bez zmian", "internet", "4–8 liter lub cyfr" };
     static const char* const N[14] = { "", "Wpisz nazwę, np. #beskidy. Kto wpisze tę samą nazwę, ten jest na kanale.", "Wpisz częstotliwość w MHz, np. 869.618",
       "Pod tą nazwą widzą Cię inni w sieci. Polskie litery: ctrl, potem litera.",
       "Format: RRRR-MM-DD GG:MM. Zegar ustawia się też sam po połączeniu z aplikacją w telefonie i z GPS po złapaniu pozycji.",
@@ -3010,7 +3037,7 @@ void UITask::fillThread() {
       "Nazwa sieci WiFi, przez którą urządzenie pobierze mapę: domowa albo hotspot z telefonu. Wielkość liter ma znaczenie.",
       "Hasło do tej sieci WiFi. Zapisane hasło jest zaszyfrowane i nie jest tu pokazywane; wpisz nowe albo zostaw puste pole.",
       "Adres w internecie, spod którego urządzenie pobiera pliki mapy (musi tam być plik lista.txt).",
-      "Nowy PIN do odblokowania ekranu. Zapamiętaj go: bez PIN-u pomoże tylko wgranie firmware kablem z kasowaniem pamięci." };
+      "Nowy kod do odblokowania ekranu: litery lub cyfry (wielkość liter nie ma znaczenia). Zapamiętaj go: bez kodu pomoże tylko wgranie firmware kablem z kasowaniem pamięci." };
     strcpy(v.title, T[_input_mode]); strcpy(v.title_right, R[_input_mode]); strcpy(v.line1, N[_input_mode]);
     scopy(v.input, sizeof(v.input), _input);
     v.input_chars = _input_chars;
@@ -3126,9 +3153,9 @@ void UITask::fillLock() {
   if (_cfg.lock == 2 && _pin_have) {
     unsigned long now = millis();
     if (_popup_until && _pin_popup) strcpy(v.line2, "Bluetooth: odblokuj, żeby sparować");   // PIN parowania nie na zablokowanym ekranie
-    if (_pin_wait && (long)(now - _pin_wait) < 0) { snprintf(v.footer, sizeof(v.footer), "Zły PIN (%d). Poczekaj %lu s", _pin_fails, (unsigned long)((_pin_wait - now) / 1000 + 1)); }
-    else if (_pin_fails) snprintf(v.footer, sizeof(v.footer), "Zły PIN (%d). Wpisz PIN i naciśnij Enter", _pin_fails);
-    else strcpy(v.footer, "Wpisz PIN i naciśnij Enter");
+    if (_pin_wait && (long)(now - _pin_wait) < 0) { snprintf(v.footer, sizeof(v.footer), "Zły kod (%d). Poczekaj %lu s", _pin_fails, (unsigned long)((_pin_wait - now) / 1000 + 1)); }
+    else if (_pin_fails) snprintf(v.footer, sizeof(v.footer), "Zły kod (%d). Wpisz kod i naciśnij Enter", _pin_fails);
+    else strcpy(v.footer, "Wpisz kod i naciśnij Enter");
     int n = strlen(_pin_in); char* d = v.popup1;
     for (int i = 0; i < n; i++) { *d++ = '*'; *d++ = ' '; }
     *d = 0;
@@ -3217,8 +3244,8 @@ void UITask::loop() {
     if (_msgs_dirty) _save_at = now;                 // ekran zgasł: dobry moment na zapis
     m9lcdBacklight(0);
     if (_display) _display->turnOff();
-    _kb.setBacklight(false);
     _dimmed = false;
+    kbLight();
     if (!_cfg.cpu_full && m9wifiBars() < 0) m9cpuSave(true);      // ekran zgasł: procesor 80 MHz (nie przy włączonym WiFi)
   }
   if (!_awake && m9wifiBars() >= 0) m9cpuSave(false);
@@ -3273,6 +3300,12 @@ void UITask::loop() {
 
   sampleLoop(now);
   powerLoop(now);
+  if ((long)(now - _kb_next) >= 0) { _kb_next = now + 300; kbLight(); }
+  // pasek stanu: mignięcie strzałek przy nadaniu i odbiorze pakietu
+  if (the_mesh.ui_tx_count != _tx_seen) { _tx_seen = the_mesh.ui_tx_count; _tx_until = now + 700; if (!_tx_until) _tx_until = 1; if (_awake) _dirty = true; }
+  if (m9logTotal() != _rx_seen) { _rx_seen = m9logTotal(); _rx_until = now + 700; if (!_rx_until) _rx_until = 1; if (_awake) _dirty = true; }
+  if (_tx_until && (long)(now - _tx_until) >= 0) { _tx_until = 0; if (_awake) _dirty = true; }
+  if (_rx_until && (long)(now - _rx_until) >= 0) { _rx_until = 0; if (_awake) _dirty = true; }
 
   // płynne przewijanie rozmowy: kilka klatek do celu
   if (_scroll_px != _scroll_tgt && (long)(now - _scroll_next) >= 0) {
@@ -3345,7 +3378,7 @@ void UITask::powerLoop(unsigned long now) {
     _dimmed = true;
     int b = brightPercent();
     m9lcdBacklight(b > 10 ? 10 : b);
-    _kb.setBacklight(false);
+    kbLight();
   }
   // GPS oszczędny: włącz co X minut, po ustaleniu pozycji (+20 s) albo po 3 min bez niej wyłącz
   if (_sensors && _prefs->gps_enabled && _cfg.gps_mode > 0) {

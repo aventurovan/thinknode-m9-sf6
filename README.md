@@ -6,7 +6,7 @@ i oglądasz mapę bez telefonu. Przez Bluetooth łączy się z aplikacjami **Mes
 
 Domyślny preset radia: **SF6 — 869,618 MHz · BW 62,5 kHz · SF6 · CR 4/8**. Do wyboru jest też **EU/UK Narrow (SF8)**.
 
-Aktualna wersja: **0.21.0** (numer jest też na ekranie startowym i w Ustawieniach).
+Aktualna wersja: **0.22.0** (numer jest też na ekranie startowym i w Ustawieniach).
 
 ---
 
@@ -69,25 +69,26 @@ klawisz **Mapa**, potem **Menu**, potem **„Pobierz z internetu”**. Szczegó�
 
 Pod paskiem stanu jest nazwa urządzenia i data, a niżej sześć kafelków. Po kafelkach chodzi się strzałkami, Enter otwiera wybrany.
 
-Kafelków jest dwanaście i sam wybierasz, które sześć widać i w jakiej kolejności: stań na kafelku, naciśnij **Menu** i wybierz **„Zmień ten kafelek”**.
-Jeśli wybrany kafelek jest już na ekranie, oba zamienią się miejscami.
+Kafelków jest trzynaście i sam wybierasz, które sześć widać i w jakiej kolejności: stań na kafelku, naciśnij **Menu** i wybierz kafelek z listy.
+Jeśli wybrany kafelek jest już na ekranie, oba zamienią się miejscami. Wejście z kafelka w ustawienia wraca po Wstecz na Start.
 
 | Kafelek | Pokazuje | Enter |
 |---|---|---|
 | Wiadomości | nowe wiadomości, ostatnia rozmowa, liczba rozmów | lista rozmów |
-| Kontakty | liczba wszystkich kontaktów (z repeaterami), ostatnio słyszany węzeł | lista kontaktów |
+| Kontakty | liczba wszystkich kontaktów (z repeaterami), ostatnio słyszana osoba | lista kontaktów |
 | Radio | preset (SF6 / SF8), częstotliwość, pasmo i kodowanie | ustawienia radia |
 | Sieć | Bluetooth (nazwa połączonej aplikacji albo PIN) i WiFi (dBm) | ustawienia Bluetooth |
 | Widmo | szum na naszym kanale z wykresem, zajętość kanału, ostatni pakiet | ekran Widmo |
 | Bateria | procent, wykres napięcia z ostatnich godzin, czas pracy, napięcie | szczegóły baterii |
-| Repeatery | liczba repeaterów, ostatnio słyszany | lista repeaterów |
+| Repeatery | liczba repeaterów, ostatnio słyszany i odległość do niego | lista repeaterów |
 | Pozycja | współrzędne z GPS, satelity | ustawienia pozycji |
 | Mapa | zakres zoomów, liczba plików, rozmiar karty | mapa |
 | Log pakietów | pakiety na minutę, typ ostatniego | log pakietów |
 | Advert | kiedy wysłany ostatni, ustawienie automatu | wysyła advert do sąsiadów |
 | Urządzenie | wersja, wolna pamięć, liczba wiadomości | informacje |
+| Discovery | ilu sąsiadów odpowiedziało na ostatni ping, najlepszy SNR | wysyła ping do sąsiadów |
 
-Na początku widać sześć pierwszych. Menu na kafelku otwiera też **Widmo** i **Log pakietów**.
+Na początku widać sześć pierwszych.
 
 ### Wiadomości
 
@@ -150,15 +151,15 @@ Kafelek Bateria pokazuje, jak spada napięcie i ile czasu zostało. Pierwsze osz
 
 - **Ustawienia** w ośmiu działach: Radio, Bluetooth, Pozycja i prywatność, Advert, Kontakty, Wiadomości, Ekran i dźwięk, System. Każdą wartość wybiera się z listy.
 - **Radio:** presety SF6 i EU/UK Narrow, własne parametry, moc nadawania, bajty trasy (1 / 2 / 3), limit nadawania.
-- **Blokada ekranu:** włącza się z wygaszeniem ekranu. Do wyboru zwykła (Wstecz, potem Enter) albo z **PIN-em** (opis niżej).
+- **Blokada ekranu:** włącza się z wygaszeniem ekranu. Do wyboru zwykła (Wstecz, potem Enter) albo z **kodem** (opis niżej).
 - **Dźwięki:** wiadomości, adverty repeaterów (wszystkie albo tylko ulubione), wyciszenie całego urządzenia.
 - **Jasność ekranu** i podświetlenie klawiatury.
-- **Pasek stanu:** godzina, nieprzeczytane, GPS, Bluetooth, WiFi z zasięgiem, bateria.
+- **Pasek stanu:** godzina, preset radia (np. „SF6”, zielony, gdy radio słucha) ze strzałkami migającymi przy nadaniu i odbiorze pakietu, nieprzeczytane, GPS, Bluetooth, WiFi z zasięgiem, bateria.
 
 ### Bezpieczeństwo
 
 - **Podpisane aktualizacje:** każdy build jest podpisywany kluczem Ed25519 trzymanym w sekretach repozytorium. Urządzenie ma wbudowany klucz publiczny i instaluje przez WiFi tylko podpisane pliki.
-- **Blokada ekranu z PIN-em** (Ustawienia › Ekran i dźwięk › Blokada ekranu): 4–8 cyfr. Ekran blokuje się po wygaszeniu i po każdym włączeniu urządzenia. Po 5 złych próbach rośnie przerwa (od 30 s do 15 min). Zapomniany PIN usuwa tylko wgranie firmware kablem z kasowaniem pamięci.
+- **Blokada ekranu z kodem** (Ustawienia › Ekran i dźwięk › Blokada ekranu): 4–8 liter lub cyfr, wielkość liter nie ma znaczenia. Ekran blokuje się po wygaszeniu i po każdym włączeniu urządzenia. Po 5 złych próbach rośnie przerwa (od 30 s do 15 min). Zapomniany kod usuwa tylko wgranie firmware kablem z kasowaniem pamięci.
 - **Rozmowy prywatne należą do klucza kontaktu, nie do nazwy.** Drugi kontakt o tej samej nazwie dostaje osobną rozmowę z dopiskiem identyfikatora (np. „Marek ·A3F2”). Identyfikator rozmówcy jest w nagłówku rozmowy.
 - **Hasła WiFi i repeaterów** są zapisywane zaszyfrowane kluczem wyprowadzonym z tożsamości urządzenia i nie są pokazywane na ekranie.
 
@@ -187,7 +188,7 @@ Kafelek Bateria pokazuje, jak spada napięcie i ile czasu zostało. Pierwsze osz
 - WiFi i Bluetooth nie działają jednocześnie. Po użyciu WiFi (mapa, aktualizacja) Bluetooth wraca dopiero po restarcie.
 - Pomiar pasma w Widmie na chwilę przerywa odbiór pakietów, dlatego działa tylko przy otwartym ekranie.
 - Nazwy telefonu przez Bluetooth nie da się odczytać. Kafelek Sieć pokazuje nazwę aplikacji (np. „MeshSpeed”).
-- Blokada z PIN-em chroni ekran. Kto ma urządzenie w ręku i odczyta całą pamięć kablem, nadal może dostać się do danych (pamięć urządzenia nie jest szyfrowana).
+- Blokada z kodem chroni ekran. Kto ma urządzenie w ręku i odczyta całą pamięć kablem, nadal może dostać się do danych (pamięć urządzenia nie jest szyfrowana).
 - Jeszcze nie ma: SOS.
 
 Błędy i pomysły zgłaszaj w zakładce **Issues** (najlepiej ze zdjęciem ekranu i numerem wersji).

@@ -547,7 +547,59 @@ static void screensHomeNew() {
   savePPM("16-start-wybor-kafelka.ppm");
 }
 
+
+// ---------- Ustawienia z Widmem i Logiem pakietów: dwie propozycje ----------
+struct St { uint8_t ic; uint8_t col; const char* label; const char* sub; };
+static void setTiles(const St* T, int n, int cols, int top, int selIdx) {
+  const int gap = 4, rows = (n + cols - 1) / cols;
+  int tw = (GFX_W - 12 - (cols - 1) * gap) / cols, th = (GFX_H - BOTTOM_H - top - 4 - (rows - 1) * gap) / rows;
+  if (th > 40) th = 40;
+  for (int i = 0; i < n; i++) {
+    int x = 6 + (i % cols) * (tw + gap), y = top + (i / cols) * (th + gap);
+    bool sel = i == selIdx;
+    if (sel) { g.fillRound(x - 1, y - 1, tw + 2, th + 2, 7, C_ACC); g.fillRound(x + 1, y + 1, tw - 2, th - 2, 5, C_SELT); }
+    else g.fillRound(x, y, tw, th, 6, C_TILE);
+    g.fillRound(x + 6, y + (th - 22) / 2, 22, 22, 6, sel ? C_ACC : C_LINE);
+    g.icon(x + 11, y + (th - 22) / 2 + 5, iconRows(T[i].ic), sel ? C_INK : ICON_COL[T[i].col]);
+    g.text(x + 34, y + th / 2 - 15, T[i].label, cols == 3 ? F_NORMAL : F_BOLD, C_TXT, tw - 38);
+    g.text(x + 34, y + th / 2 + 2, T[i].sub, F_SMALL, C_DIM, tw - 38);
+  }
+}
+static void setHead(const char* title, const char* right) {
+  memset(&v, 0, sizeof(v));
+  strcpy(v.time, "12:14"); v.batt = 78; v.bt = 2; v.gps_on = true; v.sats = 7; v.unread = 2; v.wifi = 0; strcpy(v.radio, "SF6"); v.radio_ok = true;
+  strcpy(v.title, title); strcpy(v.title_right, right);
+  g.clear(C_BG); drawStatus(g, v); drawHeader(g, v, STATUS_H); drawTabs(g, 4, v.unread, false);
+}
+static void screensSettings() {
+  static const St S8[8] = {
+    { UII_SIGNAL, UIC_PINK, "Radio", "SF6 · 22 dBm" }, { UII_BT, UIC_BLUE, "Bluetooth", "PIN 482913" },
+    { UII_GPS, UIC_RED, "Pozycja", "GPS wł. · prywatność" }, { UII_TOWER, UIC_AMBER, "Advert", "co 3 godz." },
+    { UII_USER, UIC_BLUE, "Kontakty", "dodaje wszystko" }, { UII_MAIL, UIC_AMBER, "Wiadomości", "trasa · potwierdzenia" },
+    { UII_SCREEN, UIC_TEAL, "Ekran i dźwięk", "1 min · dźwięk wł." }, { UII_GEAR, UIC_VIOLET, "System", "informacje · zegar" } };
+  static const St TOOLS[6] = {
+    { UII_SPEC, UIC_VIOLET, "Widmo", "szum -114 dBm" }, { UII_CHECK, UIC_BLUE, "Log pakietów", "3/min · razem 234" },
+    { UII_PING, UIC_VIOLET, "Discovery", "kto mnie słyszy?" }, { UII_SD, UIC_GREEN, "Mapa z internetu", "z6–13 · 9 plików" },
+    { UII_BOLT, UIC_AMBER, "Aktualizacja", "masz 0.22.0" }, { UII_BATT, UIC_GREEN, "Bateria", "78 % · ok. 14 h" } };
+  static const St ALL12[12] = { S8[0], S8[1], S8[2], S8[3], S8[4], S8[5], { UII_SCREEN, UIC_TEAL, "Ekran", "1 min" }, S8[7],
+    { UII_SPEC, UIC_VIOLET, "Widmo", "-114 dBm" }, { UII_CHECK, UIC_BLUE, "Log", "3/min" }, { UII_PING, UIC_VIOLET, "Discovery", "ping" }, { UII_BOLT, UIC_AMBER, "Aktualizacja", "0.22.0" } };
+  // 1: dwie karty — Ustawienia i Narzędzia (przełączane jak filtry w Kontaktach)
+  setHead("Ustawienia", "wersja 0.22.0");
+  chips(STATUS_H + HEADER_H + 3, { "Ustawienia", "Narzędzia" }, 0);
+  setTiles(S8, 8, 2, STATUS_H + HEADER_H + 24, 0);
+  savePPM("17-ustawienia-karta1.ppm");
+  setHead("Ustawienia", "wersja 0.22.0");
+  chips(STATUS_H + HEADER_H + 3, { "Ustawienia", "Narzędzia" }, 1);
+  setTiles(TOOLS, 6, 2, STATUS_H + HEADER_H + 24, 1);
+  savePPM("18-ustawienia-karta2.ppm");
+  // 2: jeden ekran, 12 mniejszych kafelków w trzech kolumnach
+  setHead("Ustawienia i narzędzia", "wersja 0.22.0");
+  setTiles(ALL12, 12, 3, STATUS_H + HEADER_H + 4, 8);
+  savePPM("19-ustawienia-12.ppm");
+}
+
 int main() {
+  screensSettings();
   screensHomeNew();
   screensHomeFinal();
   screensHome6();

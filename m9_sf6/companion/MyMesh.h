@@ -109,6 +109,8 @@ public:
   int uiSeal(uint8_t* dest, const uint8_t* src, int len);
   int uiUnseal(uint8_t* dest, const uint8_t* src, int len);
   void uiPinHash(uint8_t* out32, const uint8_t* salt8, const char* pin);
+  volatile uint32_t ui_tx_count = 0;      // ile pakietów nadało radio (pasek stanu: strzałka nadawania)
+  void logTx(mesh::Packet* packet, int len) override { ui_tx_count++; }
   bool ui_rx_chan = false;                // ostatnio odebrana wiadomość przyszła z kanału (a nie od kontaktu)
   char ui_app_name[24] = "";              // nazwa aplikacji połączonej przez Bluetooth (z CMD_APP_START)
   bool uiDecodeGroup(const uint8_t* payload, int len, char* chan, int chan_n, char* who, int who_n);

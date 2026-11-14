@@ -21,7 +21,7 @@ struct ContactInfo;
 #define UI_LIST_MAX    520
 #define UI_KVS_MAX     64
 #define UI_MUTED_MAX   16
-#define UI_PICK_MAX    12
+#define UI_PICK_MAX    14
 #define UI_PW_MAX      12
 #define UI_MENU_MAX    8
 
@@ -215,7 +215,10 @@ class UITask : public AbstractUITask {
   void fillStatus();
   void fillStart();
   void fillTile(UiTile& t, uint8_t id); void tileEnter(uint8_t id);
-  uint32_t _adv_sent_at; int8_t _tile_slot;   // kiedy ostatnio wysłaliśmy advert z ekranu; miejsce, w którym zmieniamy kafelek
+  uint32_t _adv_sent_at; int8_t _tile_slot;
+  // pasek stanu: radio słucha, mignięcia strzałek nadawania i odbioru; wymuszany stan podświetlenia klawiatury
+  unsigned long _radio_ok_at, _tx_until, _rx_until, _kb_next; uint32_t _tx_seen, _rx_seen;
+  void kbLight();   // kiedy ostatnio wysłaliśmy advert z ekranu; miejsce, w którym zmieniamy kafelek
   void fillSpec(); void keySpec(uint8_t k); void sweepRange(float& f0, float& step);
   void buildLog(); void fillLog(); void keyLog(uint8_t k); void detailPkt(uint32_t seq);
   void fillChInfo(); void fillQR();

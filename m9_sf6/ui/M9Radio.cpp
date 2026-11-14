@@ -38,6 +38,7 @@ bool m9radioSweep(float f0, float step, int n, int8_t* out) {
   return true;
 }
 
+bool m9radioListening() { return radio_driver.isInRecvMode(); }
 int m9radioNoiseFloor() { return radio_driver.getNoiseFloor(); }
 uint32_t m9radioAirtime(int len) { return radio_driver.getEstAirtimeFor(len); }
 

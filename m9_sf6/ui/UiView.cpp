@@ -20,6 +20,9 @@
 #define C_TILE  GFX_RGB(0x11, 0x16, 0x1D)
 #define C_BUB   GFX_RGB(0x16, 0x1D, 0x26)
 #define C_SELT  GFX_RGB(0x22, 0x1C, 0x10)
+#define C_VIOL  GFX_RGB(0xB4, 0x9C, 0xFF)
+#define C_TEAL  GFX_RGB(0x4F, 0xD8, 0xC4)
+static const uint16_t ICON_COL[8] = { C_DIM, C_ACC, C_BLUE, C_GRN, C_PINK, C_RED, C_VIOL, C_TEAL };   // kolory ikon kafelków (UIC_*)
 
 #define STATUS_H 20
 #define BOTTOM_H 24
@@ -52,6 +55,7 @@ static const char* const IC_SIGNAL[12] = { "", "..........##", "..........##", "
 static const char* const IC_NET[12] = { "....####....", "..##.##.##..", ".#..#..#..#.", ".#..#..#..#.", "############", "#...#..#...#", "#...#..#...#", "############", ".#..#..#..#.", ".#..#..#..#.", "..##.##.##..", "....####...." };
 static const char* const IC_SPEC[12] = { "", "", "..#.........", "..#.....#...", "..#.....#...", "..#..#..#...", "#.#..#..#.#.", "#.#..#..#.#.", "#.#.##.##.##", "#.#.##.##.##", "############", "" };
 static const char* const IC_BATT[12] = { "", "", "", "##########..", "#........#..", "#.######.###", "#.######.###", "#........#..", "##########..", "", "", "" };
+static const char* const IC_PING[12] = { "", ".#........#.", "#..#....#..#", "#.#..##..#.#", "#.#.####.#.#", "#.#.####.#.#", "#.#..##..#.#", "#..#....#..#", ".#........#.", "", "", "" };
 static const char* const IC_WIFI[12] = { "", "...######...", ".##......##.", "#..........#", "....####....", "..##....##..", "............", "....####....", "...#....#...", "............", ".....##.....", ".....##....." };
 
 static void dot(Gfx& g, int cx, int cy, int r, uint16_t c);
@@ -63,7 +67,7 @@ static const char* const* iconRows(uint8_t i) {
     case UII_BOLT: return IC_BOLT; case UII_SD: return IC_SD; case UII_ROOM: return IC_ROOM;
     case UII_CHECK: return IC_CHECK; case UII_MUTE: return IC_MUTE; case UII_SIGNAL: return IC_SIGNAL;
     case UII_HOME: return IC_HOME; case UII_GEAR: return IC_GEAR; case UII_SCREEN: return IC_SCREEN; case UII_SHIELD: return IC_SHIELD;
-    case UII_NET: return IC_NET; case UII_SPEC: return IC_SPEC; case UII_BATT: return IC_BATT; case UII_WIFI: return IC_WIFI;
+    case UII_NET: return IC_NET; case UII_SPEC: return IC_SPEC; case UII_BATT: return IC_BATT; case UII_WIFI: return IC_WIFI; case UII_PING: return IC_PING;
   }
   return NULL;
 }
@@ -75,6 +79,11 @@ static void drawStatus(Gfx& g, const UiView& v) {
   g.fillRect(0, 0, GFX_W, STATUS_H, C_BAR);
   int x = 6;
   x += g.text(x, 3, v.time, F_BOLD, C_TXT) + 8;
+  if (v.radio[0]) {                                // preset radia: zielony, gdy radio słucha; strzałki migają przy nadaniu i odbiorze
+    x += g.text(x, 4, v.radio, F_SMALL, v.radio_ok ? C_GRN : C_RED) + 3;
+    x += g.text(x, 4, "▲", F_SMALL, v.tx_now ? C_ACC : C_LINE);
+    x += g.text(x, 4, "▼", F_SMALL, v.rx_now ? C_BLUE : C_LINE) + 8;
+  }
   if (v.unread > 0) {
     char t[12]; snprintf(t, sizeof(t), "%d", v.unread);
     g.icon(x, 4, IC_MAIL, C_ACC);
@@ -270,7 +279,7 @@ static void drawGrid(Gfx& g, const UiView& v) {
     else g.fillRound(x, y, tw, th, 6, C_TILE);
     const char* const* ic = iconRows(t.icon);
     if (start) {                                      // ikona + nazwa, duża wartość, drobny opis
-      if (ic) g.icon(x + 7, y + 6, ic, sel ? C_ACC : C_DIM);
+      if (ic) g.icon(x + 7, y + 6, ic, t.icol ? ICON_COL[t.icol & 7] : sel ? C_ACC : C_DIM);
       g.text(x + 23, y + 6, t.label, F_SMALL, sel ? C_ACC : C_DIM, tw - 28);
       if (t.kind == UIT_NET) { drawNetTile(g, v, x, y, tw); g.text(x + 7, y + th - 17, t.sub, F_SMALL, C_DIM, tw - 14); continue; }
       bool fits = Gfx::textWidth(t.value, F_BIG) <= tw - 14;
@@ -291,7 +300,7 @@ static void drawGrid(Gfx& g, const UiView& v) {
       g.text(x + 7, y + 63, t.sub2, F_SMALL, C_DIM, tw - 14);
     } else {                                          // ikona w kółku, nazwa i jedna linia podsumowania
       g.fillRound(x + 6, y + (th - 22) / 2, 22, 22, 6, sel ? C_ACC : C_LINE);
-      if (ic) g.icon(x + 11, y + (th - 22) / 2 + 5, ic, sel ? C_INK : C_TXT);
+      if (ic) g.icon(x + 11, y + (th - 22) / 2 + 5, ic, sel ? C_INK : t.icol ? ICON_COL[t.icol & 7] : C_TXT);
       g.text(x + 34, y + th / 2 - 15, t.label, F_BOLD, C_TXT, tw - 40);
       g.text(x + 34, y + th / 2 + 2, t.sub, F_SMALL, C_DIM, tw - 40);
     }
