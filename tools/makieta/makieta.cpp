@@ -241,6 +241,7 @@ static void screenChannelQR() {
 // ---------- Start (Home): 9 kafelków 3×3, zegar w jednym wierszu ----------
 static const char* const IC_WIFI[12] = { "", "...######...", ".##......##.", "#..........#", "....####....", "..##....##..", "............", "....####....", "...#....#...", "............", ".....##.....", ".....##....." };
 static const char* const IC_SPEC[12] = { "", "", "..#.........", "..#.....#...", "..#.....#...", "..#..#..#...", "#.#..#..#.#.", "#.#..#..#.#.", "#.#.##.##.##", "#.#.##.##.##", "############", "" };
+static const char* const IC_NET[12] = { "....####....", "..##.##.##..", ".#..#..#..#.", ".#..#..#..#.", "############", "#...#..#...#", "#...#..#...#", "############", ".#..#..#..#.", ".#..#..#..#.", "..##.##.##..", "....####...." };
 static const char* const IC_BATT[12] = { "", "", "", "##########..", "#........#..", "#.######.###", "#.######.###", "#........#..", "##########..", "", "", "" };
 
 struct HomeTile { const char* const* ic; const char* label; const char* val; const char* sub; uint16_t vc; int spark; int bar; };
@@ -341,20 +342,25 @@ static void home6(const char* file, const Tile6* T, int selIdx, const UiView& st
     g.icon(x + 7, y + 6, t.ic, sel ? C_ACC : C_DIM);
     g.text(x + 23, y + 6, t.label, F_SMALL, sel ? C_ACC : C_DIM, tw - 28);
     if (t.kind == K_LINK) {                          // dwa wiersze: Bluetooth i WiFi
-      g.icon(x + 7, y + 26, IC_BT, btOn ? (btConn ? C_BLUE : C_TXT) : C_LINE);
-      g.text(x + 23, y + 24, btOn ? (btConn ? "połączony" : "czeka") : "wyłączony", F_BOLD, btOn ? (btConn ? C_BLUE : C_TXT) : C_DIM, tw - 28);
-      g.icon(x + 7, y + 47, IC_WIFI, wifiDbm ? C_TXT : C_LINE);
-      char w[24]; if (wifiDbm) snprintf(w, sizeof(w), "%d dBm", wifiDbm); else strcpy(w, "wyłączone");
-      g.text(x + 23, y + 45, w, F_BOLD, wifiDbm ? C_TXT : C_DIM, tw - 28);
+      g.text(x + 7, y + 24, btOn ? "BT ON" : "BT OFF", F_BOLD, btOn ? (btConn ? C_BLUE : C_TXT) : C_DIM, tw - 14);
+      char w[24]; if (wifiDbm) snprintf(w, sizeof(w), "WIFI %d dBm", wifiDbm); else strcpy(w, "WIFI OFF");
+      g.text(x + 7, y + 45, w, F_BOLD, wifiDbm ? C_TXT : C_DIM, tw - 14);
       continue;
     }
     bool fits = Gfx::textWidth(t.val, F_BIG) <= tw - 14;
     int vw = g.text(x + 7, y + (fits ? 23 : 26), t.val, fits ? F_BIG : F_BOLD, t.vc, tw - 14);
     if (t.kind == K_SPARK) sparkline(x + vw + 13, y + 26, tw - vw - 20, 15);
-    if (t.kind == K_BATT) {
-      int bx = x + vw + 13, bw = tw - vw - 21;
-      g.fillRound(bx, y + 29, bw, 10, 3, C_LINE);
-      g.fillRound(bx, y + 29, bw * t.pct / 100, 10, 3, t.pct <= 15 ? C_RED : C_GRN);
+    if (t.kind == K_BATT) {                          // wykres napięcia z ostatnich godzin (spada w prawo; przy ładowaniu rośnie)
+      int bx = x + vw + 12, bw = tw - vw - 19, by = y + 25, bh = 16, prev = -1;
+      g.fillRect(bx, by + bh, bw, 1, C_LINE);
+      for (int i = 0; i < bw; i++) {
+        float f = (float)i / (bw - 1);
+        float u = t.vc == C_ACC ? 0.25f + 0.65f * f : 0.95f - 0.55f * f - 0.2f * f * f;
+        u += (rnd() - 0.5f) * 0.06f;
+        int yy = by + bh - 1 - (int)(u * (bh - 1)); if (yy < by) yy = by;
+        if (prev >= 0) { int a = prev < yy ? prev : yy, b = prev < yy ? yy : prev; g.fillRect(bx + i, a, 1, b - a + 2, t.vc == C_ACC ? C_ACC : C_GRN); }
+        prev = yy;
+      }
     }
     g.text(x + 7, y + 47, t.sub, F_SMALL, C_DIM, tw - 14);
   }
@@ -396,7 +402,7 @@ static void screensHomeFinal() {
     { IC_MAIL, "Wiadomości", "2 nowe", "#bot · BBot", C_ACC, K_PLAIN, 0 },
     { IC_USER, "Kontakty", "38", "usłyszane: 12", C_TXT, K_PLAIN, 0 },
     { IC_SIGNAL, "Radio", "SF6", "869,618 MHz", C_TXT, K_PLAIN, 0 },
-    { IC_BT, "Łączność", "", "", C_TXT, K_LINK, 0 },
+    { IC_NET, "Sieć", "", "", C_TXT, K_LINK, 0 },
     { IC_SPEC, "Widmo", "-114", "zajęte 7 %", C_TXT, K_SPARK, 0 },
     { IC_BATT, "Bateria", "78 %", "zostało ok. 14 h", C_TXT, K_BATT, 78 },
   };
@@ -406,7 +412,7 @@ static void screensHomeFinal() {
     { IC_MAIL, "Wiadomości", "brak nowych", "rozmów: 6", C_TXT, K_PLAIN, 0 },
     { IC_USER, "Kontakty", "38", "usłyszane: 12", C_TXT, K_PLAIN, 0 },
     { IC_SIGNAL, "Radio", "SF8", "869,618 MHz", C_TXT, K_PLAIN, 0 },
-    { IC_BT, "Łączność", "", "", C_TXT, K_LINK, 0 },
+    { IC_NET, "Sieć", "", "", C_TXT, K_LINK, 0 },
     { IC_SPEC, "Widmo", "-109", "zajęte 12 %", C_TXT, K_SPARK, 0 },
     { IC_BATT, "Bateria", "64 %", "pełna za 1 h", C_ACC, K_BATT, 64 },
   };
