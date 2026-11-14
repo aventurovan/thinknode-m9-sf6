@@ -45,13 +45,13 @@ class UITask : public AbstractUITask {
              S_THREAD, S_KV, S_BOOT, S_MENU, S_HEARD, S_QUICK, S_DISC, S_LOGIN, S_ADMIN, S_ADMIN_ACT, S_ADMIN_CLI,
              S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS, S_PICK, S_MAP, S_MAP_NET, S_TIME, S_OTA, S_SPEC, S_LOG, S_CHINFO, S_QR };
   enum InputMode { IN_MSG = 0, IN_CHANNEL, IN_FREQ, IN_NAME, IN_TIME, IN_PASS, IN_CLI, IN_LAT, IN_LON, IN_PIN, IN_WIFI_SSID, IN_WIFI_PASS, IN_MAP_URL, IN_LOCKPIN };
-  enum Act { A_WRITE, A_FAV, A_DETAIL, A_MANAGE, A_DELETE, A_REPLY, A_RESEND, A_COPY, A_DELMSG, A_OPEN, A_MUTE, A_MARKREAD, A_DELCHAN, A_DELTHREAD, A_REPLY_ACK, A_SHOWMAP, A_ROUTE, A_ADDCHAN, A_CHINFO, A_SPEC, A_LOG, A_PKTMAP, A_MULTI, A_SELDEL, A_SELALL, A_SELOLD, A_SELNONE };
+  enum Act { A_WRITE, A_FAV, A_DETAIL, A_MANAGE, A_DELETE, A_REPLY, A_RESEND, A_COPY, A_DELMSG, A_OPEN, A_MUTE, A_MARKREAD, A_DELCHAN, A_DELTHREAD, A_REPLY_ACK, A_SHOWMAP, A_ROUTE, A_ADDCHAN, A_CHINFO, A_SPEC, A_LOG, A_PKTMAP, A_MULTI, A_SELDEL, A_SELALL, A_SELOLD, A_SELNONE, A_TILE };
   enum Pick { P_PRESET, P_BW, P_SF, P_CR, P_TX, P_HASH, P_AIR, P_BT, P_GPS, P_ADVLOC, P_TEL0, P_TEL1, P_TEL2, P_AUTOADV, P_AA_MODE, P_AA_T0, P_AA_T1, P_AA_T2, P_AA_T3,
-              P_AA_FULL, P_AA_HOPS, P_SHOWPATH, P_MULTIACK, P_SOUND, P_SLEEP, P_KBLIGHT, P_WAKE, P_LOCK, P_RPTSORT, P_BRIGHT, P_MSGSND, P_ADVSND, P_MAPRANGE, P_GPSMODE, P_DIM, P_CPU, P_BTAUTO, P_SELOLD };
+              P_AA_FULL, P_AA_HOPS, P_SHOWPATH, P_MULTIACK, P_SOUND, P_SLEEP, P_KBLIGHT, P_WAKE, P_LOCK, P_RPTSORT, P_BRIGHT, P_MSGSND, P_ADVSND, P_MAPRANGE, P_GPSMODE, P_DIM, P_CPU, P_BTAUTO, P_SELOLD, P_TILE };
   enum Confirm { C_NONE = 0, C_DEL_CHANNEL, C_DEL_CONTACT, C_REBOOT, C_FACTORY, C_RPT_REBOOT, C_RPT_SF6, C_CLEAR_MSGS, C_CLEAR_PW, C_CLEAR_BONDS, C_DEL_THREAD, C_WIFI_DL, C_WIFI_FORGET, C_BT_RESTART, C_WIFI_OTA, C_OTA_INSTALL, C_DEL_MULTI };
   struct Thread { char name[32]; uint8_t chan; uint8_t unread; uint32_t last; int16_t last_msg; };
   struct Nav { uint8_t scr; int16_t sel, top; };
-  struct Cfg { uint32_t magic; uint8_t show_path, sleep_idx, kb_light, adv_idx, ct_filter, rpt_sort, no_wake, lock, bright, no_msg_snd, adv_snd, map_range, bt_off, gps_mode, dim_idx, cpu_full, bt_auto; };   // gps_mode 0 = stale; dim_idx 0 = po 10 s; cpu_full 0 = 80 MHz po wygaszeniu; bt_auto 0 = nigdy   // map_range: 0 = cała mapa, 1 = bez zoomu 15, 2 = do zoomu 13;   // bright: 0 = nie ustawiono (pełna jasność), 1..5 = poziom
+  struct Cfg { uint32_t magic; uint8_t show_path, sleep_idx, kb_light, adv_idx, ct_filter, rpt_sort, no_wake, lock, bright, no_msg_snd, adv_snd, map_range, bt_off, gps_mode, dim_idx, cpu_full, bt_auto; uint8_t tiles[6]; };   // tiles: który z 12 kafelków jest w którym miejscu na Start   // gps_mode 0 = stale; dim_idx 0 = po 10 s; cpu_full 0 = 80 MHz po wygaszeniu; bt_auto 0 = nigdy   // map_range: 0 = cała mapa, 1 = bez zoomu 15, 2 = do zoomu 13;   // bright: 0 = nie ustawiono (pełna jasność), 1..5 = poziom
   struct Pw { uint8_t key[6]; char pw[16]; };
   struct WifiCfg { char ssid[33]; char pass[64]; char url[128]; };
 
@@ -214,6 +214,8 @@ class UITask : public AbstractUITask {
   void fill();
   void fillStatus();
   void fillStart();
+  void fillTile(UiTile& t, uint8_t id); void tileEnter(uint8_t id);
+  uint32_t _adv_sent_at; int8_t _tile_slot;   // kiedy ostatnio wysłaliśmy advert z ekranu; miejsce, w którym zmieniamy kafelek
   void fillSpec(); void keySpec(uint8_t k); void sweepRange(float& f0, float& step);
   void buildLog(); void fillLog(); void keyLog(uint8_t k); void detailPkt(uint32_t seq);
   void fillChInfo(); void fillQR();

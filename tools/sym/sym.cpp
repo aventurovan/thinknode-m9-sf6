@@ -203,6 +203,17 @@ int main(int argc, char** argv) {
     keys({ M9K_HOME, M9K_MSG }); save("p-dwie-rozmowy");
     keys({ M9K_ENTER }); save("p-rozmowa-z-id");
   }
+  // nowy Start i wymiana kafelków
+  keys({ M9K_HOME }); save("k-start");
+  keys({ M9K_RIGHT, M9K_F3 }); save("k-menu");
+  keys({ M9K_ENTER }); save("k-lista");
+  for (int i = 0; i < 5; i++) keys({ M9K_DOWN }); keys({ M9K_ENTER }); save("k-repeatery-zamiast-kontaktow");
+  keys({ M9K_DOWN, M9K_F3, M9K_ENTER, M9K_UP, M9K_UP, M9K_ENTER }); save("k-zamiana-miejsc");
+  static const int EXTRA[6] = { 7, 8, 9, 10, 11, 6 };
+  for (int q = 0; q < 6; q++) { keys({ M9K_HOME }); for (int m = 0; m < q; m++) keys({ M9K_RIGHT }); keys({ M9K_F3, M9K_ENTER }); for (int m = 0; m < 12; m++) keys({ M9K_UP }); for (int m = 0; m < EXTRA[q]; m++) keys({ M9K_DOWN }); keys({ M9K_ENTER }); }
+  keys({ M9K_HOME }); save("k-nowe-kafelki");
+  for (int q = 0; q < 6; q++) { keys({ M9K_HOME }); for (int m = 0; m < q; m++) keys({ M9K_RIGHT }); keys({ M9K_F3, M9K_ENTER }); for (int m = 0; m < 12; m++) keys({ M9K_UP }); for (int m = 0; m < q; m++) keys({ M9K_DOWN }); keys({ M9K_ENTER }); }
+  keys({ M9K_HOME }); save("k-z-powrotem");
   // zaznaczanie wielu kontaktów
   keys({ M9K_HOME }); save("z-start");
   keys({ M9K_HOME, M9K_RIGHT, M9K_ENTER }); keys({ M9K_ENTER }); save("z-menu-kontaktu");

@@ -242,8 +242,8 @@ static void drawSpark(Gfx& g, int x, int y, int w, int h, const int8_t* d, int n
 // kafelek Sieć: Bluetooth i WiFi w dwóch wierszach
 static void drawNetTile(Gfx& g, const UiView& v, int x, int y, int tw) {
   uint16_t bc = v.bt_state == 2 ? C_BLUE : v.bt_state == 1 ? C_TXT : C_DIM;
-  g.icon(x + 7, y + 26, IC_BT, bc);
-  g.text(x + 22, y + 25, v.bt_txt, F_SMALL, bc, tw - 26);
+  g.icon(x + 7, y + 28, IC_BT, bc);
+  g.text(x + 22, y + 27, v.bt_txt, F_SMALL, bc, tw - 26);
   char w[24];
   if (v.wifi_dbm) snprintf(w, sizeof(w), "WIFI %d", v.wifi_dbm); else strcpy(w, "WIFI OFF");
   g.icon(x + 7, y + 46, IC_WIFI, v.wifi_dbm ? C_GRN : C_DIM);
@@ -253,16 +253,9 @@ static void drawNetTile(Gfx& g, const UiView& v, int x, int y, int tw) {
 
 static void drawGrid(Gfx& g, const UiView& v) {
   int top;
-  bool start = v.big[0] != 0;
-  if (start) {
-    int cw = g.text(8, STATUS_H + 1, v.big, F_HUGE, C_TXT);
-    g.text(8 + cw + 10, STATUS_H + 8, v.name, F_BOLD, C_TXT, GFX_W - cw - 26);
-    g.text(8 + cw + 10, STATUS_H + 25, v.line1, F_SMALL, C_DIM, GFX_W - cw - 26);
-    top = STATUS_H + 46;
-  } else {
-    drawHeader(g, v, STATUS_H);
-    top = STATUS_H + HEADER_H + 4;
-  }
+  bool start = v.screen == UIS_START;                // Start: w nagłówku nazwa i data (godzina jest na pasku stanu)
+  drawHeader(g, v, STATUS_H);
+  top = STATUS_H + HEADER_H + 4;
   int cols = v.grid_cols > 0 ? v.grid_cols : 2;
   int rows = (v.ntiles + cols - 1) / cols;
   if (rows < 1) return;
@@ -279,22 +272,23 @@ static void drawGrid(Gfx& g, const UiView& v) {
     if (start) {                                      // ikona + nazwa, duża wartość, drobny opis
       if (ic) g.icon(x + 7, y + 6, ic, sel ? C_ACC : C_DIM);
       g.text(x + 23, y + 6, t.label, F_SMALL, sel ? C_ACC : C_DIM, tw - 28);
-      if (t.kind == UIT_NET) { drawNetTile(g, v, x, y, tw); continue; }
+      if (t.kind == UIT_NET) { drawNetTile(g, v, x, y, tw); g.text(x + 7, y + th - 17, t.sub, F_SMALL, C_DIM, tw - 14); continue; }
       bool fits = Gfx::textWidth(t.value, F_BIG) <= tw - 14;
-      int vw = g.text(x + 7, y + (fits ? 23 : 26), t.value, fits ? F_BIG : F_BOLD, t.accent ? C_ACC : C_TXT, tw - 14);
-      if (t.side[0]) g.textRight(x + tw - 7, y + 30, t.side, F_SMALL, C_DIM);
-      if (t.kind == UIT_NOISE) drawSpark(g, x + vw + 13, y + 26, tw - vw - 20, 15, v.spark, v.nspark, C_BLUE, 6);
+      int vw = g.text(x + 7, y + (fits ? 24 : 27), t.value, fits ? F_BIG : F_BOLD, t.accent ? C_ACC : C_TXT, tw - 14);
+      if (t.side[0]) g.textRight(x + tw - 7, y + 31, t.side, F_SMALL, C_DIM);
+      if (t.kind == UIT_NOISE) drawSpark(g, x + vw + 13, y + 27, tw - vw - 20, 15, v.spark, v.nspark, C_BLUE, 6);
       if (t.kind == UIT_BATT) {
         int8_t tmp[UI_SPARK_N]; int n = v.nbhist; uint16_t lo = 65535, hi = 0;
         for (int i2 = 0; i2 < n; i2++) { if (v.bhist[i2] < lo) lo = v.bhist[i2]; if (v.bhist[i2] > hi) hi = v.bhist[i2]; }
         for (int i2 = 0; i2 < n; i2++) tmp[i2] = (int8_t)(((int)v.bhist[i2] - lo) * 100 / (hi > lo ? hi - lo : 1) - 50);
         if (n >= 2) {
           int bx = x + vw + 12, bw = tw - vw - 19;
-          g.fillRect(bx, y + 41, bw, 1, C_LINE);
-          drawSpark(g, bx, y + 25, bw, 16, tmp, n, v.bchg ? C_ACC : C_GRN, hi - lo < 30 ? 1000 : 0);
+          g.fillRect(bx, y + 42, bw, 1, C_LINE);
+          drawSpark(g, bx, y + 26, bw, 16, tmp, n, v.bchg ? C_ACC : C_GRN, hi - lo < 30 ? 1000 : 0);
         }
       }
-      g.text(x + 7, y + 46, t.sub, F_SMALL, C_DIM, tw - 14);
+      g.text(x + 7, y + 49, t.sub, F_SMALL, C_TXT, tw - 14);
+      g.text(x + 7, y + 63, t.sub2, F_SMALL, C_DIM, tw - 14);
     } else {                                          // ikona w kółku, nazwa i jedna linia podsumowania
       g.fillRound(x + 6, y + (th - 22) / 2, 22, 22, 6, sel ? C_ACC : C_LINE);
       if (ic) g.icon(x + 11, y + (th - 22) / 2 + 5, ic, sel ? C_INK : C_TXT);

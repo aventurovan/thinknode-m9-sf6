@@ -6,7 +6,7 @@ i oglądasz mapę bez telefonu. Przez Bluetooth łączy się z aplikacjami **Mes
 
 Domyślny preset radia: **SF6 — 869,618 MHz · BW 62,5 kHz · SF6 · CR 4/8**. Do wyboru jest też **EU/UK Narrow (SF8)**.
 
-Aktualna wersja: **0.20.4** (numer jest też na ekranie startowym i w Ustawieniach).
+Aktualna wersja: **0.21.0** (numer jest też na ekranie startowym i w Ustawieniach).
 
 ---
 
@@ -67,18 +67,27 @@ klawisz **Mapa**, potem **Menu**, potem **„Pobierz z internetu”**. Szczegó�
 
 ### Ekran Start
 
-Duży zegar i sześć kafelków. Po kafelkach chodzi się strzałkami, a Enter otwiera wybrany:
+Pod paskiem stanu jest nazwa urządzenia i data, a niżej sześć kafelków. Po kafelkach chodzi się strzałkami, Enter otwiera wybrany.
+
+Kafelków jest dwanaście i sam wybierasz, które sześć widać i w jakiej kolejności: stań na kafelku, naciśnij **Menu** i wybierz **„Zmień ten kafelek”**.
+Jeśli wybrany kafelek jest już na ekranie, oba zamienią się miejscami.
 
 | Kafelek | Pokazuje | Enter |
 |---|---|---|
-| Wiadomości | nowe wiadomości, ostatnia rozmowa | lista rozmów |
+| Wiadomości | nowe wiadomości, ostatnia rozmowa, liczba rozmów | lista rozmów |
 | Kontakty | liczba wszystkich kontaktów (z repeaterami), ostatnio słyszany węzeł | lista kontaktów |
-| Radio | preset (SF6 / SF8) i częstotliwość | ustawienia radia |
-| Sieć | Bluetooth (nazwa połączonej aplikacji) i WiFi (dBm) | ustawienia Bluetooth |
-| Widmo | szum na naszym kanale z wykresem, zajętość kanału | ekran Widmo |
-| Bateria | procent, wykres napięcia z ostatnich godzin, czas pracy | szczegóły baterii |
+| Radio | preset (SF6 / SF8), częstotliwość, pasmo i kodowanie | ustawienia radia |
+| Sieć | Bluetooth (nazwa połączonej aplikacji albo PIN) i WiFi (dBm) | ustawienia Bluetooth |
+| Widmo | szum na naszym kanale z wykresem, zajętość kanału, ostatni pakiet | ekran Widmo |
+| Bateria | procent, wykres napięcia z ostatnich godzin, czas pracy, napięcie | szczegóły baterii |
+| Repeatery | liczba repeaterów, ostatnio słyszany | lista repeaterów |
+| Pozycja | współrzędne z GPS, satelity | ustawienia pozycji |
+| Mapa | zakres zoomów, liczba plików, rozmiar karty | mapa |
+| Log pakietów | pakiety na minutę, typ ostatniego | log pakietów |
+| Advert | kiedy wysłany ostatni, ustawienie automatu | wysyła advert do sąsiadów |
+| Urządzenie | wersja, wolna pamięć, liczba wiadomości | informacje |
 
-Menu (mała wiadomość pod Home) na ekranie Start otwiera **Widmo** i **Log pakietów**.
+Na początku widać sześć pierwszych. Menu na kafelku otwiera też **Widmo** i **Log pakietów**.
 
 ### Wiadomości
 

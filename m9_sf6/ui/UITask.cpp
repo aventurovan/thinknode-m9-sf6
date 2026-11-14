@@ -36,6 +36,9 @@ static const float BW_STEPS[] = { 31.25f, 41.7f, 62.5f, 125.0f, 250.0f, 500.0f }
 static const uint32_t SLEEP_STEPS[] = { 30000UL, 60000UL, 300000UL, 0 };            // 0 = nigdy
 static const char* const SLEEP_NAMES[] = { "30 s", "1 min", "5 min", "nigdy" };
 static const uint8_t ADV_HOURS[] = { 0, 1, 3, 6, 12, 24 };
+// Start: 12 kafelków do wyboru w 6 miejscach
+enum { T_MSG, T_CT, T_RADIO, T_NET, T_SPEC, T_BATT, T_RPT, T_POS, T_MAP, T_LOG, T_ADV, T_DEV, T_COUNT };
+static const char* const TILE_NAMES[T_COUNT] = { "Wiadomości", "Kontakty", "Radio", "Sieć", "Widmo", "Bateria", "Repeatery", "Pozycja", "Mapa", "Log pakietów", "Advert", "Urządzenie" };
 // oszczędzanie energii
 static const uint32_t DIM_STEPS[] = { 10000UL, 20000UL, 30000UL, 0 };
 static const char* const DIM_NAMES[] = { "po 10 s", "po 20 s", "po 30 s", "wyłączone" };
@@ -147,6 +150,8 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   memset(_tabsel, 0, sizeof(_tabsel));
   memset(&_cfg, 0, sizeof(_cfg));
   _cfg.magic = CFG_MAGIC; _cfg.show_path = 1; _cfg.sleep_idx = 1; _cfg.kb_light = 1;
+  for (int i = 0; i < 6; i++) _cfg.tiles[i] = (uint8_t)i;
+  _adv_sent_at = 0; _tile_slot = 0;
   _pw_n = 0;
   _cur[0] = 0; _cur_chan = false; memset(_cur_key, 0, sizeof(_cur_key)); _msgs_old_format = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_new = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1;
   _nh_n = 0; _nh_next = _nh_slot_end = 0; _nh_min = 1; _bh_n = _bh_seg = 0; _bh_next = 30000; _bh_chg = false;
@@ -230,6 +235,11 @@ void UITask::loadAll() {
   if (_cfg.gps_mode > 4) _cfg.gps_mode = 0;
   if (_cfg.dim_idx > 3) _cfg.dim_idx = 0;
   if (_cfg.bt_auto > 4) _cfg.bt_auto = 0;
+  {                                                              // kafelki: każdy z 12 najwyżej raz, inaczej układ domyślny
+    bool ok = true; uint16_t seen = 0;
+    for (int i = 0; i < 6; i++) { if (_cfg.tiles[i] >= T_COUNT || (seen & (1 << _cfg.tiles[i]))) ok = false; else seen |= 1 << _cfg.tiles[i]; }
+    if (!ok) for (int i = 0; i < 6; i++) _cfg.tiles[i] = (uint8_t)i;
+  }
 
   f = SPIFFS.open(FILE_PW, "r");
   if (f) {
@@ -1090,6 +1100,18 @@ void UITask::openMenuMsg(int idx) {
 void UITask::doAct(uint8_t act) {
   if (act == A_SPEC) { pop(); push(S_SPEC); return; }
   if (act == A_LOG) { pop(); push(S_LOG); return; }
+  if (act == A_TILE) {                                // lista 12 kafelków; przy tych, które są na ekranie, numer miejsca
+    pop();
+    pickBegin(P_TILE, "Zmień kafelek");
+    for (int q = 0; q < T_COUNT; q++) {
+      char t[48]; int at = -1;
+      for (int k = 0; k < 6; k++) if (_cfg.tiles[k] == q) at = k;
+      if (at < 0) scopy(t, sizeof(t), TILE_NAMES[q]); else snprintf(t, sizeof(t), "%s · miejsce %d", TILE_NAMES[q], at + 1);
+      pickAdd(t);
+    }
+    pickOpen(_cfg.tiles[_tile_slot]);
+    return;
+  }
   if (act == A_MULTI) { pop(); _sel_mode = true; _sel_n = 0; selAdd(_ck); return; }
   if (act == A_SELNONE) { _sel_n = 0; pop(); return; }
   if (act == A_SELALL) {                              // wszystko z bieżącego filtra oprócz ulubionych
@@ -1684,6 +1706,7 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
         case A_DELTHREAD: setRow(r, "Usuń rozmowę", "wiadomości z tego urządzenia"); break;
         case A_ADDCHAN: setRow(r, "Dodaj kanał", "z hasztagiem, np. #beskidy", UII_HASH); break;
         case A_CHINFO: setRow(r, "Info o kanale", "statystyki, kod QR", UII_HASH); break;
+        case A_TILE: setRow(r, "Zmień ten kafelek", "wybierz jeden z 12", UII_HOME, true); break;
         case A_SPEC: setRow(r, "Widmo", "pasmo i szum na naszym kanale", UII_SPEC); break;
         case A_LOG: setRow(r, "Log pakietów", "wszystko, co odebrało radio", UII_SIGNAL); break;
       }
@@ -1995,8 +2018,8 @@ void UITask::listEnter(uint8_t s, int i) {
       } else settingPick(s, i);
       return;
     case S_SET_ADV:
-      if (i == 0) popup(the_mesh.advert() ? "Advert wysłany" : "Błąd advertu", "do sąsiadów (bez przekazywania)");
-      else if (i == 1) popup(the_mesh.uiAdvertFlood() ? "Advert wysłany" : "Błąd advertu", "do całej sieci");
+      if (i == 0) { bool ok = the_mesh.advert(); if (ok) _adv_sent_at = the_mesh.getRTCClock()->getCurrentTime(); popup(ok ? "Advert wysłany" : "Błąd advertu", "do sąsiadów (bez przekazywania)"); }
+      else if (i == 1) { bool ok = the_mesh.uiAdvertFlood(); if (ok) _adv_sent_at = the_mesh.getRTCClock()->getCurrentTime(); popup(ok ? "Advert wysłany" : "Błąd advertu", "do całej sieci"); }
       else settingPick(s, i);
       return;
     case S_SET_MSG:
@@ -2130,6 +2153,13 @@ void UITask::applyPick(uint8_t id, int i) {
     case P_DIM: _cfg.dim_idx = i; saveCfg(); break;
     case P_CPU: _cfg.cpu_full = i == 1; saveCfg(); break;
     case P_BTAUTO: _cfg.bt_auto = i; saveCfg(); _bt_idle_since = 0; break;
+    case P_TILE: {                                    // wstaw wybrany kafelek; jeśli jest już na ekranie, zamień miejscami
+      if (i < 0 || i >= T_COUNT || _tile_slot < 0 || _tile_slot >= 6) break;
+      for (int k = 0; k < 6; k++) if (_cfg.tiles[k] == i) _cfg.tiles[k] = _cfg.tiles[_tile_slot];
+      _cfg.tiles[_tile_slot] = (uint8_t)i;
+      saveCfg();
+      break;
+    }
     case P_SELOLD: {                                  // kontakty z bieżącej listy, których urządzenie nie słyszało od N dni (bez ulubionych)
       static const uint16_t DAYS[3] = { 7, 30, 90 };
       uint32_t now = the_mesh.getRTCClock()->getCurrentTime(), lim = now - (uint32_t)DAYS[i % 3] * 86400UL;
@@ -2632,21 +2662,13 @@ void UITask::key(uint8_t k) {
     if (k == M9K_DOWN) { _bar = true; _bar_sel = S_START; return; }
     if (k == M9K_LEFT) { tab(S_SETTINGS); return; }
     if (k == M9K_RIGHT) { tab(S_MSGS); return; }
-    if (k == M9K_F3) {                                 // Menu na Start: Widmo i log pakietów
-      _menu_n = 0; _menu_msg = _menu_thread = false; strcpy(_menu_title, "Start");
-      _menu_act[_menu_n++] = A_SPEC; _menu_act[_menu_n++] = A_LOG;
+    if (k == M9K_F3) {                                 // Menu na kafelku: wymiana kafelka, Widmo, log pakietów
+      _tile_slot = (int8_t)(sel() >= 0 && sel() < 6 ? sel() : 0);
+      _menu_n = 0; _menu_msg = _menu_thread = false; snprintf(_menu_title, sizeof(_menu_title), "Kafelek: %s", TILE_NAMES[_cfg.tiles[_tile_slot] % T_COUNT]);
+      _menu_act[_menu_n++] = A_TILE; _menu_act[_menu_n++] = A_SPEC; _menu_act[_menu_n++] = A_LOG;
       push(S_MENU); return;
     }
-    if (k == M9K_ENTER) {
-      switch (sel()) {
-        case 0: tab(S_MSGS); break;
-        case 1: tab(S_CONTACTS); break;
-        case 2: tab(S_SETTINGS); sel() = 0; radioLoad(); push(S_RADIO); break;
-        case 3: tab(S_SETTINGS); sel() = 1; push(S_SET_BT); break;
-        case 4: push(S_SPEC); break;
-        case 5: detailBattery(); break;
-      }
-    }
+    if (k == M9K_ENTER && sel() >= 0 && sel() < 6) tileEnter(_cfg.tiles[sel()]);
     return;
   }
   if (s == S_SETTINGS) {
@@ -2727,78 +2749,155 @@ void UITask::fillStatus() {
   v.charging = digitalRead(M9_PIN_EXT_PWR) == LOW;
 }
 
+// ---------------- Start: 6 miejsc, 12 kafelków do wyboru ----------------
+
 void UITask::fillStart() {
   UiView& v = *_v;
   v.screen = UIS_START; v.tab = 0;
   v.grid_cols = 3; v.ntiles = 6; v.sel = sel();
-  scopy(v.big, sizeof(v.big), v.time);
-  scopy(v.name, sizeof(v.name), _prefs->node_name);
+  scopy(v.title, sizeof(v.title), _prefs->node_name);
   static const char* const DNI[7] = { "niedziela", "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota" };
   struct tm lt; localTime(the_mesh.getRTCClock()->getCurrentTime(), &lt);
-  snprintf(v.line1, sizeof(v.line1), "%s, %d.%02d.%04d", DNI[lt.tm_wday % 7], lt.tm_mday, lt.tm_mon + 1, lt.tm_year + 1900);
-
+  snprintf(v.title_right, sizeof(v.title_right), "%s, %d.%02d.%04d", DNI[lt.tm_wday % 7], lt.tm_mday, lt.tm_mon + 1, lt.tm_year + 1900);
   buildThreads();
-  int unread = v.unread;
-  UiTile& a = v.tile[0];
-  strcpy(a.label, "Wiadomości"); a.icon = UII_MAIL; a.accent = unread > 0;
-  if (unread > 0) snprintf(a.value, sizeof(a.value), unread == 1 ? "1 nowa" : "%d nowe", unread); else strcpy(a.value, "brak nowych");
-  if (_thread_n > 0 && _threads[0].unread) scopy(a.sub, sizeof(a.sub), _threads[0].name);
-  else snprintf(a.sub, sizeof(a.sub), "rozmów: %d", _thread_n);
+  for (int i = 0; i < 6; i++) fillTile(v.tile[i], _cfg.tiles[i]);
+}
 
-  // wszystkie kontakty (bez czujników), osobno policzone repeatery
-  int people = 0, rpts = 0;
+void UITask::fillTile(UiTile& t, uint8_t id) {
+  UiView& v = *_v;
   ContactInfo c;
-  int total = the_mesh.getTotalContactSlots();
-  for (int i = MAX_ANON_CONTACTS; i < total; i++) {
-    if (!the_mesh.getContactByIdx(i, c) || c.type == ADV_TYPE_NONE) continue;
-    if (c.type == ADV_TYPE_SENSOR) continue;
-    people++;
-    if (c.type == ADV_TYPE_REPEATER) rpts++;
+  char ago[16];
+  scopy(t.label, sizeof(t.label), TILE_NAMES[id < T_COUNT ? id : 0]);
+  switch (id) {
+    case T_MSG: {
+      int unread = v.unread;
+      t.icon = UII_MAIL; t.accent = unread > 0;
+      if (unread > 0) snprintf(t.value, sizeof(t.value), unread == 1 ? "1 nowa" : "%d nowe", unread); else strcpy(t.value, "brak nowych");
+      if (_thread_n > 0 && _threads[0].unread) scopy(t.sub, sizeof(t.sub), _threads[0].name);
+      else if (_thread_n > 0 && _threads[0].last) { fmtAgo(ago, sizeof(ago), _threads[0].last); snprintf(t.sub, sizeof(t.sub), "ostatnia: %s", ago); }
+      snprintf(t.sub2, sizeof(t.sub2), "rozmów: %d", _thread_n);
+      break;
+    }
+    case T_CT: case T_RPT: {                         // kontakty (wszystkie bez czujników) albo same repeatery
+      int all = 0, rpts = 0, fav = 0;
+      int total = the_mesh.getTotalContactSlots();
+      for (int i = MAX_ANON_CONTACTS; i < total; i++) {
+        if (!the_mesh.getContactByIdx(i, c) || c.type == ADV_TYPE_NONE || c.type == ADV_TYPE_SENSOR) continue;
+        all++;
+        if (c.type == ADV_TYPE_REPEATER) rpts++;
+        if ((c.flags & 1) && (id == T_CT || c.type == ADV_TYPE_REPEATER)) fav++;
+      }
+      t.icon = id == T_CT ? UII_USER : UII_TOWER;
+      snprintf(t.value, sizeof(t.value), "%d", id == T_CT ? all : rpts);
+      int h = -1;                                    // ostatnio usłyszany węzeł (dla Repeaterów: ostatni repeater)
+      for (int i = 0; i < the_mesh.ui_heard_n; i++) if (id == T_CT || the_mesh.ui_heard[i].type == ADV_TYPE_REPEATER) { h = i; break; }
+      if (h >= 0) { fmtAgo(t.side, sizeof(t.side), the_mesh.ui_heard_at[h]); scopy(t.sub, sizeof(t.sub), the_mesh.ui_heard[h].name); }
+      else strcpy(t.sub, "nikogo nie słychać");
+      snprintf(t.sub2, sizeof(t.sub2), "ulubionych: %d", fav);
+      break;
+    }
+    case T_RADIO: {
+      t.icon = UII_SIGNAL;
+      bool narrow = fabsf(_prefs->freq - 869.618f) < 0.005f && fabsf(_prefs->bw - 62.5f) < 0.1f && _prefs->sf == 8 && _prefs->cr == 8;
+      if (the_mesh.uiRadioIsSF6()) strcpy(t.value, "SF6"); else if (narrow) strcpy(t.value, "SF8"); else snprintf(t.value, sizeof(t.value), "SF%d", _prefs->sf);
+      snprintf(t.sub, sizeof(t.sub), "%.3f MHz", _prefs->freq); comma(t.sub);
+      snprintf(t.sub2, sizeof(t.sub2), "BW %.4g · 4/%d", _prefs->bw, _prefs->cr); comma(t.sub2);
+      break;
+    }
+    case T_NET: {                                    // Bluetooth (nazwa połączonej aplikacji) i WiFi
+      t.icon = UII_NET; t.kind = UIT_NET;
+      if (!isBluetoothEnabled()) { v.bt_state = 0; strcpy(v.bt_txt, "BT OFF"); }
+      else if (hasConnection()) { v.bt_state = 2; scopy(v.bt_txt, sizeof(v.bt_txt), the_mesh.ui_app_name[0] ? the_mesh.ui_app_name : "połączony"); }
+      else { v.bt_state = 1; strcpy(v.bt_txt, "BT ON"); snprintf(t.sub, sizeof(t.sub), "PIN %06lu", (unsigned long)the_mesh.getBLEPin()); }
+      v.wifi_dbm = m9wifiBars() >= 1 && m9wifiBars() <= 4 ? m9wifiRssi() : 0;
+      if (v.wifi_dbm && _wifi.ssid[0]) snprintf(t.sub, sizeof(t.sub), "sieć: %s", _wifi.ssid);
+      break;
+    }
+    case T_SPEC: {                                   // szum na naszym kanale z ostatnich minut
+      t.icon = UII_SPEC; t.kind = UIT_NOISE;
+      snprintf(t.value, sizeof(t.value), "%d", m9radioNoiseFloor());
+      unsigned long now = millis(); uint32_t air = 0;
+      for (int i = 0; i < m9logCount(); i++) { const M9Pkt* p = m9logGet(i); if (now - p->ms > 60000UL) break; air += m9radioAirtime(p->len); }
+      int busy = (int)(air * 100 / 60000); if (busy > 100) busy = 100;
+      snprintf(t.sub, sizeof(t.sub), "zajęte %d %%", busy);
+      if (m9logCount() > 0) snprintf(t.sub2, sizeof(t.sub2), "ostatni %d dBm", m9logGet(0)->rssi);
+      v.nspark = 0;
+      int from = _nh_n > UI_SPARK_N * 3 ? _nh_n - UI_SPARK_N * 3 : 0;      // ok. 5 ostatnich minut, co trzeci punkt
+      for (int i = from; i < _nh_n && v.nspark < UI_SPARK_N; i += 3) v.spark[v.nspark++] = _nh[i];
+      break;
+    }
+    case T_BATT: {                                   // procent, wykres napięcia z ostatnich godzin, czas pracy
+      t.icon = UII_BATT; t.kind = UIT_BATT;
+      uint16_t mv = getBattMilliVolts();
+      bool chg = digitalRead(M9_PIN_EXT_PWR) == LOW;
+      snprintf(t.value, sizeof(t.value), "%d %%", battPercent(mv));
+      t.accent = chg;
+      battEstimate(t.sub, sizeof(t.sub));
+      snprintf(t.sub2, sizeof(t.sub2), "%d,%02d V%s", mv / 1000, (mv % 1000) / 10, chg ? " · ładuje" : "");
+      memcpy(v.bhist, _bh, _bh_n * sizeof(uint16_t)); v.nbhist = _bh_n; v.bchg = chg;
+      break;
+    }
+    case T_POS: {
+      t.icon = UII_GPS;
+      double lat, lon; int sats;
+      if (!_prefs->gps_enabled) { strcpy(t.value, "GPS wył."); strcpy(t.sub, "Enter: ustawienia"); }
+      else if (gpsFix(&lat, &lon, &sats)) { snprintf(t.value, sizeof(t.value), "%.4f", lat); comma(t.value); snprintf(t.sub, sizeof(t.sub), "%.4f", lon); comma(t.sub); snprintf(t.sub2, sizeof(t.sub2), _gps_off_phase ? "GPS odpoczywa" : "satelity: %d", sats); }
+      else { strcpy(t.value, "szukam…"); snprintf(t.sub, sizeof(t.sub), "satelity: %d", sats); scopy(t.sub2, sizeof(t.sub2), GPS_NAMES[_cfg.gps_mode]); }
+      break;
+    }
+    case T_MAP:
+      t.icon = UII_SD;
+      if (!_map.sdOk()) { strcpy(t.value, "brak karty"); strcpy(t.sub, _sd_pending ? "sprawdzam…" : "karta SD"); }
+      else if (_map.numPacks() == 0) { strcpy(t.value, "brak mapy"); strcpy(t.sub, "Enter, potem Menu:"); strcpy(t.sub2, "pobierz z internetu"); }
+      else { snprintf(t.value, sizeof(t.value), "z%d–%d", _map.minZoom(), _map.maxZoom()); snprintf(t.sub, sizeof(t.sub), "plików: %d", _map.numPacks()); snprintf(t.sub2, sizeof(t.sub2), "karta %lu GB", (unsigned long)(_map.sdSizeMB() / 1024)); }
+      break;
+    case T_LOG: {
+      t.icon = UII_CHECK;
+      unsigned long now = millis(); int perMin = 0;
+      for (int i = 0; i < m9logCount(); i++) { if (now - m9logGet(i)->ms > 60000UL) break; perMin++; }
+      snprintf(t.value, sizeof(t.value), "%d/min", perMin);
+      if (m9logCount() > 0) {
+        const M9Pkt* p = m9logGet(0); M9PktInfo in;
+        fmtAgo(t.side, sizeof(t.side), p->ts);
+        snprintf(t.sub, sizeof(t.sub), "ostatni: %s", m9logParse(*p, in) ? m9logTypeShort(in.type) : "?");
+      } else strcpy(t.sub, "nic nie odebrano");
+      snprintf(t.sub2, sizeof(t.sub2), "razem: %lu", (unsigned long)m9logTotal());
+      break;
+    }
+    case T_ADV:
+      t.icon = UII_BOLT;
+      strcpy(t.value, "wyślij");
+      if (_adv_sent_at) { fmtAgo(ago, sizeof(ago), _adv_sent_at); snprintf(t.sub, sizeof(t.sub), "ostatni: %s", ago); } else strcpy(t.sub, "Enter: do sąsiadów");
+      if (ADV_HOURS[_cfg.adv_idx]) snprintf(t.sub2, sizeof(t.sub2), "sam co %d godz.", ADV_HOURS[_cfg.adv_idx]); else strcpy(t.sub2, "automat wyłączony");
+      break;
+    case T_DEV:
+      t.icon = UII_SCREEN;
+      scopy(t.value, sizeof(t.value), M9_FW_VERSION);
+      snprintf(t.sub, sizeof(t.sub), "pamięć: %u kB", m9FreeHeapKB());
+      snprintf(t.sub2, sizeof(t.sub2), "wiadomości: %d", _msg_n);
+      break;
   }
-  UiTile& b = v.tile[1];
-  strcpy(b.label, "Kontakty"); b.icon = UII_USER;
-  snprintf(b.value, sizeof(b.value), "%d", people);
-  // ostatnio usłyszany węzeł: nazwa pod liczbą, a obok liczby — jak dawno
-  (void)rpts;
-  if (the_mesh.ui_heard_n > 0) { fmtAgo(b.side, sizeof(b.side), the_mesh.ui_heard_at[0]); scopy(b.sub, sizeof(b.sub), the_mesh.ui_heard[0].name); }
-  else strcpy(b.sub, "nikogo nie słychać");
+}
 
-  UiTile& d = v.tile[2];
-  strcpy(d.label, "Radio"); d.icon = UII_SIGNAL;
-  bool narrow = fabsf(_prefs->freq - 869.618f) < 0.005f && fabsf(_prefs->bw - 62.5f) < 0.1f && _prefs->sf == 8 && _prefs->cr == 8;
-  if (the_mesh.uiRadioIsSF6()) strcpy(d.value, "SF6"); else if (narrow) strcpy(d.value, "SF8"); else snprintf(d.value, sizeof(d.value), "SF%d", _prefs->sf);
-  snprintf(d.sub, sizeof(d.sub), "%.3f MHz", _prefs->freq); comma(d.sub);
-
-  // Sieć: Bluetooth (nazwa połączonej aplikacji) i WiFi
-  UiTile& n = v.tile[3];
-  strcpy(n.label, "Sieć"); n.icon = UII_NET; n.kind = UIT_NET;
-  if (!isBluetoothEnabled()) { v.bt_state = 0; strcpy(v.bt_txt, "BT OFF"); }
-  else if (hasConnection()) { v.bt_state = 2; scopy(v.bt_txt, sizeof(v.bt_txt), the_mesh.ui_app_name[0] ? the_mesh.ui_app_name : "połączony"); }
-  else { v.bt_state = 1; strcpy(v.bt_txt, "BT ON"); }
-  v.wifi_dbm = m9wifiBars() >= 1 && m9wifiBars() <= 4 ? m9wifiRssi() : 0;
-
-  // Widmo: szum na naszym kanale z ostatnich minut
-  UiTile& w = v.tile[4];
-  strcpy(w.label, "Widmo"); w.icon = UII_SPEC; w.kind = UIT_NOISE;
-  snprintf(w.value, sizeof(w.value), "%d", m9radioNoiseFloor());
-  {
-    unsigned long now = millis(); uint32_t air = 0;
-    for (int i = 0; i < m9logCount(); i++) { const M9Pkt* p = m9logGet(i); if (now - p->ms > 60000UL) break; air += m9radioAirtime(p->len); }
-    int busy = (int)(air * 100 / 60000); if (busy > 100) busy = 100;
-    snprintf(w.sub, sizeof(w.sub), "zajęte %d %%", busy);
-    int from = _nh_n > UI_SPARK_N * 3 ? _nh_n - UI_SPARK_N * 3 : 0;      // ok. 5 ostatnich minut, co trzeci punkt
-    for (int i = from; i < _nh_n && v.nspark < UI_SPARK_N; i += 3) v.spark[v.nspark++] = _nh[i];
+// Enter na kafelku
+void UITask::tileEnter(uint8_t id) {
+  switch (id) {
+    case T_MSG: tab(S_MSGS); break;
+    case T_CT: tab(S_CONTACTS); break;
+    case T_RPT: tab(S_RPTS); break;
+    case T_RADIO: tab(S_SETTINGS); sel() = 0; radioLoad(); push(S_RADIO); break;
+    case T_NET: tab(S_SETTINGS); sel() = 1; push(S_SET_BT); break;
+    case T_SPEC: push(S_SPEC); break;
+    case T_BATT: detailBattery(); break;
+    case T_POS: tab(S_SETTINGS); sel() = 2; push(S_SET_POS); break;
+    case T_MAP: openMap(); break;
+    case T_LOG: push(S_LOG); break;
+    case T_ADV:
+      if (the_mesh.advert()) { _adv_sent_at = the_mesh.getRTCClock()->getCurrentTime(); popup("Advert wysłany", "do sąsiadów (bez przekazywania)"); }
+      else popup("Błąd advertu", "", true);
+      break;
+    case T_DEV: detailInfo(); break;
   }
-
-  // Bateria: procent, wykres napięcia z ostatnich godzin i czas pracy
-  UiTile& e = v.tile[5];
-  strcpy(e.label, "Bateria"); e.icon = UII_BATT; e.kind = UIT_BATT;
-  uint16_t mv = getBattMilliVolts();
-  bool chg = digitalRead(M9_PIN_EXT_PWR) == LOW;
-  snprintf(e.value, sizeof(e.value), "%d %%", battPercent(mv));
-  e.accent = chg;
-  battEstimate(e.sub, sizeof(e.sub));
-  memcpy(v.bhist, _bh, _bh_n * sizeof(uint16_t)); v.nbhist = _bh_n; v.bchg = chg;
 }
 
 void UITask::fillSettings() {
@@ -3158,7 +3257,7 @@ void UITask::loop() {
   if (_next_advert && (long)(now - _next_advert) >= 0) {        // automatyczny advert do sąsiadów
     uint8_t h = ADV_HOURS[_cfg.adv_idx];
     _next_advert = h ? now + h * 3600000UL : 0;
-    if (h) the_mesh.advert();
+    if (h && the_mesh.advert()) _adv_sent_at = the_mesh.getRTCClock()->getCurrentTime();
   }
 
   // zapis wiadomości: w kawałkach, kilka minut po zmianie (albo zaraz po wygaszeniu ekranu) i nie w trakcie pisania
