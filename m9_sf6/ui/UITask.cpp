@@ -19,6 +19,7 @@
 #define FILE_MUTED       "/m9ui.mut"
 #define FILE_WIFI        "/m9ui.wifi"
 #define MAP_URL_DEFAULT  "https://github.com/aventurovan/thinknode-m9-sf6/releases/download/mapa/"
+#define OTA_URL          "https://github.com/aventurovan/thinknode-m9-sf6/releases/download/latest-build/"
 #define MAP_URL_OLD      "https://github.com/aventurovan/m9-mapa/releases/download/mapa/"
 #define DEF_LAT          49.8225         // środek mapy, gdy nie ma pozycji: Bielsko-Biała
 #define DEF_LON          19.0469
@@ -149,6 +150,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   memset(&_wifi, 0, sizeof(_wifi)); strcpy(_wifi.url, MAP_URL_DEFAULT);
   memset(_tf, 0, sizeof(_tf)); _tf_sel = 0; _snap = NULL;
   _bt_killed = false; _adv_seen = 0; _sd_test_at = 0;
+  _route_n = 0; _route_star = false; _route_unknown = 0; _route_title[0] = 0; _ota_reboot_at = 0;
 }
 
 void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* node_prefs) {
@@ -623,7 +625,10 @@ void UITask::back() {
   if (scr() == S_THREAD && _input_mode != IN_MSG) _input_mode = IN_MSG;   // anulowane pole do wpisania
   if (scr() == S_ADMIN) the_mesh.uiAdminLogout();
   if (scr() == S_MAP_NET && (m9uploadActive() || m9dlActive())) { m9uploadStop(); m9dlStop(); _map.scan(); }
-  if (scr() == S_MAP_NET && _bt_killed) { pop(); ask(C_BT_RESTART, "Zrestartować, żeby wrócił Bluetooth?", ""); return; }
+  if (scr() == S_MAP && _route_n) _route_n = 0;     // koniec oglądania trasy
+  if (scr() == S_OTA && m9otaState() == 4) { popup("Trwa instalacja", "poczekaj do końca"); return; }
+  if (scr() == S_OTA && m9otaActive()) m9dlStop();
+  if ((scr() == S_MAP_NET || scr() == S_OTA) && _bt_killed) { pop(); ask(C_BT_RESTART, "Zrestartować, żeby wrócił Bluetooth?", ""); return; }
   pop();
 }
 
@@ -814,6 +819,7 @@ void UITask::openMenuMsg(int idx) {
   _menu_act[_menu_n++] = A_DETAIL;
   if (!m.out && m.chan && m.who[0]) _menu_act[_menu_n++] = A_REPLY;
   if (!m.out) _menu_act[_menu_n++] = A_REPLY_ACK;
+  if ((!m.out && !m.direct && m.path_bytes > 0) || (m.out && m.chan && m.rep_n > 0)) _menu_act[_menu_n++] = A_ROUTE;
   if (m.out) _menu_act[_menu_n++] = A_RESEND;
   _menu_act[_menu_n++] = A_COPY;
   _menu_act[_menu_n++] = A_DELMSG;
@@ -836,6 +842,7 @@ void UITask::doAct(uint8_t act) {
     UiMsg& m = _msgs[_msg_idx];
     switch (act) {
       case A_DETAIL: detailMsg(_msg_idx); break;
+      case A_ROUTE: if (buildRoute(_msg_idx)) { fitRoute(); push(S_MAP); } break;
       case A_REPLY: pop(); snprintf(_input, sizeof(_input), "@[%s] ", m.who); _input_chars = 0; for (const char* p = _input; *p; p++) if (((uint8_t)*p & 0xC0) != 0x80) _input_chars++; break;
       case A_REPLY_ACK: {                            // odpowiedź z potwierdzeniem: nick, „ack” i liczba hopów, którymi wiadomość do nas przyszła
         char h[24]; hopsTxt(h, sizeof(h), m.hops, m.direct);
@@ -907,7 +914,7 @@ void UITask::doConfirm(uint8_t what) {
     case C_RPT_REBOOT: adminCli("reboot"); break;
     case C_WIFI_DL:
       wifiPrepare();
-      m9uploadStop(); m9dlStart(_wifi.ssid, _wifi.pass, _wifi.url, _cfg.map_range == 1 ? 14 : _cfg.map_range == 2 ? 13 : 0);
+      m9uploadStop(); m9dlStart(_wifi.ssid, _wifi.pass, _wifi.url, 13);
       break;
     case C_WIFI_AP: {
       wifiPrepare();
@@ -916,6 +923,12 @@ void UITask::doConfirm(uint8_t what) {
       else { char t[48]; snprintf(t, sizeof(t), "wolna pamięć: %u kB", m9FreeHeapKB()); popup("Nie udało się uruchomić WiFi", t, true, 8000); }
       break;
     }
+    case C_WIFI_OTA:
+      wifiPrepare();
+      m9uploadStop();
+      m9otaCheck(_wifi.ssid, _wifi.pass, OTA_URL, M9_FW_VERSION);
+      break;
+    case C_OTA_INSTALL: m9otaInstall(); break;
     case C_BT_RESTART: if (_msgs_dirty || true) saveMsgs(); the_mesh.uiReboot(); break;
     case C_CLEAR_MSGS: _msg_n = 0; _msg_idx = -1; saveMsgs(); popup("Wiadomości usunięte"); break;
     case C_CLEAR_PW: _pw_n = 0; savePw(); popup("Hasła repeaterów usunięte"); break;
@@ -1219,13 +1232,14 @@ int UITask::listCount(uint8_t s) {
     case S_RADIO: return 9;
     case S_SET_BT: return 6;
     case S_PICK: return _pick_n;
-    case S_MAP_NET: return 8;
+    case S_MAP_NET: return 7;
+    case S_OTA: return 3;
     case S_SET_POS: return 9;
     case S_SET_ADV: return 3;
     case S_SET_CT: return 6;
     case S_SET_MSG: return 3;
     case S_SET_SCR: return 8;
-    case S_SET_SYS: return 6;
+    case S_SET_SYS: return 7;
   }
   return 0;
 }
@@ -1255,6 +1269,11 @@ void UITask::listHead(uint8_t s) {
       snprintf(v.title_right, sizeof(v.title_right), "%d · %s · Menu: sortuj", _list_n, _cfg.rpt_sort ? "wg odległości" : "ostatnio słyszane");
       break;
     case S_MENU: scopy(v.title, sizeof(v.title), _menu_title); hint("Enter", "wybierz"); hint("Wstecz", ""); break;
+    case S_OTA:
+      strcpy(v.title, "Aktualizacja przez WiFi");
+      if (m9dlStatus()[0] && m9otaState()) scopy(v.title_right, sizeof(v.title_right), m9dlStatus()); else snprintf(v.title_right, sizeof(v.title_right), "wersja %s", M9_FW_VERSION);
+      hint("Enter", "wybierz"); hint("Wstecz", "");
+      break;
     case S_MAP_NET:
       strcpy(v.title, "Mapa");
       if (m9dlStatus()[0]) scopy(v.title_right, sizeof(v.title_right), m9dlStatus());
@@ -1344,6 +1363,7 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
         case A_DETAIL: setRow(r, "Szczegóły", _menu_msg ? "trasa, sygnał, czas" : "pozycja, droga, klucz"); break;
         case A_MANAGE: setRow(r, "Zarządzaj", pwGet(_ck) ? "hasło zapamiętane" : "logowanie", UII_LOCK); break;
         case A_SHOWMAP: setRow(r, "Pokaż na mapie", "", UII_GPS); break;
+        case A_ROUTE: setRow(r, "Trasa na mapie", _menu_msg && _msg_idx >= 0 && _msgs[_msg_idx].out ? "kto powtórzył" : "skąd przyszła", UII_GPS); break;
         case A_DELETE: setRow(r, "Usuń kontakt"); break;
         case A_REPLY: setRow(r, "Odpowiedz", "wstawia @[nadawca]", UII_MAIL); break;
         case A_REPLY_ACK: setRow(r, "Odpowiedz: ack + hopy", "@[nadawca] ack, ile hopów", UII_CHECK); break;
@@ -1359,6 +1379,23 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       return;
     case S_QUICK: setRow(r, QUICK[i], "", i >= N_QUICK_TEXT ? UII_GPS : UII_NONE); return;
     case S_PICK: setRow(r, _pick_opt[i], i == _pick_cur ? "teraz" : "", i == _pick_cur ? UII_CHECK : UII_NONE, true); return;
+    case S_OTA: {
+      int os = m9otaState();
+      if (i == 0) {
+        switch (os) {
+          case 1: setRow(r, "Sprawdzam…", m9dlStatus(), UII_SIGNAL, true); break;
+          case 2: { char a[40]; snprintf(a, sizeof(a), "Zainstaluj %s", m9otaVersion()); snprintf(t, sizeof(t), "teraz %s", M9_FW_VERSION); setRow(r, a, t, UII_SIGNAL, true); break; }
+          case 3: snprintf(t, sizeof(t), "%s · Enter: wgraj ponownie", m9otaVersion()); setRow(r, "Masz aktualną wersję", t, UII_CHECK); break;
+          case 4: { char a[40]; snprintf(a, sizeof(a), "Instaluję %s", m9otaVersion()); snprintf(t, sizeof(t), "%d%% · nie wyłączaj", m9otaPercent()); setRow(r, a, t, UII_SIGNAL, true); break; }
+          case 5: setRow(r, "Zainstalowano", "restart…", UII_CHECK, true); break;
+          case 6: setRow(r, "Błąd — spróbuj ponownie", m9dlDetail(), UII_SIGNAL); break;
+          default: snprintf(t, sizeof(t), "teraz %s", M9_FW_VERSION); setRow(r, "Sprawdź aktualizację", t, UII_SIGNAL); break;
+        }
+      }
+      else if (i == 1) setRow(r, "Sieć WiFi", _wifi.ssid[0] ? _wifi.ssid : "nie ustawiona");
+      else setRow(r, "Hasło WiFi", _wifi.pass[0] ? "zapisane" : "brak");
+      return;
+    }
     case S_MAP_NET:
       t[0] = 0;
       switch (i) {
@@ -1384,7 +1421,7 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
           else snprintf(t, sizeof(t), "plików %d · zoom %d–%d", _map.numPacks(), _map.minZoom(), _map.maxZoom());
           setRow(r, "Karta: test i pliki", t, UII_SD);
           break;
-        case 7: setRow(r, "Zakres pobierania", _cfg.map_range == 1 ? "bez zoomu 15 · ok. 0,6 GB" : _cfg.map_range == 2 ? "do zoomu 13 · ok. 0,3 GB" : "cała mapa · ok. 1,4 GB");
+        case 7: break;
           break;
       }
       return;
@@ -1509,10 +1546,11 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       return;
     case S_SET_SYS: {
       if (i == 0) setRow(r, "Informacje", "wersja, pamięć, klucz");
-      else if (i == 1) setRow(r, "Nazwa urządzenia", _prefs->node_name, UII_USER);
-      else if (i == 2) { struct tm lt; localTime(the_mesh.getRTCClock()->getCurrentTime(), &lt); snprintf(t, sizeof(t), "%d.%02d.%04d %d:%02d", lt.tm_mday, lt.tm_mon + 1, lt.tm_year + 1900, lt.tm_hour, lt.tm_min); setRow(r, "Data i godzina", t); }
-      else if (i == 3) { snprintf(t, sizeof(t), "zapamiętanych: %d", _pw_n); setRow(r, "Usuń hasła repeaterów", t, UII_LOCK); }
-      else if (i == 4) setRow(r, "Restart urządzenia", "z potwierdzeniem");
+      else if (i == 1) { snprintf(t, sizeof(t), "teraz %s", M9_FW_VERSION); setRow(r, "Aktualizacja przez WiFi", t, UII_SIGNAL); }
+      else if (i == 2) setRow(r, "Nazwa urządzenia", _prefs->node_name, UII_USER);
+      else if (i == 3) { struct tm lt; localTime(the_mesh.getRTCClock()->getCurrentTime(), &lt); snprintf(t, sizeof(t), "%d.%02d.%04d %d:%02d", lt.tm_mday, lt.tm_mon + 1, lt.tm_year + 1900, lt.tm_hour, lt.tm_min); setRow(r, "Data i godzina", t); }
+      else if (i == 4) { snprintf(t, sizeof(t), "zapamiętanych: %d", _pw_n); setRow(r, "Usuń hasła repeaterów", t, UII_LOCK); }
+      else if (i == 5) setRow(r, "Restart urządzenia", "z potwierdzeniem");
       else setRow(r, "Ustawienia fabryczne", "kasuje wszystko");
       return;
     }
@@ -1563,12 +1601,17 @@ void UITask::listEnter(uint8_t s, int i) {
         if (m9dlActive() || m9uploadActive()) popup("Najpierw zatrzymaj przesyłanie", "");
         else { _sd_pending = false; popup("Sprawdzam kartę SD…", "to potrwa do minuty, ekran stoi", false, 120000); _sd_test_at = millis() + 500; }
       }
-      else if (i == 7) {
-        pickBegin(P_MAPRANGE, "Zakres pobierania");
-        pickAdd("cała mapa: południe do zoomu 15 (1,4 GB)"); pickAdd("bez zoomu 15: południe do 14 (0,6 GB)"); pickAdd("do zoomu 13: cała Polska (0,3 GB)");
-        pickOpen(_cfg.map_range < 3 ? _cfg.map_range : 0);
-      }
       return;
+    case S_OTA: {
+      int os = m9otaState();
+      if (i == 0) {
+        if (os == 0 || os == 6) { if (!_wifi.ssid[0]) popup("Najpierw ustaw sieć WiFi", "pozycje niżej: sieć i hasło"); else if (!_bt_killed) ask(C_WIFI_OTA, "WiFi wyłączy Bluetooth do restartu", ""); else doConfirm(C_WIFI_OTA); }
+        else if (os == 2 || os == 3) { char t[48]; snprintf(t, sizeof(t), os == 2 ? "Zainstalować wersję %s?" : "Wgrać ponownie %s?", m9otaVersion()); ask(C_OTA_INSTALL, t, ""); }
+      }
+      else if (i == 1) openInput(IN_WIFI_SSID, _wifi.ssid);
+      else if (i == 2) openInput(IN_WIFI_PASS, _wifi.pass);
+      return;
+    }
     case S_QUICK: {
       char t[100];
       if (i < N_QUICK_TEXT) scopy(t, sizeof(t), QUICK[i]);
@@ -1648,10 +1691,11 @@ void UITask::listEnter(uint8_t s, int i) {
       return;
     case S_SET_SYS:
       if (i == 0) detailInfo();
-      else if (i == 1) openInput(IN_NAME, _prefs->node_name);
-      else if (i == 2) openTime();
-      else if (i == 3) ask(C_CLEAR_PW, "Usunąć zapamiętane hasła?", "");
-      else if (i == 4) ask(C_REBOOT, "Zrestartować urządzenie?", "");
+      else if (i == 1) push(S_OTA);
+      else if (i == 2) openInput(IN_NAME, _prefs->node_name);
+      else if (i == 3) openTime();
+      else if (i == 4) ask(C_CLEAR_PW, "Usunąć zapamiętane hasła?", "");
+      else if (i == 5) ask(C_REBOOT, "Zrestartować urządzenie?", "");
       else ask(C_FACTORY, "Skasować WSZYSTKO?", "");
       return;
     default: settingPick(s, i); return;               // pozostałe ustawienia: lista wartości do wyboru
@@ -1925,6 +1969,101 @@ void UITask::fillTime() {
   v.nhints = 4;
 }
 
+// ---------------- trasa wiadomości na mapie ----------------
+
+// repeater o identyfikatorze z trasy (początek klucza); przy kilku pasujących — najbliższy poprzedniego punktu
+bool UITask::findRepeater(const uint8_t* id, int n, double plat, double plon, bool have_prev, ContactInfo& out) {
+  ContactInfo c;
+  bool found = false;
+  double best = 1e18;
+  int total = the_mesh.getTotalContactSlots();
+  for (int i = MAX_ANON_CONTACTS; i < total; i++) {
+    if (!the_mesh.getContactByIdx(i, c) || c.type != ADV_TYPE_REPEATER) continue;
+    if (memcmp(c.id.pub_key, id, n) != 0 || (c.gps_lat == 0 && c.gps_lon == 0)) continue;
+    double d = have_prev ? distKm(plat, plon, c.gps_lat / 1e6, c.gps_lon / 1e6) : 0;
+    if (!found || d < best) { best = d; out = c; found = true; }
+  }
+  return found;
+}
+
+bool UITask::buildRoute(int idx) {
+  if (idx < 0 || idx >= _msg_n) return false;
+  UiMsg& m = _msgs[idx];
+  _route_n = 0; _route_unknown = 0; _route_star = false;
+  auto add = [&](double lat, double lon, const char* label, uint8_t kind) {
+    if (_route_n >= (int)(sizeof(_route) / sizeof(_route[0]))) return;
+    RoutePt& p = _route[_route_n++];
+    p.lat = lat; p.lon = lon; p.kind = kind; scopy(p.label, sizeof(p.label), label);
+  };
+  // moja pozycja: GPS, a bez niego pozycja zapisana w ustawieniach
+  double mlat = 0, mlon = 0; int sats;
+  bool me = gpsFix(&mlat, &mlon, &sats);
+  if (!me && (_sensors->node_lat != 0 || _sensors->node_lon != 0)) { mlat = _sensors->node_lat; mlon = _sensors->node_lon; me = true; }
+  ContactInfo c;
+  char lab[24];
+
+  if (m.out) {                                       // wysłana na kanale: ja i repeatery, które ją powtórzyły (gwiazda)
+    _route_star = true;
+    if (me) add(mlat, mlon, "ja", UIM_ME);
+    for (int i = 0; i < m.rep_n && i < 6; i++) {
+      if (findRepeater(m.rep_id[i], m.rep_hs, mlat, mlon, me, c)) add(c.gps_lat / 1e6, c.gps_lon / 1e6, c.name, UIM_RPT);
+      else _route_unknown++;
+    }
+    snprintf(_route_title, sizeof(_route_title), "powtórzyli: %d", m.rep_n);
+  } else {                                           // odebrana: nadawca → kolejne repeatery → ja
+    const char* who = m.chan ? m.who : m.thread;
+    bool sender = false;
+    int total = the_mesh.getTotalContactSlots();
+    for (int i = MAX_ANON_CONTACTS; i < total && who[0]; i++) {
+      if (the_mesh.getContactByIdx(i, c) && c.type != ADV_TYPE_REPEATER && strcmp(c.name, who) == 0 && (c.gps_lat || c.gps_lon)) {
+        add(c.gps_lat / 1e6, c.gps_lon / 1e6, c.name, UIM_PERSON); sender = true; break;
+      }
+    }
+    if (!sender) _route_unknown++;
+    int hs = m.hash_size ? m.hash_size : 1, cnt = m.path_bytes / hs;
+    double plat = sender ? _route[0].lat : 0, plon = sender ? _route[0].lon : 0;
+    bool prev = sender;
+    for (int h = 0; h < cnt; h++) {
+      if (findRepeater(&m.path[h * hs], hs, plat, plon, prev, c)) {
+        snprintf(lab, sizeof(lab), "%d. %s", h + 1, c.name);
+        add(c.gps_lat / 1e6, c.gps_lon / 1e6, lab, UIM_RPT);
+        plat = c.gps_lat / 1e6; plon = c.gps_lon / 1e6; prev = true;
+      } else _route_unknown++;
+    }
+    if (m.hops > cnt) _route_unknown += m.hops - cnt;
+    if (me) add(mlat, mlon, "ja", UIM_ME);
+    char h[24]; hopsTxt(h, sizeof(h), m.hops, m.direct);
+    snprintf(_route_title, sizeof(_route_title), "%s", h);
+  }
+  if (_route_n < 2) {
+    _route_n = 0;
+    popup("Za mało punktów z pozycją", "repeatery z trasy nie podają pozycji albo nie ma ich w kontaktach", true, 5000);
+    return false;
+  }
+  return true;
+}
+
+// dobiera środek i zoom tak, żeby cała trasa zmieściła się na ekranie
+void UITask::fitRoute() {
+  if (_route_n == 0) return;
+  double la0 = _route[0].lat, la1 = la0, lo0 = _route[0].lon, lo1 = lo0;
+  for (int i = 1; i < _route_n; i++) {
+    if (_route[i].lat < la0) la0 = _route[i].lat; if (_route[i].lat > la1) la1 = _route[i].lat;
+    if (_route[i].lon < lo0) lo0 = _route[i].lon; if (_route[i].lon > lo1) lo1 = _route[i].lon;
+  }
+  _map_lat = (la0 + la1) / 2; _map_lon = (lo0 + lo1) / 2;
+  _map_follow = false;
+  int lo = _map.numPacks() ? _map.minZoom() : 6, hi = _map.numPacks() ? _map.maxZoom() : 13;
+  _map_zoom = lo;
+  for (int z = hi; z >= lo; z--) {
+    if (_map.numPacks() && !_map.hasZoom(z)) continue;
+    double x0, y0, x1, y1;
+    mcmLatLonToPixel(la1, lo0, z, &x0, &y0);
+    mcmLatLonToPixel(la0, lo1, z, &x1, &y1);
+    if (x1 - x0 <= GFX_W - 60 && y1 - y0 <= UI_MAP_H - 50) { _map_zoom = z; break; }
+  }
+}
+
 // ---------------- mapa ----------------
 
 void UITask::openMap() {
@@ -1947,8 +2086,8 @@ void UITask::keyMap(uint8_t k) {
   int lo = _map.numPacks() ? _map.minZoom() : 6, hi = _map.numPacks() ? _map.maxZoom() : 15;
   if (k == 'i' || k == 'I' || k == '+') { for (int z = _map_zoom + 1; z <= hi; z++) if (_map.numPacks() == 0 || _map.hasZoom(z)) { _map_zoom = z; break; } return; }
   if (k == 'o' || k == 'O' || k == '-') { for (int z = _map_zoom - 1; z >= lo; z--) if (_map.numPacks() == 0 || _map.hasZoom(z)) { _map_zoom = z; break; } return; }
-  if (k == M9K_ENTER) { _map_follow = true; return; }
-  if (k == M9K_F3) { push(S_MAP_NET); return; }
+  if (k == M9K_ENTER) { if (_route_n) fitRoute(); else _map_follow = true; return; }
+  if (k == M9K_F3) { if (!_route_n) push(S_MAP_NET); return; }
 }
 
 void UITask::drawMap() {
@@ -1957,7 +2096,8 @@ void UITask::drawMap() {
   fillStatus();
   v.tab = -1;
   static const char* const H[4][2] = { { "I", "bliżej" }, { "O", "dalej" }, { "Enter", "do mnie" }, { "Menu", "pobierz" } };
-  for (int i = 0; i < 4; i++) { strcpy(v.hint[i].key, H[i][0]); strcpy(v.hint[i].txt, H[i][1]); }
+  static const char* const HR[4][2] = { { "I", "bliżej" }, { "O", "dalej" }, { "Enter", "cała trasa" }, { "Wstecz", "koniec" } };
+  for (int i = 0; i < 4; i++) { strcpy(v.hint[i].key, (_route_n ? HR : H)[i][0]); strcpy(v.hint[i].txt, (_route_n ? HR : H)[i][1]); }
   v.nhints = 4;
   if (_popup_until) { v.popup = true; v.popup_danger = _pop_danger; scopy(v.popup1, sizeof(v.popup1), _pop1); scopy(v.popup2, sizeof(v.popup2), _pop2); }
 
@@ -1980,10 +2120,24 @@ void UITask::drawMap() {
   double cx, cy;
   mcmLatLonToPixel(_map_lat, _map_lon, _map_zoom, &cx, &cy);
   const int mx = GFX_W / 2, my = UI_MAP_TOP + UI_MAP_H / 2;
-  bool names = _map_zoom >= 11;
+  bool names = _map_zoom >= 11 && !_route_n;
   ContactInfo c;
   int total = the_mesh.getTotalContactSlots(), drawn = 0;
-  for (int pass = 0; pass < 2; pass++) {                   // najpierw zwykłe, potem ulubione (na wierzchu)
+  if (_route_n) {                                    // trasa: linie, potem punkty z podpisami
+    int px[16], py[16];
+    for (int i = 0; i < _route_n; i++) {
+      double qx, qy;
+      mcmLatLonToPixel(_route[i].lat, _route[i].lon, _map_zoom, &qx, &qy);
+      px[i] = mx + (int)(qx - cx); py[i] = my + (int)(qy - cy);
+    }
+    for (int i = 1; i < _route_n; i++) {
+      int a = _route_star ? 0 : i - 1;
+      uiMapLine(g, px[a], py[a], px[i], py[i]);
+    }
+    for (int i = 0; i < _route_n; i++) uiMapMarker(g, px[i], py[i], _route[i].kind, _route[i].label);
+    drawn = 999;                                     // bez pozostałych znaczników
+  }
+  for (int pass = 0; pass < 2 && !_route_n; pass++) {                   // najpierw zwykłe, potem ulubione (na wierzchu)
     for (int i = MAX_ANON_CONTACTS; i < total && drawn < 60; i++) {
       if (!the_mesh.getContactByIdx(i, c) || c.type == ADV_TYPE_NONE || c.type == ADV_TYPE_SENSOR) continue;
       if (c.gps_lat == 0 && c.gps_lon == 0) continue;
@@ -1997,13 +2151,13 @@ void UITask::drawMap() {
       drawn++;
     }
   }
-  if (fix) {
+  if (fix && !_route_n) {
     double qx, qy;
     mcmLatLonToPixel(lat, lon, _map_zoom, &qx, &qy);
     int x = mx + (int)(qx - cx), y = my + (int)(qy - cy);
     if (x >= 8 && x <= GFX_W - 8 && y >= UI_MAP_TOP + 10 && y <= UI_MAP_TOP + UI_MAP_H - 10) uiMapMarker(g, x, y, UIM_ME, "");
   }
-  if (!fix || !_map_follow) uiMapMarker(g, mx, my, UIM_CROSS, "");
+  if ((!fix || !_map_follow) && !_route_n) uiMapMarker(g, mx, my, UIM_CROSS, "");
 
   char tr[24], bl[40], note[160];
   snprintf(tr, sizeof(tr), "zoom %d", _map_zoom);
@@ -2012,6 +2166,10 @@ void UITask::drawMap() {
   if (!_map.sdOk()) strcpy(note, _sd_pending ? "Sprawdzam kartę SD…" : "Brak karty SD. Bez niej widać tylko znaczniki na pustym tle.");
   else if (_map.numPacks() == 0) strcpy(note, "Na karcie nie ma jeszcze mapy. Klawisz Menu: pobierz z internetu albo wgraj z telefonu.");
   else if (tiles == 0) strcpy(note, "Dla tego miejsca i zoomu nie ma mapy na karcie.");
+  if (_route_n) {
+    snprintf(bl, sizeof(bl), "trasa: %s", _route_title);
+    if (_route_unknown && !note[0]) snprintf(note, sizeof(note), "Punktów bez pozycji na mapie: %d (nie ma ich w kontaktach albo nie podają pozycji).", _route_unknown);
+  }
   uiMapLabels(g, tr, bl, note);
   uiRenderOverlay(g, v);
   g.swapBytes();
@@ -2450,14 +2608,16 @@ void UITask::loop() {
     uint32_t mine = the_mesh.getRTCClock()->getCurrentTime();
     if (st > mine + 3 || mine > st + 3) the_mesh.getRTCClock()->setCurrentTime(st);
   }
+  if (m9otaState() == 5 && !_ota_reboot_at) { _ota_reboot_at = now + 3000; wake(); popup("Aktualizacja zainstalowana", "restart za 3 s", false, 5000); }
+  if (_ota_reboot_at && (long)(now - _ota_reboot_at) >= 0) { _ota_reboot_at = 0; saveMsgs(); the_mesh.uiReboot(); }
   if (m9dlFinished()) { _map.scan(); wake(); popup("Mapa pobrana", "możesz wyjść z menu (Wstecz)", false, 20000); }
   if (m9dlFailed()) {                                // błąd pobierania: ekran ze szczegółami (zostaje do naciśnięcia Wstecz)
     wake();
-    kvOpen("Pobieranie mapy: błąd", M9_FW_VERSION);
+    kvOpen("Pobieranie: błąd", M9_FW_VERSION);
     kvText(m9dlDiag());
     if (scr() != S_KV) push(S_KV);
   }
-  if (m9uploadActive() || m9dlActive()) { uint32_t ms = SLEEP_STEPS[_cfg.sleep_idx]; if (ms) _sleep_at = now + ms; }     // przy przesyłaniu mapy ekran nie gaśnie
+  if (m9uploadActive() || m9dlActive() || m9otaActive()) { uint32_t ms = SLEEP_STEPS[_cfg.sleep_idx]; if (ms) _sleep_at = now + ms; }     // przy przesyłaniu mapy ekran nie gaśnie
 
   adminLoop();
   if (_disc_until && (long)(now - _disc_until) >= 0) { _disc_until = 0; _dirty = true; }
@@ -2498,7 +2658,7 @@ void UITask::loop() {
   if (the_mesh.ui_sent_changed) { the_mesh.ui_sent_changed = false; pollSent(); }
 
   if ((long)(now - _next_tick) >= 0) {             // zegar, bateria, „… min temu”, odpowiedzi discovery
-    _next_tick = now + ((scr() == S_DISC || scr() == S_MAP_NET) ? 1000 : scr() == S_MAP ? 3000 : 5000);
+    _next_tick = now + ((scr() == S_DISC || scr() == S_MAP_NET || scr() == S_OTA) ? 1000 : scr() == S_MAP ? 3000 : 5000);
     // zegar niewiarygodny (przed 2025 r.), a GPS ma czas: ustaw sam
     if (the_mesh.getRTCClock()->getCurrentTime() < 1735689600UL) timeFromGps();
     _dirty = true;

@@ -80,6 +80,10 @@ jobs:
           cp MeshCore/.pio/build/$PIO_ENV/firmware-merged.bin out/MC-SF6-ThinkNode-M9-$VER-pelny.bin
           cp MeshCore/.pio/build/$PIO_ENV/firmware.bin out/MC-SF6-ThinkNode-M9-$VER-aktualizacja.bin
           cp mapa-testowa.zip out/mapa-testowa.zip
+          # dla aktualizacji przez WiFi z urządzenia: wersja, plik, rozmiar, suma MD5
+          F=MC-SF6-ThinkNode-M9-$VER-aktualizacja.bin
+          echo "$VER $F $(stat -c %s out/$F) $(md5sum out/$F | cut -d' ' -f1)" > out/wersja.txt
+          cat out/wersja.txt
 
       - uses: actions/upload-artifact@v4
         with:

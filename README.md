@@ -7,7 +7,7 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 
 ## Stan prac
 
-**Wersja 0.17.2.** Companion Bluetooth dla aplikacji MeshCore i MeshSpeed (PIN losowany przy każdym uruchomieniu i pokazywany na ekranie przy parowaniu; stały można ustawić w Ustawieniach) i własny kolorowy interfejs po polsku:
+**Wersja 0.18.0.** Companion Bluetooth dla aplikacji MeshCore i MeshSpeed (PIN losowany przy każdym uruchomieniu i pokazywany na ekranie przy parowaniu; stały można ustawić w Ustawieniach) i własny kolorowy interfejs po polsku:
 
 - **Start** — zegar i sześć kafelków (Wiadomości, Kontakty, Repeatery, Pozycja, Radio, Urządzenie); po kafelkach chodzi się strzałkami, Enter wchodzi.
 - **Dolny pasek** — ikony: Start, Wiadomości, Kontakty, Repeatery, Ustawienia.
@@ -44,6 +44,10 @@ Domyślny preset radia: **869,618 MHz · BW 62,5 kHz · SF6 · CR 4/5**.
 
 - **Mapa** (klawisz Mapa) — mapa z karty SD z Twoją pozycją, repeaterami i kontaktami; strzałki przesuwają, I / O zmieniają zoom, Enter wraca do pozycji GPS,
   Menu otwiera pobieranie mapy z internetu, wgrywanie z telefonu i ustawienia WiFi. „Pokaż na mapie” jest w menu kontaktu.
+
+- **Trasa wiadomości na mapie** — w menu wiadomości „Trasa na mapie”: odebrana — nadawca, kolejne repeatery i Ty; wysłana na kanale — repeatery, które ją powtórzyły.
+- **Aktualizacja przez WiFi** — Ustawienia › System › „Aktualizacja przez WiFi”: urządzenie sprawdza wersję w wydaniu „Najnowszy build” i instaluje ją samo (plik `wersja.txt` z sumą MD5).
+- **Mapa** — cała Polska w zoomach 6–13 (ok. 330 MB).
 
 Jeszcze nie ma: SOS.
 

@@ -15,4 +15,12 @@ bool m9dlChanged();              // true raz, gdy na karcie przybył plik (trzeb
 const char* m9dlStatus();        // krótki stan, np. „pobieram 3 z 12”
 const char* m9dlDetail();
 const char* m9dlDiag();
-uint32_t m9dlServerTime();       // czas UTC z ostatniej odpowiedzi serwera (nagłówek Date), poprawiony o czas od odczytu; 0 = brak. Zwraca raz.          // po błędzie: szczegóły w kilku wierszach (etap, kod, błąd szyfrowania, pamięć, WiFi)        // szczegóły, np. nazwa pliku i postęp
+uint32_t m9dlServerTime();
+
+// Aktualizacja firmware przez WiFi z wydania „latest-build” (plik wersja.txt + plik „aktualizacja”).
+void m9otaCheck(const char* ssid, const char* pass, const char* base_url, const char* cur_ver);
+void m9otaInstall();                    // po m9otaState() == 2 (albo 3, żeby wgrać tę samą wersję jeszcze raz)
+int  m9otaState();                      // 0 nic, 1 sprawdzam, 2 jest nowsza, 3 aktualna, 4 pobieram, 5 gotowe — restart, 6 błąd
+bool m9otaActive();
+const char* m9otaVersion();             // wersja na serwerze
+int  m9otaPercent();       // czas UTC z ostatniej odpowiedzi serwera (nagłówek Date), poprawiony o czas od odczytu; 0 = brak. Zwraca raz.          // po błędzie: szczegóły w kilku wierszach (etap, kod, błąd szyfrowania, pamięć, WiFi)        // szczegóły, np. nazwa pliku i postęp

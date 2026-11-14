@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <esp_heap_caps.h>
 #include <mbedtls/platform.h>
+#include <Update.h>
 
 // Szyfrowanie połączenia (TLS) potrzebuje ok. 40 kB pamięci naraz, a w pamięci wewnętrznej zostaje ok. 30 kB.
 // Dlatego jego bufory kierujemy do dużej pamięci dodatkowej (PSRAM); gdyby jej zabrakło — do wewnętrznej.
@@ -27,7 +28,8 @@ static void tlsFree(void* p) { heap_caps_free(p); }
 // Dlatego: WiFi wł. → porcja do 3 MB do pamięci PSRAM → WiFi wył. → zapis porcji na kartę → WiFi wł. → następna porcja.
 // Połączenia z serwerem (do kilkunastu sekund) robi zadanie w tle, więc ekran i klawisze działają przez cały czas.
 
-enum { ST_IDLE, ST_CONNECT, ST_LIST, ST_NEXT, ST_FETCH, ST_WIFI_OFF, ST_WRITE, ST_DONE, ST_ERROR };
+enum { ST_IDLE, ST_CONNECT, ST_LIST, ST_NEXT, ST_FETCH, ST_WIFI_OFF, ST_WRITE, ST_DONE, ST_ERROR,
+       ST_OTA_INFO, ST_OTA_READY, ST_OTA_FETCH, ST_OTA_DONE };
 enum { N_IDLE, N_REQ, N_OPEN, N_STREAM, N_DONE, N_FAIL };
 
 static uint8_t st = ST_IDLE;
@@ -49,6 +51,12 @@ static volatile uint8_t net = N_IDLE;
 static volatile int last_code = 0;                     // ostatni kod odpowiedzi serwera (ujemny = błąd połączenia)
 static char req_url[220];
 static volatile uint32_t req_from = 0, req_to = 0;     // zakres bajtów (włącznie); req_to = 0 → lista plików
+// aktualizacja firmware: plik wersja.txt w wydaniu „latest-build”: „wersja nazwa_pliku rozmiar md5”
+static bool ota_mode = false;
+static volatile bool req_ota = false;
+static volatile uint32_t ota_got = 0;
+static char ota_cur[16] = "", ota_ver[16] = "", ota_file[72] = "", ota_md5[40] = "", ota_err[64] = "";
+static uint32_t ota_size = 0;
 static char list_body[4096];
 // diagnostyka ostatniej nieudanej próby
 static char d_tls[72] = "", diag[480] = "";
@@ -141,6 +149,39 @@ static void netTask(void* arg) {
     bool ok = openUrl(req_url, req_from, to);
     if (session != my) break;
     if (!ok) { closeHttp(); net = N_FAIL; continue; }
+    if (req_ota) {                                    // aktualizacja: strumień prosto do drugiej partycji pamięci flash
+      req_ota = false;
+      net = N_STREAM;
+      bool good = false;
+      ota_err[0] = 0;
+      if (!Update.begin(ota_size, U_FLASH)) snprintf(ota_err, sizeof(ota_err), "nie mogę zacząć zapisu (%s)", Update.errorString());
+      else {
+        if (ota_md5[0]) Update.setMD5(ota_md5);
+        WiFiClient* s = http->getStreamPtr();
+        static uint8_t ob[4096];
+        unsigned long t_last = millis();
+        while (ota_got < ota_size && session == my) {
+          int av = s ? s->available() : 0;
+          if (av <= 0) {
+            if (!s || !s->connected()) { snprintf(ota_err, sizeof(ota_err), "połączenie zerwane"); break; }
+            if (millis() - t_last > 20000) { snprintf(ota_err, sizeof(ota_err), "serwer przestał wysyłać"); break; }
+            vTaskDelay(2 / portTICK_PERIOD_MS);
+            continue;
+          }
+          int n = s->read(ob, av > (int)sizeof(ob) ? sizeof(ob) : av);
+          if (n <= 0) { vTaskDelay(2 / portTICK_PERIOD_MS); continue; }
+          if (Update.write(ob, n) != (size_t)n) { snprintf(ota_err, sizeof(ota_err), "błąd zapisu (%s)", Update.errorString()); break; }
+          ota_got = ota_got + n; t_last = millis();
+        }
+        if (!ota_err[0] && ota_got >= ota_size) {
+          if (Update.end(true)) good = true;           // sprawdza sumę MD5 i ustawia nową wersję do uruchomienia
+          else snprintf(ota_err, sizeof(ota_err), "plik uszkodzony (%s)", Update.errorString());
+        } else Update.abort();
+      }
+      closeHttp();
+      net = good ? N_DONE : N_FAIL;
+      continue;
+    }
     if (to == 0) {                                    // lista plików
       String b = http->getString();
       strncpy(list_body, b.c_str(), sizeof(list_body) - 1); list_body[sizeof(list_body) - 1] = 0;
@@ -231,7 +272,42 @@ void m9dlStart(const char* ssid, const char* pass, const char* base_url, int max
   snprintf(detail, sizeof(detail), "%s", ssid);
 }
 
+static int verNum(const char* v) { int a = 0, b = 0, c = 0; sscanf(v, "%d.%d.%d", &a, &b, &c); return a * 1000000 + b * 1000 + c; }
+
+void m9otaCheck(const char* ssid, const char* pass, const char* base_url, const char* cur_ver) {
+  m9dlStart(ssid, pass, base_url, 0);
+  if (st == ST_ERROR) return;
+  ota_mode = true;
+  strncpy(ota_cur, cur_ver, sizeof(ota_cur) - 1); ota_cur[sizeof(ota_cur) - 1] = 0;
+  ota_ver[0] = 0; ota_got = 0; ota_size = 0;
+}
+
+void m9otaInstall() {
+  if (st != ST_OTA_READY) return;
+  char url[220]; snprintf(url, sizeof(url), "%s%s", base, ota_file);
+  ota_got = 0;
+  req_ota = true;
+  request(url, 0, 0);
+  st = ST_OTA_FETCH;
+  snprintf(status, sizeof(status), "pobieram %s", ota_ver);
+}
+
+int m9otaState() {                                     // 0 nic, 1 sprawdzam, 2 jest nowsza, 3 aktualna, 4 pobieram, 5 gotowe, 6 błąd
+  switch (st) {
+    case ST_CONNECT: case ST_OTA_INFO: return ota_mode ? 1 : 0;
+    case ST_OTA_READY: return verNum(ota_ver) > verNum(ota_cur) ? 2 : 3;
+    case ST_OTA_FETCH: return 4;
+    case ST_OTA_DONE: return 5;
+    case ST_ERROR: return ota_mode ? 6 : 0;
+  }
+  return 0;
+}
+const char* m9otaVersion() { return ota_ver; }
+int m9otaPercent() { return ota_size ? (int)((uint64_t)ota_got * 100 / ota_size) : 0; }
+
 void m9dlStop() {
+  if (st == ST_OTA_FETCH) Update.abort();
+  ota_mode = false;
   stopTask();
   if (st != ST_IDLE) wifiOff();
   st = ST_IDLE;
@@ -314,7 +390,8 @@ void m9dlLoop() {
       if (WiFi.status() == WL_CONNECTED) {
         wifi_fails = 0;
         WiFi.setSleep(false);                          // bez usypiania radia WiFi pobieranie jest szybsze
-        if (after_wifi_list) { st = ST_LIST; list_asked = false; t_retry = 0; }
+        if (ota_mode) { char url[220]; snprintf(url, sizeof(url), "%swersja.txt", base); request(url, 0, 0); st = ST_OTA_INFO; snprintf(status, sizeof(status), "sprawdzam wersję…"); }
+        else if (after_wifi_list) { st = ST_LIST; list_asked = false; t_retry = 0; }
         else { st = ST_NEXT; t_retry = 0; }
       } else if (now - t0 > 25000) {
         int ws = (int)WiFi.status();
@@ -330,6 +407,25 @@ void m9dlLoop() {
         }
         fail(ws == WL_NO_SSID_AVAIL ? "nie widzę takiej sieci WiFi (nazwa? 5 GHz?)" : ws == WL_CONNECT_FAILED ? "sieć odrzuciła połączenie (hasło?)" : "nie połączono z WiFi (nazwa, hasło?)");
       } else snprintf(status, sizeof(status), "%s łączę z WiFi… %lu s", after_wifi_list ? "" : "porcja:", (now - t0) / 1000);
+      break;
+    case ST_OTA_INFO:
+      if (net == N_FAIL) { char why[64]; snprintf(why, sizeof(why), "nie mogę odczytać wersji, kod %d", (int)last_code); fail(why); break; }
+      if (net != N_DONE) break;
+      net = N_IDLE;
+      {
+        char fn[72] = "", md[40] = "", ver[16] = ""; unsigned long sz = 0;
+        if (sscanf(list_body, "%15s %71s %lu %39s", ver, fn, &sz, md) < 3 || sz < 100000) { fail("zły plik wersja.txt"); break; }
+        strcpy(ota_ver, ver); strcpy(ota_file, fn); strcpy(ota_md5, md); ota_size = sz;
+      }
+      st = ST_OTA_READY;
+      snprintf(status, sizeof(status), "%s", verNum(ota_ver) > verNum(ota_cur) ? "jest nowsza wersja" : "masz aktualną wersję");
+      snprintf(detail, sizeof(detail), "na serwerze %s, w urządzeniu %s", ota_ver, ota_cur);
+      break;
+    case ST_OTA_READY: break;
+    case ST_OTA_FETCH:
+      snprintf(detail, sizeof(detail), "%d%% · %lu z %lu kB", m9otaPercent(), (unsigned long)(ota_got / 1024), (unsigned long)(ota_size / 1024));
+      if (net == N_DONE) { net = N_IDLE; st = ST_OTA_DONE; snprintf(status, sizeof(status), "zainstalowano %s", ota_ver); stopTask(); wifiOff(); }
+      else if (net == N_FAIL) { net = N_IDLE; char why[96]; snprintf(why, sizeof(why), "aktualizacja: %s", ota_err[0] ? ota_err : "serwer nie oddaje pliku"); fail(why); }
       break;
     case ST_LIST: {
       if (!list_asked) {
@@ -472,7 +568,8 @@ void m9dlLoop() {
   }
 }
 
-bool m9dlActive() { return st == ST_CONNECT || st == ST_LIST || st == ST_NEXT || st == ST_FETCH || st == ST_WIFI_OFF || st == ST_WRITE; }
+bool m9dlActive() { return !ota_mode && (st == ST_CONNECT || st == ST_LIST || st == ST_NEXT || st == ST_FETCH || st == ST_WIFI_OFF || st == ST_WRITE); }
+bool m9otaActive() { return ota_mode && st != ST_IDLE && st != ST_ERROR && st != ST_OTA_DONE; }
 bool m9dlChanged() { bool c = changed; changed = false; return c; }
 bool m9dlFailed() { bool f = failed_flag; failed_flag = false; return f; }
 bool m9dlFinished() { bool f = done_flag; done_flag = false; return f; }
@@ -491,6 +588,12 @@ uint32_t m9dlServerTime() {
 void m9dlStart(const char*, const char*, const char*, int) { }
 void m9dlStop() { }
 void m9dlLoop() { }
+void m9otaCheck(const char*, const char*, const char*, const char*) { }
+void m9otaInstall() { }
+int m9otaState() { return 0; }
+const char* m9otaVersion() { return ""; }
+int m9otaPercent() { return 0; }
+bool m9otaActive() { return false; }
 bool m9dlActive() { return false; }
 bool m9dlChanged() { return false; }
 bool m9dlFailed() { return false; }

@@ -11,8 +11,7 @@ Karta w M9 jest wbudowana, dlatego pliki wgrywa samo urządzenie. Na M9: klawisz
 1. „Sieć WiFi” i „Hasło WiFi” — wpisz sieć domową albo hotspot z telefonu.
 2. „Pobierz z internetu” — urządzenie łączy się z WiFi, czyta `lista.txt` spod „Adresu mapy” i pobiera brakujące pliki na kartę.
    Przerwane pobieranie wznawia się od miejsca przerwania po ponownym wybraniu tej pozycji.
-3. „Zakres pobierania” — cała mapa (1,4 GB), bez zoomu 15 (0,6 GB) albo tylko do zoomu 13 (0,3 GB).
-   Pliki idą od najmniejszego zoomu, więc ogólna mapa kraju jest na karcie po kilku minutach.
+3. Mapa obejmuje całą Polskę w zoomach 6–13 (ok. 330 MB). Pliki idą od najmniejszego zoomu.
 
 Na czas WiFi urządzenie wyłącza Bluetooth (oba naraz nie mieszczą się w pamięci); wraca po restarcie.
 Pobieranie idzie porcjami po 3 MB: WiFi włączone → porcja do pamięci → WiFi wyłączone → zapis na kartę.

@@ -53,6 +53,7 @@ void uiRender(Gfx& g, const UiView& v);
 #define UI_MAP_H   196
 enum UiMapMark { UIM_ME, UIM_RPT, UIM_RPT_FAV, UIM_PERSON, UIM_CROSS };
 void uiMapMarker(Gfx& g, int x, int y, uint8_t kind, const char* label);
+void uiMapLine(Gfx& g, int x0, int y0, int x1, int y1);   // odcinek trasy: biały z czarną obwódką
 void uiMapLabels(Gfx& g, const char* top_right, const char* bottom_left, const char* note);
 void uiRenderOverlay(Gfx& g, const UiView& v);     // pasek stanu, dolny pasek i okienko na wierzchu mapy
 uint16_t uiColorBg();

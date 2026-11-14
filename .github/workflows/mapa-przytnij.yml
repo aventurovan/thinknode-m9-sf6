@@ -1,0 +1,30 @@
+name: Mapa — przycięcie wydania do zoomu 13
+
+# Usuwa z wydania „mapa” pliki powyżej zoomu 13 i zapisuje nową lista.txt.
+# Start: zmiana pliku mapa/PRZYTNIJ.txt (albo ręcznie z zakładki Actions).
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths: [ 'mapa/PRZYTNIJ.txt' ]
+
+permissions:
+  contents: write
+
+jobs:
+  przytnij:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Usuń zoomy 14 i wyżej, nowa lista plików
+        env:
+          GH_TOKEN: ${{ github.token }}
+          R: ${{ github.repository }}
+        run: |
+          for a in $(gh release view mapa -R "$R" --json assets -q '.assets[].name'); do
+            z=$(echo "$a" | sed -n 's/^z\([0-9]*\)_.*/\1/p')
+            if [ -n "$z" ] && [ "$z" -gt 13 ]; then gh release delete-asset mapa "$a" -y -R "$R"; echo "usunięto $a"; fi
+          done
+          gh release view mapa -R "$R" --json assets -q '.assets[] | select(.name|endswith(".mcm")) | "\(.name) \(.size)"' | sort -V > lista.txt
+          cat lista.txt
+          gh release upload mapa lista.txt --clobber -R "$R"
+          gh release edit mapa -R "$R" --notes "Mapa na kartę SD ThinkNode M9 (firmware MeshSpeed): cała Polska w zoomach 6–13, $(wc -l < lista.txt) plików. Na urządzeniu: Mapa → Menu → Pobierz z internetu. Dane mapy © autorzy OpenStreetMap (licencja ODbL)."

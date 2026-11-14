@@ -42,12 +42,12 @@ struct UiMsg {
 class UITask : public AbstractUITask {
   enum Scr { S_START = 0, S_MSGS = 1, S_CONTACTS = 2, S_RPTS = 3, S_SETTINGS = 4,
              S_THREAD, S_KV, S_BOOT, S_MENU, S_HEARD, S_QUICK, S_DISC, S_LOGIN, S_ADMIN, S_ADMIN_ACT, S_ADMIN_CLI,
-             S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS, S_PICK, S_MAP, S_MAP_NET, S_TIME };
+             S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS, S_PICK, S_MAP, S_MAP_NET, S_TIME, S_OTA };
   enum InputMode { IN_MSG = 0, IN_CHANNEL, IN_FREQ, IN_NAME, IN_TIME, IN_PASS, IN_CLI, IN_LAT, IN_LON, IN_PIN, IN_WIFI_SSID, IN_WIFI_PASS, IN_MAP_URL };
-  enum Act { A_WRITE, A_FAV, A_DETAIL, A_MANAGE, A_DELETE, A_REPLY, A_RESEND, A_COPY, A_DELMSG, A_OPEN, A_MUTE, A_MARKREAD, A_DELCHAN, A_DELTHREAD, A_REPLY_ACK, A_SHOWMAP };
+  enum Act { A_WRITE, A_FAV, A_DETAIL, A_MANAGE, A_DELETE, A_REPLY, A_RESEND, A_COPY, A_DELMSG, A_OPEN, A_MUTE, A_MARKREAD, A_DELCHAN, A_DELTHREAD, A_REPLY_ACK, A_SHOWMAP, A_ROUTE };
   enum Pick { P_PRESET, P_BW, P_SF, P_CR, P_TX, P_HASH, P_AIR, P_BT, P_GPS, P_ADVLOC, P_TEL0, P_TEL1, P_TEL2, P_AUTOADV, P_AA_MODE, P_AA_T0, P_AA_T1, P_AA_T2, P_AA_T3,
               P_AA_FULL, P_AA_HOPS, P_SHOWPATH, P_MULTIACK, P_SOUND, P_SLEEP, P_KBLIGHT, P_WAKE, P_LOCK, P_RPTSORT, P_BRIGHT, P_MSGSND, P_ADVSND, P_MAPRANGE };
-  enum Confirm { C_NONE = 0, C_DEL_CHANNEL, C_DEL_CONTACT, C_REBOOT, C_FACTORY, C_RPT_REBOOT, C_RPT_SF6, C_CLEAR_MSGS, C_CLEAR_PW, C_CLEAR_BONDS, C_DEL_THREAD, C_WIFI_DL, C_WIFI_AP, C_BT_RESTART };
+  enum Confirm { C_NONE = 0, C_DEL_CHANNEL, C_DEL_CONTACT, C_REBOOT, C_FACTORY, C_RPT_REBOOT, C_RPT_SF6, C_CLEAR_MSGS, C_CLEAR_PW, C_CLEAR_BONDS, C_DEL_THREAD, C_WIFI_DL, C_WIFI_AP, C_BT_RESTART, C_WIFI_OTA, C_OTA_INSTALL };
   struct Thread { char name[32]; uint8_t chan; uint8_t unread; uint32_t last; int16_t last_msg; };
   struct Nav { uint8_t scr; int16_t sel, top; };
   struct Cfg { uint32_t magic; uint8_t show_path, sleep_idx, kb_light, adv_idx, ct_filter, rpt_sort, no_wake, lock, bright, no_msg_snd, adv_snd, map_range; };   // map_range: 0 = cała mapa, 1 = bez zoomu 15, 2 = do zoomu 13;   // bright: 0 = nie ustawiono (pełna jasność), 1..5 = poziom
@@ -81,6 +81,10 @@ class UITask : public AbstractUITask {
   M9Map _map; bool _map_ready, _sd_pending;
   double _map_lat, _map_lon; int _map_zoom; bool _map_follow;
   WifiCfg _wifi;
+  // trasa wiadomości na mapie
+  struct RoutePt { double lat, lon; char label[24]; uint8_t kind; };
+  RoutePt _route[16]; int _route_n; bool _route_star; int _route_unknown; char _route_title[40];
+  unsigned long _ota_reboot_at;
   unsigned long _sd_test_at;             // zaplanowany test karty SD (po narysowaniu okienka)
   bool _bt_killed;                       // Bluetooth wyłączony na czas WiFi (do restartu)
   uint32_t _adv_seen;                    // ostatni advert, dla którego zagrał dźwięk
@@ -185,6 +189,9 @@ class UITask : public AbstractUITask {
   void keyMap(uint8_t k);
   void saveWifi();
   void openTime();
+  bool buildRoute(int idx);
+  void fitRoute();
+  bool findRepeater(const uint8_t* id, int n, double plat, double plon, bool have_prev, ContactInfo& out);
   void wifiPrepare();
   void keyTime(uint8_t k);
   void fillTime();

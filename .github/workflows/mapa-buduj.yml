@@ -1,6 +1,6 @@
 name: Mapa — budowanie (Polska)
 
-# Buduje mapę na kartę SD ThinkNode M9: cała Polska w zoomach 6–13, południe Polski w zoomach 14–15.
+# Buduje mapę na kartę SD ThinkNode M9: cała Polska w zoomach 6–13.
 # Wynik: wydanie „mapa” z plikami .mcm i lista.txt — urządzenie pobiera je samo przez WiFi.
 # Start: zmiana pliku mapa/BUDUJ.txt (albo ręcznie z zakładki Actions).
 on:
@@ -58,17 +58,6 @@ jobs:
           - { nazwa: pl-12,    obszar: "14.07,48.95,24.20,54.90", zoom: "12" }
           - { nazwa: pl-13-a,  obszar: "14.07,48.95,19.10,54.90", zoom: "13" }
           - { nazwa: pl-13-b,  obszar: "19.10,48.95,24.20,54.90", zoom: "13" }
-          # południe: 14.80–24.20 E, 48.95–51.20 N
-          - { nazwa: pd-14-a,  obszar: "14.80,48.95,19.50,51.20", zoom: "14" }
-          - { nazwa: pd-14-b,  obszar: "19.50,48.95,24.20,51.20", zoom: "14" }
-          - { nazwa: pd-15-a,  obszar: "14.80,48.95,15.97,51.20", zoom: "15" }
-          - { nazwa: pd-15-b,  obszar: "15.97,48.95,17.15,51.20", zoom: "15" }
-          - { nazwa: pd-15-c,  obszar: "17.15,48.95,18.32,51.20", zoom: "15" }
-          - { nazwa: pd-15-d,  obszar: "18.32,48.95,19.50,51.20", zoom: "15" }
-          - { nazwa: pd-15-e,  obszar: "19.50,48.95,20.67,51.20", zoom: "15" }
-          - { nazwa: pd-15-f,  obszar: "20.67,48.95,21.85,51.20", zoom: "15" }
-          - { nazwa: pd-15-g,  obszar: "21.85,48.95,23.02,51.20", zoom: "15" }
-          - { nazwa: pd-15-h,  obszar: "23.02,48.95,24.20,51.20", zoom: "15" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -123,7 +112,7 @@ jobs:
           : > lista.txt
           for f in *.mcm; do echo "$f $(stat -c %s "$f")" >> lista.txt; done
           cat lista.txt
-          NOTES="Mapa na kartę SD ThinkNode M9 (firmware MeshSpeed): Polska w zoomach 6–13, południe Polski w zoomach 14–15. Na urządzeniu: Mapa → Menu → Pobierz z internetu. Dane mapy © autorzy OpenStreetMap (licencja ODbL). Zbudowano $(date -u +%Y-%m-%d), plików: $(ls *.mcm | wc -l), razem $(du -ch *.mcm | tail -1 | cut -f1)."
+          NOTES="Mapa na kartę SD ThinkNode M9 (firmware MeshSpeed): cała Polska w zoomach 6–13. Na urządzeniu: Mapa → Menu → Pobierz z internetu. Dane mapy © autorzy OpenStreetMap (licencja ODbL). Zbudowano $(date -u +%Y-%m-%d), plików: $(ls *.mcm | wc -l), razem $(du -ch *.mcm | tail -1 | cut -f1)."
           gh release delete mapa -y --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
           gh release create mapa --title "Mapa Polski dla M9" --notes "$NOTES" --target "$GITHUB_SHA" -R "$GITHUB_REPOSITORY"
           for f in lista.txt *.mcm; do gh release upload mapa "$f" --clobber -R "$GITHUB_REPOSITORY"; done

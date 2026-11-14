@@ -1,4 +1,5 @@
 #include "UiView.h"
+#include <stdlib.h>
 #include "FontData.h"
 #include "LogoData.h"
 #include <string.h>
@@ -375,11 +376,26 @@ static void dot(Gfx& g, int cx, int cy, int r, uint16_t c) {
   }
 }
 
+void uiMapLine(Gfx& g, int x0, int y0, int x1, int y1) {
+  int dx = x1 - x0, dy = y1 - y0;
+  int n = abs(dx) > abs(dy) ? abs(dx) : abs(dy);
+  if (n == 0) return;
+  for (int pass = 0; pass < 2; pass++) {              // najpierw czarna obwódka (5 px), na niej biała linia (3 px)
+    int r = pass == 0 ? 2 : 1;
+    uint16_t col = pass == 0 ? C_INK : C_TXT;
+    for (int i = 0; i <= n; i++) {
+      int x = x0 + dx * i / n, y = y0 + dy * i / n;
+      if (y - r < UI_MAP_TOP || y + r >= UI_MAP_TOP + UI_MAP_H) continue;
+      g.fillRect(x - r, y - r, 2 * r + 1, 2 * r + 1, col);
+    }
+  }
+}
+
 void uiMapMarker(Gfx& g, int x, int y, uint8_t kind, const char* label) {
   if (kind == UIM_CROSS) { g.fillRect(x - 7, y, 15, 1, C_TXT); g.fillRect(x, y - 7, 1, 15, C_TXT); return; }
-  if (kind == UIM_ME) { dot(g, x, y, 8, C_TXT); dot(g, x, y, 6, C_ACC); dot(g, x, y, 2, C_INK); }
+  if (kind == UIM_ME) { dot(g, x, y, 8, C_TXT); dot(g, x, y, 6, C_BLUE); dot(g, x, y, 2, C_INK); }      // ja: niebieski, żeby nie mylić z repeaterem
   else if (kind == UIM_PERSON) { dot(g, x, y, 5, C_INK); dot(g, x, y, 4, C_GRN); }
-  else { dot(g, x, y, 7, C_INK); dot(g, x, y, 6, kind == UIM_RPT_FAV ? C_ACC : C_BLUE); g.fillRect(x - 1, y - 3, 2, 7, C_INK); g.fillRect(x - 3, y + 3, 6, 1, C_INK); }
+  else { dot(g, x, y, 6, C_INK); dot(g, x, y, 4, C_ACC); if (kind == UIM_RPT_FAV) dot(g, x, y, 1, C_INK); }   // repeater: pomarańczowy punkt z czarną ramką
   if (label && label[0]) {
     int w = Gfx::textWidth(label, F_SMALL);
     int lx = x + 10;

@@ -104,6 +104,13 @@ int main(int argc, char** argv) {
   keys({ M9K_HOME, M9K_LEFT, M9K_RIGHT, M9K_ENTER, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("zegar");
   keys({ M9K_RIGHT, M9K_UP, M9K_RIGHT, M9K_RIGHT, M9K_DOWN }); save("zegar-zmiana");
   keys({ M9K_BACK, M9K_HOME, M9K_DOWN, M9K_DOWN, M9K_RIGHT, M9K_RIGHT }); save("pasek-podglad");
+  // trasa wiadomości na mapie: odebrana (nadawca → repeatery → ja) i wysłana (kto powtórzył)
+  keys({ M9K_HOME, M9K_MSG }); save("trasa-lista");
+  keys({ M9K_ENTER, M9K_F3, M9K_DOWN, M9K_DOWN }); save("trasa-menu-odebranej");
+  keys({ M9K_ENTER }); save("trasa-odebranej");
+  keys({ M9K_BACK, M9K_HOME, M9K_MSG, M9K_UP, M9K_UP, M9K_DOWN, M9K_ENTER, M9K_F3, M9K_DOWN, M9K_DOWN }); save("trasa-menu-wyslanej");
+  keys({ M9K_ENTER }); save("trasa-wyslanej");
+  keys({ M9K_BACK, M9K_HOME, M9K_LEFT, M9K_UP, M9K_UP, M9K_UP, M9K_LEFT, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_RIGHT, M9K_ENTER, M9K_DOWN, M9K_ENTER }); save("aktualizacja");
   printf("zrzutow: %d\n", shot);
   return 0;
 }
