@@ -346,7 +346,7 @@ static void home6(const char* file, const Tile6* T, int selIdx, const UiView& st
       g.icon(x + 7, y + 26, IC_BT, bc);
       g.text(x + 22, y + 25, btOn ? (btConn ? "MeshSpeed" : "BT ON") : "BT OFF", F_SMALL, bc, tw - 26);   // połączony: nazwa aplikacji z telefonu
       char w[24]; if (wifiDbm) snprintf(w, sizeof(w), "WIFI %d", wifiDbm); else strcpy(w, "WIFI OFF");
-      g.icon(x + 7, y + 46, IC_WIFI, wifiDbm ? C_TXT : C_DIM);
+      g.icon(x + 7, y + 46, IC_WIFI, wifiDbm ? C_GRN : C_DIM);   // połączone: zielona ikona
       int ww = g.text(x + 22, y + 45, w, F_SMALL, wifiDbm ? C_TXT : C_DIM, tw - 26);
       if (wifiDbm) g.text(x + 25 + ww, y + 45, "dBm", F_SMALL, C_DIM);
       continue;
