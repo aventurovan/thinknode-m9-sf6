@@ -641,6 +641,20 @@ static void drawQR(Gfx& g, const UiView& v) {
   for (int i = 0; i < 4; i++) if (v.qr_line[i][0]) { g.text(x, y, v.qr_line[i], F_SMALL, C_TXT, GFX_W - x - 4); y += 14; }
 }
 
+// wybór emotki do wstawienia w wiadomość: siatka 8 kolumn
+static void drawEmoji(Gfx& g, const UiView& v) {
+  drawHeader(g, v, STATUS_H);
+  const int cols = 8, cw = 38, ch = 38, x0 = (GFX_W - cols * cw) / 2, y0 = STATUS_H + HEADER_H + 10;
+  for (int i = 0; i < v.emo_n; i++) {
+    int x = x0 + (i % cols) * cw, y = y0 + (i / cols) * ch;
+    bool s = i == v.sel;
+    if (s) { g.fillRound(x + 1, y + 1, cw - 2, ch - 2, 7, C_ACC); g.fillRound(x + 3, y + 3, cw - 6, ch - 6, 5, C_SELT); }
+    else g.fillRound(x + 2, y + 2, cw - 4, ch - 4, 6, C_TILE);
+    g.emoji(x + (cw - 16) / 2, y + (ch - 16) / 2, v.emo[i], 16);
+  }
+  drawHints(g, v);
+}
+
 void uiRender(Gfx& g, const UiView& v) {
   g.clear(C_BG);
   switch (v.screen) {
@@ -655,6 +669,7 @@ void uiRender(Gfx& g, const UiView& v) {
     case UIS_LOG: drawLog(g, v); break;
     case UIS_CHINFO: drawChInfo(g, v); break;
     case UIS_QR: drawQR(g, v); break;
+    case UIS_EMOJI: drawEmoji(g, v); return;
   }
   drawStatus(g, v);
   drawBottom(g, v);

@@ -9,7 +9,7 @@
 #define UI_KV_MAX     9
 #define UI_INPUT_MAX  140
 
-enum UiScreen { UIS_START, UIS_LIST, UIS_THREAD, UIS_INFO, UIS_BOOT, UIS_LOCK, UIS_GRID, UIS_TIME, UIS_SPEC, UIS_LOG, UIS_CHINFO, UIS_QR };
+enum UiScreen { UIS_START, UIS_LIST, UIS_THREAD, UIS_INFO, UIS_BOOT, UIS_LOCK, UIS_GRID, UIS_TIME, UIS_SPEC, UIS_LOG, UIS_CHINFO, UIS_QR, UIS_EMOJI };
 enum UiIcon { UII_NONE, UII_MAIL, UII_TOWER, UII_USER, UII_HASH, UII_STAR, UII_GPS, UII_BT, UII_LOCK, UII_BOLT, UII_SD, UII_ROOM, UII_HOME, UII_GEAR, UII_SCREEN, UII_SHIELD, UII_CHECK, UII_MUTE, UII_SIGNAL, UII_NET, UII_SPEC, UII_BATT, UII_WIFI, UII_PING };
 // kolor ikony kafelka (0 = domyślny szary)
 enum UiIconColor { UIC_DEF, UIC_AMBER, UIC_BLUE, UIC_GREEN, UIC_PINK, UIC_RED, UIC_VIOLET, UIC_TEAL };
@@ -77,6 +77,7 @@ struct UiView {
   // info o kanale: najaktywniejsi
   char top_name[3][24]; int top_cnt[3]; int ntop;
   // kod QR
+  int16_t emo[32]; uint8_t emo_n;                  // wybór emotki: numery w zestawie (Gfx::emojiFind)
   uint8_t qr[UI_QR_BYTES]; bool qr_ok; char qr_line[4][40];
 };
 

@@ -19,6 +19,7 @@
 #define FILE_PW          "/m9ui.pw"
 #define FILE_MSGS        "/m9ui.msg"
 #define FILE_MUTED       "/m9ui.mut"
+#define N_EMO_PICK       24                                     // emotki do wstawienia w wiadomość
 #define NTABS            6                                      // ekrany na dolnym pasku: Start, Wiadomości, Kontakty, Repeatery, Narzędzia, Ustawienia
 #define FILE_WIFI        "/m9ui.wifi"
 #define FILE_LOCK        "/m9ui.lck"
@@ -1579,7 +1580,13 @@ void UITask::keyThread(uint8_t k) {
     if (n > 0) {
       n--;
       while (n > 0 && ((uint8_t)_input[n] & 0xC0) == 0x80) n--;     // cały znak UTF-8
-      _input[n] = 0; _input_chars--;
+      _input_chars--;
+      if (strcmp(&_input[n], "\xEF\xB8\x8F") == 0 && n > 0) {      // skasowany znak był niewidocznym dodatkiem emotki: kasujemy też ją
+        _input[n] = 0;
+        n--;
+        while (n > 0 && ((uint8_t)_input[n] & 0xC0) == 0x80) n--;
+        _input[n] = 0; _input_chars--;
+      } else _input[n] = 0;
     }
     _polish = false;
     return;
@@ -1591,6 +1598,7 @@ void UITask::keyThread(uint8_t k) {
     if (maxs < 0) maxs = 0;
     if (k == M9K_UP) { _scroll_tgt += step; if (_scroll_tgt > maxs) _scroll_tgt = maxs; return; }
     if (k == M9K_DOWN) { _scroll_tgt -= step; if (_scroll_tgt < 0) _scroll_tgt = 0; return; }
+    if (k == M9K_LEFT) { push(S_EMOJI); return; }      // ◄: wstaw emotkę
     if (k == M9K_RIGHT || k == M9K_F3) {              // Menu (albo ►): opcje zaznaczonej wiadomości
       if (_th_sel >= 0 && _th_sel < _msg_n && _msgs[_th_sel].chan == _cur_chan && strcmp(_msgs[_th_sel].thread, _cur) == 0) openMenuMsg(_th_sel);
       return;
@@ -2796,6 +2804,11 @@ void UITask::key(uint8_t k) {
     return;
   }
   if (s == S_QR) return;
+  if (s == S_EMOJI) {
+    if (gridKey(k, N_EMO_PICK, 8)) return;
+    if (k == M9K_ENTER) { int i = sel(); pop(); insertEmoji(i); }
+    return;
+  }
   if (s == S_KV && _kv_pkt) {                          // szczegóły pakietu: ◄► poprzedni / następny, Menu: mapa
     if (k == M9K_LEFT || k == M9K_RIGHT) {
       buildLog();
@@ -3123,6 +3136,39 @@ void UITask::tileEnter(uint8_t id) {
   }
 }
 
+// Emotki do wstawienia w pisaną wiadomość (◄ w rozmowie). Serce i ostrzeżenie mają dodatek U+FE0F,
+// żeby telefony pokazały je jako kolorowe emotki, a nie czarne znaki.
+static const char* const EMO_PICK[N_EMO_PICK] = {
+  "\xF0\x9F\x91\x8D", "\xF0\x9F\x91\x8E", "\xF0\x9F\x91\x8C", "\xF0\x9F\x99\x8F", "\xF0\x9F\x91\x8B", "\xF0\x9F\x92\xAA", "\xF0\x9F\x98\x80", "\xF0\x9F\x98\x82",
+  "\xF0\x9F\x98\x89", "\xF0\x9F\x98\x8A", "\xF0\x9F\x98\x8D", "\xF0\x9F\x98\x8E", "\xF0\x9F\xA4\x94", "\xF0\x9F\x98\xA2", "\xF0\x9F\x98\xA1", "\xE2\x9D\xA4\xEF\xB8\x8F",
+  "\xE2\x9C\x85", "\xE2\x9D\x8C", "\xE2\x9A\xA0\xEF\xB8\x8F", "\xF0\x9F\x93\x8D", "\xF0\x9F\x93\xA1", "\xF0\x9F\x94\x8B", "\xE2\x98\x95", "\xF0\x9F\x8D\xBA" };
+
+void UITask::fillEmoji() {
+  UiView& v = *_v;
+  v.screen = UIS_EMOJI; v.tab = -1;
+  strcpy(v.title, "Emotki"); snprintf(v.title_right, sizeof(v.title_right), "do: %s", _cur);
+  if (sel() < 0 || sel() >= N_EMO_PICK) sel() = 0;
+  v.sel = sel();
+  v.emo_n = N_EMO_PICK;
+  for (int i = 0; i < N_EMO_PICK; i++) {
+    const uint8_t* p = (const uint8_t*)EMO_PICK[i];
+    uint32_t cp = p[0] >= 0xF0 ? ((uint32_t)(p[0] & 7) << 18) | ((uint32_t)(p[1] & 63) << 12) | ((uint32_t)(p[2] & 63) << 6) | (p[3] & 63)
+                               : ((uint32_t)(p[0] & 15) << 12) | ((uint32_t)(p[1] & 63) << 6) | (p[2] & 63);
+    v.emo[i] = (int16_t)Gfx::emojiFind(cp);
+  }
+  strcpy(v.hint[0].key, "Enter"); strcpy(v.hint[0].txt, "wstaw"); strcpy(v.hint[1].key, "Wstecz"); strcpy(v.hint[1].txt, ""); v.nhints = 2;
+}
+
+void UITask::insertEmoji(int i) {
+  if (i < 0 || i >= N_EMO_PICK || _input_mode != IN_MSG) return;
+  size_t n = strlen(_input), m = strlen(EMO_PICK[i]);
+  int cps = m > 4 ? 2 : 1;                             // licznik znaków liczy też niewidoczny dodatek U+FE0F
+  if (_input_chars + cps > UI_INPUT_MAX || n + m + 1 > sizeof(_input)) { popup("Wiadomość jest już za długa", "", true); return; }
+  memcpy(_input + n, EMO_PICK[i], m + 1);
+  _input_chars += cps;
+  _polish = false;
+}
+
 // Narzędzia: sześć kafelków w układzie ekranu startowego (wartość na żywo i opis)
 void UITask::fillTools() {
   UiView& v = *_v;
@@ -3337,7 +3383,7 @@ void UITask::fillThread() {
   v.polish_next = _polish;
   strcpy(v.hint[0].key, "Enter"); strcpy(v.hint[0].txt, _input[0] ? "wyślij" : "szybkie");
   strcpy(v.hint[1].key, "ctrl"); strcpy(v.hint[1].txt, "ąęł");
-  strcpy(v.hint[2].key, "▲▼"); strcpy(v.hint[2].txt, "przewiń");
+  strcpy(v.hint[2].key, "◄"); strcpy(v.hint[2].txt, "emotki");
   strcpy(v.hint[3].key, "Menu"); strcpy(v.hint[3].txt, "opcje");
   v.nhints = 4;
 }
@@ -3364,6 +3410,7 @@ void UITask::fill() {
   else if (s == S_LOG) fillLog();
   else if (s == S_CHINFO) fillChInfo();
   else if (s == S_QR) fillQR();
+  else if (s == S_EMOJI) fillEmoji();
   else fillList();
   if (_bar && v.tab >= 0) { v.bar_focus = true; v.tab = _bar_sel; }
   if (_popup_until) {

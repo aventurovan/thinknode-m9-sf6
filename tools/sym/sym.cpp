@@ -238,6 +238,17 @@ int main(int argc, char** argv) {
   keys({ M9K_ENTER, M9K_F3, M9K_ENTER }); save("z-pytanie"); keys({ M9K_ENTER }); save("z-usuniete");
   for (int i = 0; i < 3; i++) rx("Public", i == 1 ? "Ania: druga nowa, trochę dłuższa wiadomość na kanale" : "Ania: nowa po przerwie", 2);
   keys({ M9K_HOME, M9K_MSG }); for (int i = 0; i < 8; i++) keys({ M9K_UP }); keys({ M9K_ENTER }); save("s-nowe-wiadomosci"); keys({ M9K_UP }); save("s-nowe-przewiniete");
+  // emotki: odebrane z telefonów (znane, z odcieniem skóry, flaga, spoza zestawu) i wstawianie własnych
+  keys({ M9K_BACK });
+  rx("Public", u8"Ania: Super zasięg z Klimczoka 😀👍 dzięki! 🙏", 2);
+  rx("Public", u8"Marek SP9: Jutro grill 🍺🍕 i test anten 📡 ⚠️ bierzcie baterie 🔋", 1);
+  rx("Public", u8"Wojtek: 👍🏽 pozdro z 🇵🇱 i 🇨🇿 ❤️ 🦄 🫠", 3);
+  keys({ M9K_HOME, M9K_MSG }); save("e-lista");
+  for (int i = 0; i < 8; i++) keys({ M9K_UP }); keys({ M9K_ENTER }); run(600); save("e-rozmowa");
+  keys({ 'O', 'k', ' ', M9K_LEFT }); save("e-wybor");
+  keys({ M9K_ENTER, M9K_LEFT, M9K_DOWN, M9K_DOWN, M9K_RIGHT, M9K_RIGHT, M9K_RIGHT, M9K_RIGHT, M9K_RIGHT, M9K_RIGHT }); save("e-wybor-2");
+  keys({ M9K_ENTER, M9K_LEFT, M9K_UP, M9K_RIGHT, M9K_ENTER }); save("e-pole");
+  keys({ M9K_BKSP }); save("e-skasowana"); keys({ M9K_ENTER }); run(600); save("e-wyslana"); keys({ M9K_BACK });
   keys({ M9K_HOME, M9K_LEFT, M9K_UP, M9K_UP, M9K_UP, M9K_LEFT, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("p-ekran-i-dzwiek");
   keys({ M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("p-blokada-wybor");
   keys({ M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("p-pin-nowy");

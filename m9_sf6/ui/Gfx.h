@@ -30,7 +30,8 @@ public:
   void image(int x, int y, int w, int h, const uint16_t* px);   // obrazek RGB565
   void dim();                                   // przyciemnia cały ekran (tło okienka)
 
-  // tekst UTF-8; y = górna krawędź wiersza. Znaki spoza czcionki (np. emotki) są pomijane.
+  // tekst UTF-8; y = górna krawędź wiersza. Emotki z wbudowanego zestawu są rysowane jako kolorowe obrazki,
+  // nieznane jako mały kwadracik; pozostałe znaki spoza czcionki są pomijane.
   // maxW > 0: tekst jest obcinany z wielokropkiem. Zwraca szerokość narysowanego tekstu.
   int text(int x, int y, const char* s, const GfxFont& f, uint16_t c, int maxW = 0);
   int textN(int x, int y, const char* s, int nbytes, const GfxFont& f, uint16_t c);
@@ -39,6 +40,11 @@ public:
   static int textWidth(const char* s, const GfxFont& f, int nbytes = -1);
   // dzieli tekst na wiersze o szerokości do maxW (po spacjach, długie słowa łamie); zwraca liczbę wierszy
   static int wrap(const char* s, const GfxFont& f, int maxW, GfxLine* lines, int maxLines);
+
+  // emotki: numer w zestawie dla kodu Unicode (-1 = brak), rysowanie obrazka o boku 16 albo 12 px
+  static int emojiFind(uint32_t key);
+  static int emojiSize(const GfxFont& f) { return f.line_h >= 17 ? 16 : 12; }
+  void emoji(int x, int y, int idx, int size);
 
   // ikona 12x12 z wzoru znakowego ('#' = piksel)
   void icon(int x, int y, const char* const* rows, uint16_t c);
@@ -49,5 +55,8 @@ public:
 private:
   static const GfxGlyph* glyph(const GfxFont& f, uint32_t cp);
   static uint32_t nextCp(const char*& s, const char* end);
+  // następny element tekstu: znak czcionki (g) albo emotka (em >= 0; -2 = nieznana); zwraca jego szerokość
+  static int item(const char*& s, const char* end, const GfxFont& f, const GfxGlyph*& g, int& em);
+  void drawItem(int x, int y, const GfxFont& f, const GfxGlyph* g, int em, uint16_t c);
   void drawGlyph(int x, int y, const GfxFont& f, const GfxGlyph* g, uint16_t c);
 };

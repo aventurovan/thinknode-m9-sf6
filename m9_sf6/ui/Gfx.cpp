@@ -1,5 +1,6 @@
 #include "Gfx.h"
 #include <string.h>
+#include "EmojiData.h"
 
 void Gfx::clear(uint16_t c) { for (int i = 0; i < GFX_W * GFX_H; i++) _fb[i] = c; }
 
@@ -100,24 +101,93 @@ void Gfx::drawGlyph(int x, int y, const GfxFont& f, const GfxGlyph* g, uint16_t 
   }
 }
 
+int Gfx::emojiFind(uint32_t key) {
+  int lo = 0, hi = EMOJI_N - 1;
+  while (lo <= hi) {
+    int mid = (lo + hi) / 2;
+    uint32_t k = EMOJI_CP[mid];
+    if (k == key) return mid;
+    if (k < key) lo = mid + 1; else hi = mid - 1;
+  }
+  return -1;
+}
+
+void Gfx::emoji(int x, int y, int idx, int size) {
+  if (idx < 0 || idx >= EMOJI_N) return;
+  const uint16_t* rgb = size == 16 ? EMOJI16_RGB + idx * 256 : EMOJI12_RGB + idx * 144;
+  const uint8_t* al = size == 16 ? EMOJI16_A + idx * 128 : EMOJI12_A + idx * 72;
+  if (size != 16) size = 12;
+  int k = 0;
+  for (int j = 0; j < size; j++) {
+    int py = y + j;
+    for (int i = 0; i < size; i++, k++) {
+      int a = (k & 1) ? (al[k >> 1] & 15) : (al[k >> 1] >> 4);
+      int px = x + i;
+      if (a == 0 || px < 0 || py < 0 || px >= GFX_W || py >= GFX_H) continue;
+      uint16_t c = rgb[k];
+      uint16_t* p = &_fb[py * GFX_W + px];
+      if (a == 15) { *p = c; continue; }
+      int r = (c >> 11) & 31, g = (c >> 5) & 63, b = c & 31;
+      int br = (*p >> 11) & 31, bg = (*p >> 5) & 63, bb = *p & 31;
+      br += (r - br) * a / 15; bg += (g - bg) * a / 15; bb += (b - bb) * a / 15;
+      *p = (uint16_t)((br << 11) | (bg << 5) | bb);
+    }
+  }
+}
+
+static bool emojiRange(uint32_t cp) {
+  return (cp >= 0x1F000 && cp <= 0x1FAFF) || (cp >= 0x2600 && cp <= 0x27BF) || (cp >= 0x2B00 && cp <= 0x2BFF) || (cp >= 0x2300 && cp <= 0x23FF);
+}
+
+int Gfx::item(const char*& s, const char* end, const GfxFont& f, const GfxGlyph*& g, int& em) {
+  uint32_t cp = nextCp(s, end);
+  g = cp < 0x10000 ? glyph(f, cp) : NULL;
+  em = -1;
+  if (g) return g->adv;
+  if (cp < 0x2000) return 0;
+  // dodatki do emotek (wariant, łącznik, odcień skóry, ramka klawisza, znaczniki): nic nie rysują
+  if (cp == 0xFE0F || cp == 0xFE0E || cp == 0x200D || cp == 0x20E3 || (cp >= 0x1F3FB && cp <= 0x1F3FF) || (cp >= 0xE0020 && cp <= 0xE007F)) return 0;
+  int w = emojiSize(f) + 1;
+  if (cp >= 0x1F1E6 && cp <= 0x1F1FF) {                // flaga = dwie litery regionu
+    const char* q = s;
+    uint32_t c2 = nextCp(q, end);
+    em = -2;
+    if (c2 >= 0x1F1E6 && c2 <= 0x1F1FF) {
+      s = q;
+      int i = emojiFind(0x80000000u | (('A' + (cp - 0x1F1E6)) << 8) | ('A' + (c2 - 0x1F1E6)));
+      if (i >= 0) em = i;
+    }
+    return w;
+  }
+  int i = emojiFind(cp);
+  if (i >= 0) { em = i; return w; }
+  if (emojiRange(cp)) { em = -2; return w; }
+  return 0;
+}
+
+void Gfx::drawItem(int x, int y, const GfxFont& f, const GfxGlyph* g, int em, uint16_t c) {
+  if (g) { if (g->w) drawGlyph(x, y, f, g, c); return; }
+  int sz = emojiSize(f), top = y + (f.line_h - sz) / 2;
+  if (em >= 0) emoji(x, top, em, sz);
+  else if (em == -2) rect(x + 2, top + 2, sz - 4, sz - 4, c);      // emotka spoza zestawu
+}
+
 int Gfx::textWidth(const char* s, const GfxFont& f, int nbytes) {
   const char* end = s + (nbytes < 0 ? strlen(s) : (size_t)nbytes);
-  int w = 0;
-  while (s < end) {
-    const GfxGlyph* g = glyph(f, nextCp(s, end));
-    if (g) w += g->adv;
-  }
+  int w = 0, em;
+  const GfxGlyph* g;
+  while (s < end) w += item(s, end, f, g, em);
   return w;
 }
 
 int Gfx::textN(int x, int y, const char* s, int nbytes, const GfxFont& f, uint16_t c) {
   const char* end = s + nbytes;
-  int x0 = x;
+  int x0 = x, em;
+  const GfxGlyph* g;
   while (s < end) {
-    const GfxGlyph* g = glyph(f, nextCp(s, end));
-    if (!g) continue;
-    if (g->w) drawGlyph(x, y, f, g, c);
-    x += g->adv;
+    int a = item(s, end, f, g, em);
+    if (a) drawItem(x, y, f, g, em, c);
+    x += a;
   }
   return x - x0;
 }
@@ -132,8 +202,8 @@ int Gfx::text(int x, int y, const char* s, const GfxFont& f, uint16_t c, int max
   int w = 0, fit = 0;
   while (p < end) {
     const char* q = p;
-    const GfxGlyph* g = glyph(f, nextCp(q, end));
-    int a = g ? g->adv : 0;
+    const GfxGlyph* g; int em;
+    int a = item(q, end, f, g, em);
     if (w + a + dw > maxW) break;
     w += a; p = q; fit = (int)(p - s);
   }
@@ -167,11 +237,10 @@ int Gfx::wrap(const char* s, const GfxFont& f, int maxW, GfxLine* lines, int max
     while (q < end) {
       if (*q == '\n') break;
       const char* r = q;
-      uint32_t cp = nextCp(r, end);
-      const GfxGlyph* g = glyph(f, cp);
-      int a = g ? g->adv : 0;
+      const GfxGlyph* g; int em;
+      int a = item(r, end, f, g, em);
       if (w + a > maxW && q > line) break;
-      if (cp == ' ') lastSpace = q;
+      if (*q == ' ') lastSpace = q;
       w += a; q = r;
     }
     const char* stop = q;

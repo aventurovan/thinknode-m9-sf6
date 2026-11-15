@@ -6,7 +6,7 @@ i oglądasz mapę bez telefonu. Przez Bluetooth łączy się z aplikacjami **Mes
 
 Domyślny preset radia: **SF6 — 869,618 MHz · BW 62,5 kHz · SF6 · CR 4/8**. Do wyboru jest też **EU/UK Narrow (SF8)**.
 
-Aktualna wersja: **0.25.0** (numer jest też w nagłówku ekranów Narzędzia i Ustawienia).
+Aktualna wersja: **0.26.0** (numer jest też w nagłówku ekranów Narzędzia i Ustawienia).
 
 ---
 
@@ -99,6 +99,7 @@ Na początku widać sześć pierwszych.
   - pod odebraną liczba hopów i trasa z identyfikatorami repeaterów (4 znaki).
 - **Opcje wiadomości** (Menu albo ►): Odpowiedz @, Odpowiedz ack (z liczbą hopów), Szczegóły (trasa, SNR, RSSI, bajty), Trasa na mapie, Wyślij ponownie, Kopiuj, Usuń.
 - **Info o kanale:** rodzaj kanału, hash, liczba wiadomości, średnia liczba hopów i najaktywniejsi z 24 h. Enter pokazuje **kod QR**, którym kolega doda kanał w aplikacji.
+- **Emotki:** emotki wysłane z telefonów są pokazywane jako kolorowe obrazki (ok. 200 najpopularniejszych i kilkanaście flag); emotka spoza zestawu to mały kwadracik. W rozmowie klawisz **◄** otwiera siatkę 24 emotek do wstawienia we własną wiadomość.
 - **Szybkie odpowiedzi:** Enter na pustym polu, m.in. „Test” i pozycja.
 - **Wyciszanie:** pojedyncze kanały i rozmowy.
 - **Pamięć:** do 300 wiadomości, zostają po restarcie.
@@ -194,7 +195,7 @@ Kafelek Bateria pokazuje, jak spada napięcie i ile czasu zostało. Pierwsze osz
 
 | Klawisz | Działanie |
 |---|---|
-| ▲ ▼ ◄ ► | chodzenie po kafelkach i listach; w rozmowie ▲▼ przewija |
+| ▲ ▼ ◄ ► | chodzenie po kafelkach i listach; w rozmowie ▲▼ przewija, ◄ wstawia emotkę, ► otwiera opcje wiadomości |
 | Enter / środek krzyżaka | wybór; w rozmowie wysłanie (puste pole: szybkie odpowiedzi) |
 | Wstecz | krok wstecz |
 | Home | ekran Start |
@@ -237,5 +238,6 @@ Błędy i pomysły zgłaszaj w zakładce **Issues** (najlepiej ze zdjęciem ekra
 
 - Kod w tym repozytorium: MIT (jak MeshCore). Sterownik klawiatury jest napisany od zera.
 - Czcionka Inter: SIL Open Font License 1.1.
+- Emotki: Noto Color Emoji, SIL Open Font License 1.1 (obrazki generuje `tools/gen_emoji.py`).
 - Generator kodów QR: Project Nayuki, licencja MIT.
 - Mapa: dane © autorzy OpenStreetMap (ODbL).
