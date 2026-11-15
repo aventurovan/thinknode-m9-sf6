@@ -57,7 +57,9 @@ public:
   void getPress(int i, Press* out);        // 0 = najnowsze
 
   bool intLevel() const { return digitalRead(M9KB_PIN_INT) == HIGH; }
-  void setBacklight(bool on) { digitalWrite(M9KB_PIN_LED, on ? HIGH : LOW); }
+  // tryb wyjścia ustawiamy przy każdej zmianie: gdyby coś po starcie przestawiło pin, samo digitalWrite nic by nie dało
+  void setBacklight(bool on) { pinMode(M9KB_PIN_LED, OUTPUT); digitalWrite(M9KB_PIN_LED, on ? HIGH : LOW); }
+  bool backlightPin() const { return digitalRead(M9KB_PIN_LED) == HIGH; }
 
   // używane przez zadanie odczytu
   void taskLoop();

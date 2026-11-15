@@ -112,6 +112,14 @@ int Gfx::emojiFind(uint32_t key) {
   return -1;
 }
 
+int Gfx::emojiCount() { return EMOJI_N; }
+uint32_t Gfx::emojiKey(int idx) { return idx >= 0 && idx < EMOJI_N ? EMOJI_CP[idx] : 0; }
+int Gfx::emojiFrom(uint32_t key) {
+  int lo = 0, hi = EMOJI_N;
+  while (lo < hi) { int mid = (lo + hi) / 2; if (EMOJI_CP[mid] < key) lo = mid + 1; else hi = mid; }
+  return lo < EMOJI_N ? lo : EMOJI_N - 1;
+}
+
 // Obrazek ma 16x16; w małym tekście (size 12) jest pomniejszany: każdy piksel to średnia z 4 próbek źródła.
 void Gfx::emoji(int x, int y, int idx, int size) {
   if (idx < 0 || idx >= EMOJI_N) return;

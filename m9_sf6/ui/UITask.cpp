@@ -22,6 +22,7 @@
 #define N_EMO_PICK       24                                     // emotki do wstawienia w wiadomość
 #define NTABS            6                                      // ekrany na dolnym pasku: Start, Wiadomości, Kontakty, Repeatery, Narzędzia, Ustawienia
 #define FILE_WIFI        "/m9ui.wifi"
+#define FILE_EMO          "/m9ui.emo"
 #define FILE_LOCK        "/m9ui.lck"
 #define MAP_URL_DEFAULT  "https://github.com/aventurovan/thinknode-m9-sf6/releases/download/mapa/"
 #define OTA_URL          "https://github.com/aventurovan/thinknode-m9-sf6/releases/download/latest-build/"
@@ -30,7 +31,8 @@
 #define DEF_LON          19.0469
 #define FILE_MSGS_TMP    "/m9ui.tmp"
 #define FILE_MSGS_BAK    "/m9ui.bak"
-#define SAVE_DELAY_MS    45000UL        // wiadomości zapisujemy 45 s po zmianie (albo po wygaszeniu ekranu)
+#define SAVE_DELAY_MS    30000UL        // wiadomości zapisujemy najpóźniej 30 s po pierwszej zmianie (albo po wygaszeniu ekranu)
+#define SAVE_SENT_MS     2000UL         // a po wysłaniu własnej — po 2 s
 #define SAVE_CHUNK       6              // ile wiadomości na jedno przejście pętli
 
 static const int8_t TX_STEPS[] = { 10, 14, 17, 20, 22 };
@@ -158,7 +160,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   _radio_ok_at = _tx_until = _rx_until = _kb_next = 0; _tx_seen = _rx_seen = 0;
 
   _pw_n = 0;
-  _cur[0] = 0; _cur_chan = false; memset(_cur_key, 0, sizeof(_cur_key)); _msgs_old_format = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_new = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1; _wifi_sel = -1; _wifi_new[0] = 0; _wifi_scan_st = 0;
+  _cur[0] = 0; _cur_chan = false; memset(_cur_key, 0, sizeof(_cur_key)); _msgs_old_format = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_new = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1; _wifi_sel = -1; _wifi_new[0] = 0; _wifi_scan_st = 0; _emo_edit = false; _emo_slot = -1; memset(_emo, 0, sizeof(_emo));
   _nh_n = 0; _nh_next = _nh_slot_end = 0; _nh_min = 1; _bh_n = _bh_seg = 0; _bh_next = 30000; _bh_chg = false;
   _sp_tab = _sp_range = 0; _sp_pause = _sp_have = false; _sp_next = 0; _sp_ms = 0; _sp_wf_n = 0;
   memset(_sp_cur, -128, sizeof(_sp_cur)); memset(_sp_peak, -128, sizeof(_sp_peak)); memset(_sp_wf, -128, sizeof(_sp_wf));
@@ -296,6 +298,7 @@ void UITask::loadAll() {
     if (_msg_n > 0) { _msgs_dirty = true; _save_at = millis() + 10000; }
   }
   _msg_loaded = _msg_n;
+  loadEmo();
 
   f = SPIFFS.open(FILE_WIFI, "r");
   if (f) {
@@ -567,6 +570,14 @@ bool UITask::saveStep() {
   return true;
 }
 
+// Zmiana w wiadomościach: zapis najpóźniej za „delay”. Termin liczymy od PIERWSZEJ niezapisanej zmiany —
+// kolejne wiadomości go nie odsuwają (na ruchliwym kanale zapis nigdy by nie nastąpił).
+void UITask::msgsChanged(unsigned long delay) {
+  unsigned long at = millis() + delay;
+  if (!_msgs_dirty || (long)(at - _save_at) < 0) _save_at = at;
+  _msgs_dirty = true;
+}
+
 void UITask::saveMsgs() {
   if (sv_active) { sv_file.close(); SPIFFS.remove(FILE_MSGS_TMP); sv_active = false; }
   _msgs_dirty = false;
@@ -622,8 +633,8 @@ UiMsg* UITask::addMsg(const char* thread, const char* who, const char* text, boo
   m.chan = chan; m.out = out; m.hops = hops;
   // przeczytana od razu, jeśli właśnie patrzymy na tę rozmowę
   m.unread = !out && !(_awake && scr() == S_THREAD && _input_mode == IN_MSG && _cur_chan == chan && strcmp(_cur, thread) == 0);
-  _dirty = true; _msgs_dirty = true;
-  _save_at = millis() + SAVE_DELAY_MS;
+  _dirty = true;
+  msgsChanged(out ? SAVE_SENT_MS : SAVE_DELAY_MS);     // własna wiadomość trafia do pamięci trwałej prawie od razu
   return &m;
 }
 
@@ -674,9 +685,39 @@ void UITask::pollSent() {
       m.repeats = u->repeats; m.delivered = u->delivered;
       m.rep_n = u->rep_n; m.rep_hs = u->rep_hs;
       memcpy(m.rep_id, u->rep_id, sizeof(m.rep_id)); memcpy(m.rep_snr, u->rep_snr, sizeof(m.rep_snr));
-      _dirty = true; _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS;
+      _dirty = true; msgsChanged(SAVE_DELAY_MS);
     }
   }
+}
+
+// Nadawca i treść wiadomości. Nazwa dłuższa niż pole „who” (np. z emotkami) zostaje na początku tekstu
+// jako „Nadawca: treść” — wtedy rozdzielamy ją dopiero tutaj.
+#define WHO_MAX 40
+static const char* msgWho(const UiMsg& m, char* who, const char** body = NULL) {
+  who[0] = 0;
+  if (body) *body = m.text;
+  if (m.who[0]) { strncpy(who, m.who, WHO_MAX - 1); who[WHO_MAX - 1] = 0; return who; }
+  if (m.chan && !m.out) {
+    const char* sep = strstr(m.text, ": ");
+    if (sep && sep > m.text && sep - m.text < WHO_MAX) {
+      memcpy(who, m.text, sep - m.text); who[sep - m.text] = 0;
+      if (body) *body = sep + 2;
+    }
+  }
+  return who;
+}
+
+// cały zestaw: siatka 8 x 4 przewijana wierszami; Menu skacze do następnej grupy
+struct EmoSect { uint32_t from; const char* name; };
+static const EmoSect EMO_SECT[] = { { 0, "symbole" }, { 0x1F300, "pogoda i jedzenie" }, { 0x1F3A0, "sport i miejsca" }, { 0x1F400, "zwierzęta" }, { 0x1F440, "gesty i ludzie" },
+  { 0x1F4A0, "przedmioty" }, { 0x1F600, "buźki" }, { 0x1F680, "pojazdy" }, { 0x1F900, "nowsze" }, { 0x80000000u, "flagi" } };
+#define N_EMO_SECT ((int)(sizeof(EMO_SECT) / sizeof(EMO_SECT[0])))
+
+static int emoSect(int idx) {
+  uint32_t k = Gfx::emojiKey(idx);
+  int s = 0;
+  for (int i = 0; i < N_EMO_SECT; i++) if (k >= EMO_SECT[i].from) s = i;
+  return s;
 }
 
 static int cmpNoCase(const char* a, const char* b) {
@@ -738,7 +779,7 @@ int UITask::unreadTotal() {
 }
 
 void UITask::markRead(const char* name, bool chan) {
-  for (int i = 0; i < _msg_n; i++) if (_msgs[i].unread && _msgs[i].chan == chan && strcmp(_msgs[i].thread, name) == 0) { _msgs[i].unread = 0; _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS; }
+  for (int i = 0; i < _msg_n; i++) if (_msgs[i].unread && _msgs[i].chan == chan && strcmp(_msgs[i].thread, name) == 0) { _msgs[i].unread = 0; msgsChanged(SAVE_DELAY_MS); }
 }
 
 static bool keySet(const uint8_t* k) { for (int i = 0; i < 6; i++) if (k[i]) return true; return false; }
@@ -770,7 +811,7 @@ void UITask::dmThreadName(const uint8_t* key, const char* name, char* out, size_
   if (have && strcmp(cur, want) != 0) {              // kontakt zmienił nazwę: jego rozmowa idzie za nim
     for (int i = 0; i < _msg_n; i++) if (!_msgs[i].chan && memcmp(_msgs[i].key, key, 6) == 0) scopy(_msgs[i].thread, sizeof(_msgs[i].thread), want);
     if (!_cur_chan && strcmp(_cur, cur) == 0) scopy(_cur, sizeof(_cur), want);
-    _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS;
+    msgsChanged(SAVE_DELAY_MS);
   }
   if (keySet(key)) {                                 // starsze wiadomości tej rozmowy bez klucza dostają go teraz
     for (int i = 0; i < _msg_n; i++) if (!_msgs[i].chan && !keySet(_msgs[i].key) && strcmp(_msgs[i].thread, want) == 0) memcpy(_msgs[i].key, key, 6);
@@ -1101,7 +1142,7 @@ void UITask::detailMsg(int idx) {
       }
     } else kvAdd("Dostarczona", m.delivered ? "tak, jest potwierdzenie" : "brak potwierdzenia");
   } else {
-    if (m.who[0]) kvAdd("Od", m.who);
+    { char w[WHO_MAX]; if (msgWho(m, w)[0]) kvAdd("Od", w); }
     fmtSnr(t, sizeof(t), m.snr_x4); kvAdd("SNR odbioru", t);
     snprintf(t, sizeof(t), "%d dBm", m.rssi); kvAdd("RSSI odbioru", t);
     snprintf(t, sizeof(t), "%d (identyfikator: %d znaki)", m.hash_size ? m.hash_size : 1, (m.hash_size ? m.hash_size : 1) * 2); kvAdd("Bajty trasy nadawcy", t);
@@ -1131,6 +1172,7 @@ void UITask::detailInfo() {
   snprintf(t, sizeof(t), "%d z %d", the_mesh.getNumContacts(), MAX_CONTACTS); kvAdd("Kontakty", t);
   snprintf(t, sizeof(t), "%d z %d", _msg_n, UI_MSG_MAX); kvAdd("Zapisane wiadomości", t);
   snprintf(t, sizeof(t), "0x%02X", _kb.addr()); kvAdd("Klawiatura", _kb.isFound() ? t : "nie znaleziona");
+  snprintf(t, sizeof(t), "%s · pin %s", _cfg.kb_light ? "włączone" : "wyłączone", _kb.backlightPin() ? "wysoki" : "niski"); kvAdd("Podświetlenie klawiatury", t);
   snprintf(t, sizeof(t), "%lu kB · PSRAM %lu kB", (unsigned long)(ESP.getFreeHeap() / 1024), (unsigned long)(ESP.getFreePsram() / 1024)); kvAdd("Wolna pamięć RAM", t);
   snprintf(t, sizeof(t), "%lu z %lu kB", (unsigned long)(SPIFFS.usedBytes() / 1024), (unsigned long)(SPIFFS.totalBytes() / 1024)); kvAdd("Pamięć na dane", t);
   {
@@ -1182,9 +1224,10 @@ void UITask::openMenuMsg(int idx) {
   _msg_idx = idx;
   _menu_n = 0; _menu_msg = true; _menu_thread = false;
   UiMsg& m = _msgs[idx];
-  scopy(_menu_title, sizeof(_menu_title), m.out ? "Moja wiadomość" : (m.who[0] ? m.who : m.thread));
+  char mw[WHO_MAX]; msgWho(m, mw);
+  scopy(_menu_title, sizeof(_menu_title), m.out ? "Moja wiadomość" : (mw[0] ? mw : m.thread));
   // kolejność: Odpowiedz @, Odpowiedz ack, Szczegóły, Trasa na mapie, reszta
-  if (!m.out && m.chan && m.who[0]) _menu_act[_menu_n++] = A_REPLY;
+  if (!m.out && m.chan && mw[0]) _menu_act[_menu_n++] = A_REPLY;
   if (!m.out) _menu_act[_menu_n++] = A_REPLY_ACK;
   _menu_act[_menu_n++] = A_DETAIL;
   if ((!m.out && !m.direct && m.path_bytes > 0) || (m.out && m.chan && m.rep_n > 0)) _menu_act[_menu_n++] = A_ROUTE;
@@ -1231,11 +1274,11 @@ void UITask::doAct(uint8_t act) {
     switch (act) {
       case A_DETAIL: detailMsg(_msg_idx); break;
       case A_ROUTE: if (buildRoute(_msg_idx)) { fitRoute(); push(S_MAP); } break;
-      case A_REPLY: pop(); snprintf(_input, sizeof(_input), "@[%s] ", m.who); _input_chars = 0; for (const char* p = _input; *p; p++) if (((uint8_t)*p & 0xC0) != 0x80) _input_chars++; break;
+      case A_REPLY: { char w[WHO_MAX]; msgWho(m, w); pop(); snprintf(_input, sizeof(_input), "@[%s] ", w); } _input_chars = 0; for (const char* p = _input; *p; p++) if (((uint8_t)*p & 0xC0) != 0x80) _input_chars++; break;
       case A_REPLY_ACK: {                            // odpowiedź z potwierdzeniem: nick, „ack” i liczba hopów, którymi wiadomość do nas przyszła
         char h[24]; hopsTxt(h, sizeof(h), m.hops, m.direct);
-        bool chanWho = m.chan && m.who[0];
-        char who[24]; scopy(who, sizeof(who), m.who);
+        char who[WHO_MAX]; msgWho(m, who);
+        bool chanWho = m.chan && who[0];
         pop();
         if (chanWho) snprintf(_input, sizeof(_input), "@[%s] ack, %s ", who, h); else snprintf(_input, sizeof(_input), "ack, %s ", h);
         _input_chars = 0; for (const char* p = _input; *p; p++) if (((uint8_t)*p & 0xC0) != 0x80) _input_chars++;
@@ -1245,7 +1288,7 @@ void UITask::doAct(uint8_t act) {
       case A_RESEND: { char t[164]; scopy(t, sizeof(t), m.text); pop(); sendText(t); break; }
       case A_DELMSG:
         memmove(&_msgs[_msg_idx], &_msgs[_msg_idx + 1], sizeof(UiMsg) * (_msg_n - _msg_idx - 1)); _th_new = -1; _msg_n--;
-        _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS; scrollReset(); _msg_idx = -1;
+        msgsChanged(SAVE_DELAY_MS); scrollReset(); _msg_idx = -1;
         pop();
         break;
     }
@@ -1274,7 +1317,7 @@ void UITask::doConfirm(uint8_t what) {
         if (_msgs[i].chan && strcmp(_msgs[i].thread, _confirm_name) == 0) { memmove(&_msgs[i], &_msgs[i + 1], sizeof(UiMsg) * (_msg_n - i - 1)); _th_new = -1; _msg_n--; }
         else i++;
       }
-      _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS;
+      msgsChanged(SAVE_DELAY_MS);
       if (scr() == S_MENU) pop(); else prepare(S_MSGS);
       popup(ok ? "Kanał usunięty" : "Nie udało się usunąć", _confirm_name, !ok);
       break;
@@ -1284,7 +1327,7 @@ void UITask::doConfirm(uint8_t what) {
         if (!_msgs[i].chan && strcmp(_msgs[i].thread, _confirm_name) == 0) { memmove(&_msgs[i], &_msgs[i + 1], sizeof(UiMsg) * (_msg_n - i - 1)); _th_new = -1; _msg_n--; }
         else i++;
       }
-      _msgs_dirty = true; _save_at = millis() + SAVE_DELAY_MS;
+      msgsChanged(SAVE_DELAY_MS);
       if (scr() == S_MENU) pop();
       popup("Rozmowa usunięta", _confirm_name);
       break;
@@ -1598,7 +1641,7 @@ void UITask::keyThread(uint8_t k) {
     if (maxs < 0) maxs = 0;
     if (k == M9K_UP) { _scroll_tgt += step; if (_scroll_tgt > maxs) _scroll_tgt = maxs; return; }
     if (k == M9K_DOWN) { _scroll_tgt -= step; if (_scroll_tgt < 0) _scroll_tgt = 0; return; }
-    if (k == M9K_LEFT) { push(S_EMOJI); return; }      // ◄: wstaw emotkę
+    if (k == M9K_LEFT) { _emo_edit = false; push(S_EMOJI); return; }      // ◄: wstaw emotkę
     if (k == M9K_RIGHT || k == M9K_F3) {              // Menu (albo ►): opcje zaznaczonej wiadomości
       if (_th_sel >= 0 && _th_sel < _msg_n && _msgs[_th_sel].chan == _cur_chan && strcmp(_msgs[_th_sel].thread, _cur) == 0) openMenuMsg(_th_sel);
       return;
@@ -1671,7 +1714,7 @@ int UITask::listCount(uint8_t s) {
     case S_SET_POS: return 10;
     case S_SET_ADV: return 3;
     case S_SET_CT: return 6;
-    case S_SET_MSG: return 3;
+    case S_SET_MSG: return 4;
     case S_SET_SCR: return 11;
     case S_SET_SYS: return 7;
   }
@@ -2009,6 +2052,7 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
     case S_SET_MSG:
       if (i == 0) setRow(r, "Trasa pod wiadomością", _cfg.show_path ? "identyfikatory repeaterów" : "tylko liczba skoków");
       else if (i == 1) setRow(r, "Dodatkowe potwierdzenia", _prefs->multi_acks ? "włączone (pewniej, więcej ruchu)" : "wyłączone");
+      else if (i == 2) setRow(r, "Szybkie emotki", "24 do wstawiania (◄ w rozmowie)");
       else { snprintf(t, sizeof(t), "zapisanych: %d", _msg_n); setRow(r, "Usuń wszystkie wiadomości", t); }
       return;
     case S_SET_SCR:
@@ -2185,7 +2229,8 @@ void UITask::listEnter(uint8_t s, int i) {
       else settingPick(s, i);
       return;
     case S_SET_MSG:
-      if (i == 2) ask(C_CLEAR_MSGS, "Usunąć wszystkie wiadomości?", "");
+      if (i == 2) { _emo_edit = true; push(S_EMOJI); }
+      else if (i == 3) ask(C_CLEAR_MSGS, "Usunąć wszystkie wiadomości?", "");
       else settingPick(s, i);
       return;
     case S_SET_SYS:
@@ -2582,7 +2627,8 @@ bool UITask::buildRoute(int idx) {
     }
     snprintf(_route_title, sizeof(_route_title), "powtórzyli: %d", m.rep_n);
   } else {                                           // odebrana: nadawca → kolejne repeatery → ja
-    const char* who = m.chan ? m.who : m.thread;
+    char whoBuf[WHO_MAX];
+    const char* who = m.chan ? msgWho(m, whoBuf) : m.thread;
     bool sender = false;
     int total = the_mesh.getTotalContactSlots();
     for (int i = MAX_ANON_CONTACTS; i < total && who[0]; i++) {
@@ -2806,7 +2852,31 @@ void UITask::key(uint8_t k) {
   if (s == S_QR) return;
   if (s == S_EMOJI) {
     if (gridKey(k, N_EMO_PICK, 8)) return;
+    if (k == M9K_F3 || (k == M9K_ENTER && _emo_edit)) {      // podmiana emotki w tym miejscu: cały zestaw, kursor na obecnej
+      _emo_slot = (int8_t)sel();
+      int at = Gfx::emojiFind(_emo[sel()]);
+      push(S_EMOALL); sel() = at < 0 ? 0 : at; _nav[_depth - 1].top = sel() / 8 > 1 ? sel() / 8 - 1 : 0;
+      return;
+    }
     if (k == M9K_ENTER) { int i = sel(); pop(); insertEmoji(i); }
+    return;
+  }
+  if (s == S_EMOALL) {
+    int total = Gfx::emojiCount();
+    int16_t& i = sel();
+    if (k == M9K_LEFT && i > 0) i--;
+    else if (k == M9K_RIGHT && i < total - 1) i++;
+    else if (k == M9K_UP && i >= 8) i -= 8;
+    else if (k == M9K_DOWN) i = i + 8 < total ? i + 8 : total - 1;
+    else if (k == M9K_F3) {                              // następna grupa (po ostatniej wraca na początek)
+      int sc = (emoSect(i) + 1) % N_EMO_SECT;
+      i = (int16_t)Gfx::emojiFrom(EMO_SECT[sc].from);
+      _nav[_depth - 1].top = i / 8;
+    }
+    else if (k == M9K_ENTER) {
+      if (_emo_slot >= 0 && _emo_slot < N_EMO_PICK) { _emo[_emo_slot] = Gfx::emojiKey(i); saveEmo(); }
+      pop();
+    }
     return;
   }
   if (s == S_KV && _kv_pkt) {                          // szczegóły pakietu: ◄► poprzedni / następny, Menu: mapa
@@ -3136,35 +3206,91 @@ void UITask::tileEnter(uint8_t id) {
   }
 }
 
-// Emotki do wstawienia w pisaną wiadomość (◄ w rozmowie). Serce i ostrzeżenie mają dodatek U+FE0F,
-// żeby telefony pokazały je jako kolorowe emotki, a nie czarne znaki.
-static const char* const EMO_PICK[N_EMO_PICK] = {
-  "\xF0\x9F\x91\x8D", "\xF0\x9F\x91\x8E", "\xF0\x9F\x91\x8C", "\xF0\x9F\x99\x8F", "\xF0\x9F\x91\x8B", "\xF0\x9F\x92\xAA", "\xF0\x9F\x98\x80", "\xF0\x9F\x98\x82",
-  "\xF0\x9F\x98\x89", "\xF0\x9F\x98\x8A", "\xF0\x9F\x98\x8D", "\xF0\x9F\x98\x8E", "\xF0\x9F\xA4\x94", "\xF0\x9F\x98\xA2", "\xF0\x9F\x98\xA1", "\xE2\x9D\xA4\xEF\xB8\x8F",
-  "\xE2\x9C\x85", "\xE2\x9A\xA0\xEF\xB8\x8F", "\xF0\x9F\x93\x8D", "\xF0\x9F\x93\xA1", "\xF0\x9F\x94\x8B", "\xE2\x98\x95", "\xF0\x9F\x8D\xBA", "\xF0\x9F\x8D\xB9" };
+// Szybkie emotki (◄ w rozmowie): 24 miejsca, każde można podmienić na dowolną emotkę z zestawu (Menu).
+static const uint32_t EMO_DEF[N_EMO_PICK] = {
+  0x1F44D, 0x1F44E, 0x1F44C, 0x1F64F, 0x1F44B, 0x1F4AA, 0x1F600, 0x1F602,
+  0x1F609, 0x1F60A, 0x1F60D, 0x1F60E, 0x1F914, 0x1F622, 0x1F621, 0x2764,
+  0x2705, 0x26A0, 0x1F4CD, 0x1F4E1, 0x1F50B, 0x2615, 0x1F37A, 0x1F943 };
+
+void UITask::loadEmo() {
+  memcpy(_emo, EMO_DEF, sizeof(_emo));
+  File f = SPIFFS.open(FILE_EMO, "r");
+  if (!f) return;
+  uint8_t h[2]; uint32_t e[N_EMO_PICK];
+  if (f.size() == 2 + sizeof(e) && f.read(h, 2) == 2 && h[0] == 'E' && h[1] == '1' && f.read((uint8_t*)e, sizeof(e)) == sizeof(e))
+    for (int i = 0; i < N_EMO_PICK; i++) if (Gfx::emojiFind(e[i]) >= 0) _emo[i] = e[i];
+  f.close();
+}
+
+void UITask::saveEmo() {
+  File f = SPIFFS.open(FILE_EMO, "w");
+  if (!f) return;
+  f.write((const uint8_t*)"E1", 2);
+  f.write((const uint8_t*)_emo, sizeof(_emo));
+  f.close();
+}
+
+static int putCp(char* d, uint32_t cp) {
+  if (cp < 0x800) { d[0] = (char)(0xC0 | (cp >> 6)); d[1] = (char)(0x80 | (cp & 63)); return 2; }
+  if (cp < 0x10000) { d[0] = (char)(0xE0 | (cp >> 12)); d[1] = (char)(0x80 | ((cp >> 6) & 63)); d[2] = (char)(0x80 | (cp & 63)); return 3; }
+  d[0] = (char)(0xF0 | (cp >> 18)); d[1] = (char)(0x80 | ((cp >> 12) & 63)); d[2] = (char)(0x80 | ((cp >> 6) & 63)); d[3] = (char)(0x80 | (cp & 63)); return 4;
+}
+
+// Tekst emotki do wysłania; zwraca liczbę znaków Unicode. Starsze symbole (serce, ostrzeżenie) dostają dodatek U+FE0F,
+// żeby telefony pokazały je jako kolorowe emotki; flaga to dwie litery regionu.
+static int emojiText(uint32_t key, char* d) {
+  int n, cps;
+  if (key & 0x80000000u) { n = putCp(d, 0x1F1E6 + ((key >> 8) & 0xFF) - 'A'); n += putCp(d + n, 0x1F1E6 + (key & 0xFF) - 'A'); cps = 2; }
+  else if (key < 0x1F000) { n = putCp(d, key); n += putCp(d + n, 0xFE0F); cps = 2; }
+  else { n = putCp(d, key); cps = 1; }
+  d[n] = 0;
+  return cps;
+}
 
 void UITask::fillEmoji() {
   UiView& v = *_v;
   v.screen = UIS_EMOJI; v.tab = -1;
-  strcpy(v.title, "Emotki"); snprintf(v.title_right, sizeof(v.title_right), "do: %s", _cur);
+  strcpy(v.title, _emo_edit ? "Szybkie emotki" : "Emotki");
+  if (_emo_edit) strcpy(v.title_right, "Enter: zmień"); else snprintf(v.title_right, sizeof(v.title_right), "do: %s", _cur);
   if (sel() < 0 || sel() >= N_EMO_PICK) sel() = 0;
   v.sel = sel();
-  v.emo_n = N_EMO_PICK;
-  for (int i = 0; i < N_EMO_PICK; i++) {
-    const uint8_t* p = (const uint8_t*)EMO_PICK[i];
-    uint32_t cp = p[0] >= 0xF0 ? ((uint32_t)(p[0] & 7) << 18) | ((uint32_t)(p[1] & 63) << 12) | ((uint32_t)(p[2] & 63) << 6) | (p[3] & 63)
-                               : ((uint32_t)(p[0] & 15) << 12) | ((uint32_t)(p[1] & 63) << 6) | (p[2] & 63);
-    v.emo[i] = (int16_t)Gfx::emojiFind(cp);
-  }
-  strcpy(v.hint[0].key, "Enter"); strcpy(v.hint[0].txt, "wstaw"); strcpy(v.hint[1].key, "Wstecz"); strcpy(v.hint[1].txt, ""); v.nhints = 2;
+  v.emo_n = N_EMO_PICK; v.emo_total = 0; v.emo_first = 0;
+  for (int i = 0; i < N_EMO_PICK; i++) v.emo[i] = (int16_t)Gfx::emojiFind(_emo[i]);
+  v.nhints = 0;
+  if (_emo_edit) { strcpy(v.hint[0].key, "Enter"); strcpy(v.hint[0].txt, "zmień"); v.nhints = 1; }
+  else { strcpy(v.hint[0].key, "Enter"); strcpy(v.hint[0].txt, "wstaw"); strcpy(v.hint[1].key, "Menu"); strcpy(v.hint[1].txt, "zmień emotkę"); v.nhints = 2; }
+  strcpy(v.hint[v.nhints].key, "Wstecz"); strcpy(v.hint[v.nhints].txt, ""); v.nhints++;
+}
+
+void UITask::fillEmoAll() {
+  UiView& v = *_v;
+  v.screen = UIS_EMOJI; v.tab = -1;
+  int total = Gfx::emojiCount();
+  if (sel() < 0) sel() = 0;
+  if (sel() >= total) sel() = total - 1;
+  int16_t& top = _nav[_depth - 1].top;                 // pierwszy widoczny wiersz
+  int row = sel() / 8;
+  if (row < top) top = row;
+  if (row > top + 3) top = row - 3;
+  if (top < 0) top = 0;
+  snprintf(v.title, sizeof(v.title), "Wybierz emotkę");
+  snprintf(v.title_right, sizeof(v.title_right), "%s · %d z %d", EMO_SECT[emoSect(sel())].name, sel() + 1, total);
+  v.emo_n = 0; v.emo_total = (int16_t)total; v.emo_first = (int16_t)(top * 8);
+  for (int i = top * 8; i < total && v.emo_n < 32; i++) v.emo[v.emo_n++] = (int16_t)i;
+  v.sel = sel() - top * 8;
+  strcpy(v.hint[0].key, "Enter"); strcpy(v.hint[0].txt, "wybierz");
+  strcpy(v.hint[1].key, "Menu"); strcpy(v.hint[1].txt, "następna grupa");
+  strcpy(v.hint[2].key, "Wstecz"); strcpy(v.hint[2].txt, "");
+  v.nhints = 3;
 }
 
 void UITask::insertEmoji(int i) {
   if (i < 0 || i >= N_EMO_PICK || _input_mode != IN_MSG) return;
-  size_t n = strlen(_input), m = strlen(EMO_PICK[i]);
-  int cps = m > 4 ? 2 : 1;                             // licznik znaków liczy też niewidoczny dodatek U+FE0F
+  char e[12];
+  int cps = emojiText(_emo[i], e);                     // licznik znaków liczy też niewidoczny dodatek U+FE0F
+  size_t n = strlen(_input), m = strlen(e);
   if (_input_chars + cps > UI_INPUT_MAX || n + m + 1 > sizeof(_input)) { popup("Wiadomość jest już za długa", "", true); return; }
-  memcpy(_input + n, EMO_PICK[i], m + 1);
+  memcpy(_input + n, e, m + 1);
   _input_chars += cps;
   _polish = false;
 }
@@ -3267,8 +3393,10 @@ void UITask::fillKv() {
 }
 
 void UITask::makeBubble(const UiMsg& m, UiBubble& b) {
-  scopy(b.who, sizeof(b.who), m.who[0] ? m.who : (m.out ? "" : _cur));
-  scopy(b.text, sizeof(b.text), m.text);
+  char w[WHO_MAX]; const char* body;
+  msgWho(m, w, &body);
+  scopy(b.who, sizeof(b.who), w[0] ? w : (m.out ? "" : _cur));
+  scopy(b.text, sizeof(b.text), body);
   b.out = m.out;
   b.sep = _th_new >= 0 && &m == &_msgs[_th_new];
   char t[8]; fmtClock(t, sizeof(t), m.ts, false);
@@ -3411,6 +3539,7 @@ void UITask::fill() {
   else if (s == S_CHINFO) fillChInfo();
   else if (s == S_QR) fillQR();
   else if (s == S_EMOJI) fillEmoji();
+  else if (s == S_EMOALL) fillEmoAll();
   else fillList();
   if (_bar && v.tab >= 0) { v.bar_focus = true; v.tab = _bar_sel; }
   if (_popup_until) {
@@ -3566,7 +3695,8 @@ void UITask::loop() {
   }
 
   // zapis wiadomości: w kawałkach, kilka minut po zmianie (albo zaraz po wygaszeniu ekranu) i nie w trakcie pisania
-  if (sv_active || (_msgs_dirty && (long)(now - _save_at) >= 0 && now - _last_key > 5000)) saveStep();
+  // pisanie odsuwa zapis najwyżej o 10 s ponad termin
+  if (sv_active || (_msgs_dirty && (long)(now - _save_at) >= 0 && (now - _last_key > 3000 || (long)(now - _save_at) >= 10000))) saveStep();
 
   // Bluetooth wyłączony w ustawieniach: po starcie (gdy MeshCore już go włączył) wyłącz
   if (!_bt_boot_done && now > 2000) {
@@ -4001,14 +4131,15 @@ void UITask::fillChInfo() {
     last = i;
     hopsN++; hopsSum += m.direct ? 0 : m.hops;
     if (m.snr_x4) { snrN++; snrSum += m.snr_x4; }
-    if (m.who[0] && m.ts + 86400 >= now) {
-      int k = 0; while (k < ntop && strcmp(top[k].who, m.who) != 0) k++;
-      if (k == ntop && ntop < 24) { scopy(top[ntop].who, sizeof(top[0].who), m.who); top[ntop].n = 0; ntop++; }
+    char mw[WHO_MAX]; msgWho(m, mw);
+    if (mw[0] && m.ts + 86400 >= now) {
+      int k = 0; while (k < ntop && strncmp(top[k].who, mw, sizeof(top[0].who) - 1) != 0) k++;
+      if (k == ntop && ntop < 24) { scopy(top[ntop].who, sizeof(top[0].who), mw); top[ntop].n = 0; ntop++; }
       if (k < ntop) top[k].n++;
     }
   }
   snprintf(t, sizeof(t), unread ? "%d · %d nowych" : "%d", cnt, unread); kv("Wiadomości", t);
-  if (last >= 0) { char c[8]; fmtClock(c, sizeof(c), _msgs[last].ts, true); snprintf(t, sizeof(t), "%s · %s", c, _msgs[last].who[0] ? _msgs[last].who : "?"); } else strcpy(t, "—");
+  if (last >= 0) { char c[8]; fmtClock(c, sizeof(c), _msgs[last].ts, true); char lw[WHO_MAX]; msgWho(_msgs[last], lw); snprintf(t, sizeof(t), "%s · %s", c, lw[0] ? lw : "?"); } else strcpy(t, "—");
   kv("Ostatnia", t);
   if (hopsN) { if (snrN) snprintf(t, sizeof(t), "%.1f hopa · SNR %.1f", hopsSum / (double)hopsN, snrSum / 4.0 / snrN); else snprintf(t, sizeof(t), "%.1f hopa", hopsSum / (double)hopsN); comma(t); } else strcpy(t, "—");
   kv("Średnio do nas", t);

@@ -243,9 +243,11 @@ int main(int argc, char** argv) {
   rx("Public", u8"Ania: Super zasięg z Klimczoka 😀👍 dzięki! 🙏", 2);
   rx("Public", u8"Marek SP9: Jutro grill 🍺🍕 i test anten 📡 ⚠️ bierzcie baterie 🔋", 1);
   rx("Public", u8"Wojtek: 👍🏽 pozdro z 🇵🇱 i 🇨🇿 ❤️ 🦄 🫠", 3);
+  rx("Public", u8"👾Chodok Z Bryjowa👾: Już się ściemnia a wróciłem z przehyby", 6);
   keys({ M9K_HOME, M9K_MSG }); save("e-lista");
   for (int i = 0; i < 8; i++) keys({ M9K_UP }); keys({ M9K_ENTER }); run(600); save("e-rozmowa");
   keys({ 'O', 'k', ' ', M9K_LEFT }); save("e-wybor");
+  keys({ M9K_RIGHT, M9K_F3 }); save("e-wszystkie"); keys({ M9K_F3, M9K_F3, M9K_DOWN, M9K_RIGHT }); save("e-grupa"); keys({ M9K_ENTER }); save("e-podmieniona"); keys({ M9K_LEFT });
   keys({ M9K_ENTER, M9K_LEFT, M9K_DOWN, M9K_DOWN, M9K_RIGHT, M9K_RIGHT, M9K_RIGHT, M9K_RIGHT, M9K_RIGHT, M9K_RIGHT }); save("e-wybor-2");
   keys({ M9K_ENTER, M9K_LEFT, M9K_UP, M9K_RIGHT, M9K_ENTER }); save("e-pole");
   keys({ M9K_BKSP }); save("e-skasowana"); keys({ M9K_ENTER }); run(600); save("e-wyslana"); keys({ M9K_BACK });

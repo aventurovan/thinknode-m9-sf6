@@ -16,5 +16,5 @@
 #define M9K_BACK 0x86
 #define M9K_CTRL 0x90
 extern std::vector<uint8_t> sim_keys;
-class M9Keyboard { public: void begin() { } bool isFound() { return true; } uint8_t addr() { return 0x6D; } void setBacklight(bool) { }
+class M9Keyboard { public: void begin() { } bool isFound() { return true; } uint8_t addr() { return 0x6D; } void setBacklight(bool) { } bool backlightPin() { return true; }
   uint8_t readKey() { if (sim_keys.empty()) return 0; uint8_t k = sim_keys.front(); sim_keys.erase(sim_keys.begin()); return k; } };

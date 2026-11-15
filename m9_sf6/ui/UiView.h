@@ -15,7 +15,7 @@ enum UiIcon { UII_NONE, UII_MAIL, UII_TOWER, UII_USER, UII_HASH, UII_STAR, UII_G
 enum UiIconColor { UIC_DEF, UIC_AMBER, UIC_BLUE, UIC_GREEN, UIC_PINK, UIC_RED, UIC_VIOLET, UIC_TEAL };
 
 struct UiRow { char text[44]; char sub[80]; char right[64]; uint8_t icon; uint8_t badge; bool icon_accent; };
-struct UiBubble { char who[24]; char meta[32]; char text[168]; char path[72]; bool out; bool sel; bool sep; };   // sep: nad dymkiem kreska „nowe wiadomości”
+struct UiBubble { char who[40]; char meta[32]; char text[168]; char path[72]; bool out; bool sel; bool sep; };   // sep: nad dymkiem kreska „nowe wiadomości”
 struct UiKV { char k[64]; char v[52]; };
 struct UiHint { char key[14]; char txt[32]; };
 struct UiTile { char label[24]; char value[36]; char sub[72]; uint8_t icon; bool accent; uint8_t kind; char side[16]; char sub2[48]; uint8_t icol; };   // icol: UIC_*   // side: drobny dopisek z prawej strony wartości   // kind: UIT_*
@@ -77,7 +77,7 @@ struct UiView {
   // info o kanale: najaktywniejsi
   char top_name[3][24]; int top_cnt[3]; int ntop;
   // kod QR
-  int16_t emo[32]; uint8_t emo_n;                  // wybór emotki: numery w zestawie (Gfx::emojiFind)
+  int16_t emo[32]; uint8_t emo_n; int16_t emo_total, emo_first;   // emo_total > 0: przeglądanie całego zestawu (suwak)                  // wybór emotki: numery w zestawie (Gfx::emojiFind)
   uint8_t qr[UI_QR_BYTES]; bool qr_ok; char qr_line[4][40];
 };
 

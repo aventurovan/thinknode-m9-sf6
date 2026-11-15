@@ -652,6 +652,12 @@ static void drawEmoji(Gfx& g, const UiView& v) {
     else g.fillRound(x + 2, y + 2, cw - 4, ch - 4, 6, C_TILE);
     g.emoji(x + (cw - 16) / 2, y + (ch - 16) / 2, v.emo[i], 16);
   }
+  if (v.emo_total > 32) {                            // suwak przy przeglądaniu całego zestawu
+    int th = 4 * ch - 4, bh = th * 32 / v.emo_total; if (bh < 10) bh = 10;
+    int by = y0 + 2 + (th - bh) * v.emo_first / (v.emo_total - 32 > 0 ? v.emo_total - 32 : 1);
+    g.fillRect(GFX_W - 4, y0 + 2, 2, th, C_LINE);
+    g.fillRect(GFX_W - 5, by, 4, bh, C_ACC);
+  }
   drawHints(g, v);
 }
 

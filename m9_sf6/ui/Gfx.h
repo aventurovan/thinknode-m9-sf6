@@ -43,6 +43,9 @@ public:
 
   // emotki: numer w zestawie dla kodu Unicode (-1 = brak), rysowanie obrazka o boku 16 albo 12 px
   static int emojiFind(uint32_t key);
+  static int emojiCount();
+  static uint32_t emojiKey(int idx);               // kod Unicode; flaga: 0x80000000 | litera1 << 8 | litera2
+  static int emojiFrom(uint32_t key);              // pierwsza emotka o kluczu >= key
   static int emojiSize(const GfxFont& f) { return f.line_h >= 17 ? 16 : 12; }
   void emoji(int x, int y, int idx, int size);
 
