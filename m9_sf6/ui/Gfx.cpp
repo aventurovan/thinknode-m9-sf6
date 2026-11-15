@@ -112,22 +112,42 @@ int Gfx::emojiFind(uint32_t key) {
   return -1;
 }
 
+// Obrazek ma 16x16; w małym tekście (size 12) jest pomniejszany: każdy piksel to średnia z 4 próbek źródła.
 void Gfx::emoji(int x, int y, int idx, int size) {
   if (idx < 0 || idx >= EMOJI_N) return;
-  const uint16_t* rgb = size == 16 ? EMOJI16_RGB + idx * 256 : EMOJI12_RGB + idx * 144;
-  const uint8_t* al = size == 16 ? EMOJI16_A + idx * 128 : EMOJI12_A + idx * 72;
+  const uint16_t* rgb = EMOJI16_RGB + idx * 256;
+  const uint8_t* al = EMOJI16_A + idx * 128;
   if (size != 16) size = 12;
-  int k = 0;
   for (int j = 0; j < size; j++) {
     int py = y + j;
-    for (int i = 0; i < size; i++, k++) {
-      int a = (k & 1) ? (al[k >> 1] & 15) : (al[k >> 1] >> 4);
+    if (py < 0 || py >= GFX_H) continue;
+    for (int i = 0; i < size; i++) {
       int px = x + i;
-      if (a == 0 || px < 0 || py < 0 || px >= GFX_W || py >= GFX_H) continue;
-      uint16_t c = rgb[k];
+      if (px < 0 || px >= GFX_W) continue;
+      int a, r, g, b;
+      if (size == 16) {
+        int k = j * 16 + i;
+        a = (k & 1) ? (al[k >> 1] & 15) : (al[k >> 1] >> 4);
+        if (a == 0) continue;
+        uint16_t c = rgb[k];
+        r = (c >> 11) & 31; g = (c >> 5) & 63; b = c & 31;
+      } else {
+        int sa = 0, sr = 0, sg = 0, sb = 0;
+        for (int q = 0; q < 4; q++) {                  // próbki w ćwiartkach piksela docelowego (skala 4:3)
+          int sx = (i * 8 + (q & 1) * 4 + 2) / 6, sy = (j * 8 + (q >> 1) * 4 + 2) / 6;
+          if (sx > 15) sx = 15;
+          if (sy > 15) sy = 15;
+          int k = sy * 16 + sx;
+          int aa = (k & 1) ? (al[k >> 1] & 15) : (al[k >> 1] >> 4);
+          uint16_t c = rgb[k];
+          sa += aa; sr += ((c >> 11) & 31) * aa; sg += ((c >> 5) & 63) * aa; sb += (c & 31) * aa;
+        }
+        if (sa == 0) continue;
+        r = sr / sa; g = sg / sa; b = sb / sa; a = (sa + 2) / 4;
+        if (a == 0) continue;
+      }
       uint16_t* p = &_fb[py * GFX_W + px];
-      if (a == 15) { *p = c; continue; }
-      int r = (c >> 11) & 31, g = (c >> 5) & 63, b = c & 31;
+      if (a >= 15) { *p = (uint16_t)((r << 11) | (g << 5) | b); continue; }
       int br = (*p >> 11) & 31, bg = (*p >> 5) & 63, bb = *p & 31;
       br += (r - br) * a / 15; bg += (g - bg) * a / 15; bb += (b - bb) * a / 15;
       *p = (uint16_t)((br << 11) | (bg << 5) | bb);
@@ -136,7 +156,7 @@ void Gfx::emoji(int x, int y, int idx, int size) {
 }
 
 static bool emojiRange(uint32_t cp) {
-  return (cp >= 0x1F000 && cp <= 0x1FAFF) || (cp >= 0x2600 && cp <= 0x27BF) || (cp >= 0x2B00 && cp <= 0x2BFF) || (cp >= 0x2300 && cp <= 0x23FF);
+  return (cp >= 0x1F000 && cp <= 0x1FBFF) || (cp >= 0x2600 && cp <= 0x27BF) || (cp >= 0x2B00 && cp <= 0x2BFF) || (cp >= 0x2300 && cp <= 0x23FF);
 }
 
 int Gfx::item(const char*& s, const char* end, const GfxFont& f, const GfxGlyph*& g, int& em) {

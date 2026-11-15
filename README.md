@@ -6,7 +6,7 @@ i oglądasz mapę bez telefonu. Przez Bluetooth łączy się z aplikacjami **Mes
 
 Domyślny preset radia: **SF6 — 869,618 MHz · BW 62,5 kHz · SF6 · CR 4/8**. Do wyboru jest też **EU/UK Narrow (SF8)**.
 
-Aktualna wersja: **0.26.0** (numer jest też w nagłówku ekranów Narzędzia i Ustawienia).
+Aktualna wersja: **0.27.0** (numer jest też w nagłówku ekranów Narzędzia i Ustawienia).
 
 ---
 
@@ -99,7 +99,7 @@ Na początku widać sześć pierwszych.
   - pod odebraną liczba hopów i trasa z identyfikatorami repeaterów (4 znaki).
 - **Opcje wiadomości** (Menu albo ►): Odpowiedz @, Odpowiedz ack (z liczbą hopów), Szczegóły (trasa, SNR, RSSI, bajty), Trasa na mapie, Wyślij ponownie, Kopiuj, Usuń.
 - **Info o kanale:** rodzaj kanału, hash, liczba wiadomości, średnia liczba hopów i najaktywniejsi z 24 h. Enter pokazuje **kod QR**, którym kolega doda kanał w aplikacji.
-- **Emotki:** emotki wysłane z telefonów są pokazywane jako kolorowe obrazki (ok. 200 najpopularniejszych i kilkanaście flag); emotka spoza zestawu to mały kwadracik. W rozmowie klawisz **◄** otwiera siatkę 24 emotek do wstawienia we własną wiadomość.
+- **Emotki:** emotki wysłane z telefonów są pokazywane jako kolorowe obrazki (pełny zestaw: ok. 1400 emotek i flagi wszystkich krajów; odcienie skóry pokazują się jako wersja podstawowa, a emotki złożone z kilku znaków jako ich części). W rozmowie klawisz **◄** otwiera siatkę 24 emotek do wstawienia we własną wiadomość.
 - **Szybkie odpowiedzi:** Enter na pustym polu, m.in. „Test” i pozycja.
 - **Wyciszanie:** pojedyncze kanały i rozmowy.
 - **Pamięć:** do 300 wiadomości, zostają po restarcie.
