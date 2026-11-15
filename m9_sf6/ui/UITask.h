@@ -25,6 +25,8 @@ struct ContactInfo;
 #define UI_PICK_MAX    14
 #define UI_PW_MAX      12
 #define UI_MENU_MAX    8
+#define UI_QUICK_MAX   12      // szybkie wiadomości: najwyżej tyle własnych tekstów
+#define UI_QUICK_LEN   100     // bajtów na tekst (48 znaków, polskie litery liczą się podwójnie)
 
 struct UiMsg {
   char thread[32];        // nazwa kanału albo kontaktu
@@ -44,11 +46,11 @@ struct UiMsg {
 class UITask : public AbstractUITask {
   enum Scr { S_START = 0, S_MSGS = 1, S_CONTACTS = 2, S_RPTS = 3, S_TOOLS = 4, S_SETTINGS = 5,
              S_THREAD, S_KV, S_BOOT, S_MENU, S_HEARD, S_QUICK, S_DISC, S_LOGIN, S_ADMIN, S_ADMIN_ACT, S_ADMIN_CLI,
-             S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS, S_PICK, S_MAP, S_MAP_NET, S_TIME, S_OTA, S_SPEC, S_LOG, S_CHINFO, S_QR, S_WIFI, S_EMOJI, S_EMOALL };
-  enum InputMode { IN_MSG = 0, IN_CHANNEL, IN_FREQ, IN_NAME, IN_TIME, IN_PASS, IN_CLI, IN_LAT, IN_LON, IN_PIN, IN_WIFI_SSID, IN_WIFI_PASS, IN_MAP_URL, IN_LOCKPIN };
+             S_RADIO, S_SET_BT, S_SET_POS, S_SET_ADV, S_SET_CT, S_SET_MSG, S_SET_SCR, S_SET_SYS, S_PICK, S_MAP, S_MAP_NET, S_TIME, S_OTA, S_SPEC, S_LOG, S_CHINFO, S_QR, S_WIFI, S_EMOJI, S_EMOALL, S_QUICK_EDIT };
+  enum InputMode { IN_MSG = 0, IN_CHANNEL, IN_FREQ, IN_NAME, IN_TIME, IN_PASS, IN_CLI, IN_LAT, IN_LON, IN_PIN, IN_WIFI_SSID, IN_WIFI_PASS, IN_MAP_URL, IN_LOCKPIN, IN_QUICK };
   enum Act { A_WRITE, A_FAV, A_DETAIL, A_MANAGE, A_DELETE, A_REPLY, A_RESEND, A_COPY, A_DELMSG, A_OPEN, A_MUTE, A_MARKREAD, A_DELCHAN, A_DELTHREAD, A_REPLY_ACK, A_SHOWMAP, A_ROUTE, A_ADDCHAN, A_CHINFO, A_SPEC, A_LOG, A_PKTMAP, A_MULTI, A_SELDEL, A_SELALL, A_SELOLD, A_SELNONE, A_TILE };
   enum Pick { P_PRESET, P_BW, P_SF, P_CR, P_TX, P_HASH, P_AIR, P_BT, P_GPS, P_ADVLOC, P_TEL0, P_TEL1, P_TEL2, P_AUTOADV, P_AA_MODE, P_AA_T0, P_AA_T1, P_AA_T2, P_AA_T3,
-              P_AA_FULL, P_AA_HOPS, P_SHOWPATH, P_MULTIACK, P_SOUND, P_SLEEP, P_KBLIGHT, P_WAKE, P_LOCK, P_RPTSORT, P_BRIGHT, P_MSGSND, P_ADVSND, P_MAPRANGE, P_GPSMODE, P_DIM, P_CPU, P_BTAUTO, P_SELOLD, P_TILE, P_WIFINET };
+              P_AA_FULL, P_AA_HOPS, P_SHOWPATH, P_MULTIACK, P_SOUND, P_SLEEP, P_KBLIGHT, P_WAKE, P_LOCK, P_RPTSORT, P_BRIGHT, P_MSGSND, P_ADVSND, P_MAPRANGE, P_GPSMODE, P_DIM, P_CPU, P_BTAUTO, P_SELOLD, P_TILE, P_WIFINET, P_QUICK };
   enum Confirm { C_NONE = 0, C_DEL_CHANNEL, C_DEL_CONTACT, C_REBOOT, C_FACTORY, C_RPT_REBOOT, C_RPT_SF6, C_CLEAR_MSGS, C_CLEAR_PW, C_CLEAR_BONDS, C_DEL_THREAD, C_WIFI_DL, C_WIFI_FORGET, C_BT_RESTART, C_WIFI_OTA, C_OTA_INSTALL, C_DEL_MULTI, C_WIFI_SCAN };
   struct Thread { char name[32]; uint8_t chan; uint8_t unread; uint32_t last; int16_t last_msg; };
   struct Nav { uint8_t scr; int16_t sel, top; };
@@ -231,6 +233,9 @@ class UITask : public AbstractUITask {
   void fillTools();
   void fillEmoji();
   void fillEmoAll();
+  void loadQuick();
+  void saveQuick();
+  char _quick[UI_QUICK_MAX][UI_QUICK_LEN]; uint8_t _quick_n; int8_t _quick_sel;   // szybkie wiadomości (własne teksty)
   void loadEmo();
   void saveEmo();
   uint32_t _emo[24]; bool _emo_edit; int8_t _emo_slot;   // szybkie emotki (klucze z Gfx::emojiKey)

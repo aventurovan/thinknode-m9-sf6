@@ -251,6 +251,12 @@ int main(int argc, char** argv) {
   keys({ M9K_ENTER, M9K_LEFT, M9K_DOWN, M9K_DOWN, M9K_RIGHT, M9K_RIGHT, M9K_RIGHT, M9K_RIGHT, M9K_RIGHT, M9K_RIGHT }); save("e-wybor-2");
   keys({ M9K_ENTER, M9K_LEFT, M9K_UP, M9K_RIGHT, M9K_ENTER }); save("e-pole");
   keys({ M9K_BKSP }); save("e-skasowana"); keys({ M9K_ENTER }); run(600); save("e-wyslana"); keys({ M9K_BACK });
+  // szybkie wiadomości: lista w rozmowie, edycja, dodanie, usunięcie
+  keys({ M9K_HOME, M9K_MSG }); for (int i = 0; i < 8; i++) keys({ M9K_UP }); keys({ M9K_ENTER, M9K_ENTER }); save("q-szybkie");
+  keys({ M9K_F3 }); save("q-edycja-lista"); keys({ M9K_DOWN, M9K_ENTER }); save("q-menu");
+  keys({ M9K_ENTER }); save("q-edycja"); keys({ ' ', 'j', 'e', 's', 't', M9K_ENTER }); run(100); save("q-zmieniona");
+  run(3000); for (int i = 0; i < 12; i++) keys({ M9K_DOWN }); keys({ M9K_ENTER, 'J', 'a', 'd', M9K_CTRL, 'e', ' ', 'n', 'a', ' ', 'g', M9K_CTRL, 'o', 'r', M9K_CTRL, 'e', M9K_ENTER }); run(3000); save("q-dodana");
+  keys({ M9K_UP, M9K_UP, M9K_UP, M9K_ENTER, M9K_DOWN, M9K_ENTER }); run(3000); save("q-usunieta"); keys({ M9K_BACK }); save("q-szybkie-po"); keys({ M9K_BACK, M9K_BACK });
   keys({ M9K_HOME, M9K_LEFT, M9K_UP, M9K_UP, M9K_UP, M9K_LEFT, M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("p-ekran-i-dzwiek");
   keys({ M9K_DOWN, M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("p-blokada-wybor");
   keys({ M9K_DOWN, M9K_DOWN, M9K_ENTER }); save("p-pin-nowy");

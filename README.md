@@ -6,7 +6,7 @@ i oglądasz mapę bez telefonu. Przez Bluetooth łączy się z aplikacjami **Mes
 
 Domyślny preset radia: **SF6 — 869,618 MHz · BW 62,5 kHz · SF6 · CR 4/8**. Do wyboru jest też **EU/UK Narrow (SF8)**.
 
-Aktualna wersja: **0.28.0** (numer jest też w nagłówku ekranów Narzędzia i Ustawienia).
+Aktualna wersja: **0.29.0** (numer jest też w nagłówku ekranów Narzędzia i Ustawienia).
 
 ---
 
@@ -100,7 +100,7 @@ Na początku widać sześć pierwszych.
 - **Opcje wiadomości** (Menu albo ►): Odpowiedz @, Odpowiedz ack (z liczbą hopów), Szczegóły (trasa, SNR, RSSI, bajty), Trasa na mapie, Wyślij ponownie, Kopiuj, Usuń.
 - **Info o kanale:** rodzaj kanału, hash, liczba wiadomości, średnia liczba hopów i najaktywniejsi z 24 h. Enter pokazuje **kod QR**, którym kolega doda kanał w aplikacji.
 - **Emotki:** emotki wysłane z telefonów są pokazywane jako kolorowe obrazki (pełny zestaw: ok. 1400 emotek i flagi wszystkich krajów; odcienie skóry pokazują się jako wersja podstawowa, a emotki złożone z kilku znaków jako ich części). W rozmowie klawisz **◄** otwiera siatkę 24 szybkich emotek do wstawienia we własną wiadomość. Każdą z nich można podmienić na dowolną z zestawu: **Menu** na emotce (albo Ustawienia › Wiadomości › Szybkie emotki), w przeglądarce Menu skacze między grupami.
-- **Szybkie odpowiedzi:** Enter na pustym polu, m.in. „Test” i pozycja.
+- **Szybkie odpowiedzi:** Enter na pustym polu – własne teksty (do 12) i pozycja z GPS. Listę zmienia się klawiszem **Menu** na tej liście albo w Ustawienia › Wiadomości › Szybkie wiadomości: dodaj, edytuj, usuń.
 - **Wyciszanie:** pojedyncze kanały i rozmowy.
 - **Pamięć:** do 300 wiadomości, zostają po restarcie. Własna wiadomość zapisuje się kilka sekund po wysłaniu, odebrane najpóźniej po 30 s (albo od razu po wygaszeniu ekranu).
 

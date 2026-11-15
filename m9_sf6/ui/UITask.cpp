@@ -58,8 +58,11 @@ static const char* const BTA_NAMES[] = { "nigdy", "po 5 min", "po 15 min", "po 3
 #define NOISE_SLOT_MS    2143UL         // 10 minut szumu w 280 punktach
 #define BATT_SAMPLE_MS   450000UL       // napięcie baterii co 7,5 min
 static const char* const FILTER_NAMES[] = { "wszystkie", "osoby", "repeatery", "pokoje", "czujniki", "ulubione" };
-static const char* const QUICK[] = { "Test", "OK", "Tak", "Nie", "Zaraz będę", "Oddzwonię później", "Moja pozycja", "Moja pozycja + link do mapy" };
-#define N_QUICK_TEXT 6      // pierwsze pozycje to gotowy tekst, dwie ostatnie to pozycja
+// szybkie wiadomości: teksty domyślne (można je zmieniać w Ustawieniach › Wiadomości); pod nimi zawsze dwie pozycje z GPS
+static const char* const QUICK_DEF[] = { "Test", "OK", "Tak", "Nie", "Zaraz będę", "Oddzwonię później" };
+#define N_QUICK_DEF 6
+#define N_QUICK_TEXT _quick_n
+#define FILE_QUICK       "/m9ui.qck"
 static const uint8_t BRIGHT_STEPS[] = { 10, 25, 50, 75, 100 };
 static const char* const CLI_CMDS[] = { "ver", "clock", "neighbors", "get radio", "get tx", "get name", "get repeat" };
 
@@ -160,7 +163,7 @@ UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial) : AbstractU
   _radio_ok_at = _tx_until = _rx_until = _kb_next = 0; _tx_seen = _rx_seen = 0;
 
   _pw_n = 0;
-  _cur[0] = 0; _cur_chan = false; memset(_cur_key, 0, sizeof(_cur_key)); _msgs_old_format = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_new = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1; _wifi_sel = -1; _wifi_new[0] = 0; _wifi_scan_st = 0; _emo_edit = false; _emo_slot = -1; memset(_emo, 0, sizeof(_emo));
+  _cur[0] = 0; _cur_chan = false; memset(_cur_key, 0, sizeof(_cur_key)); _msgs_old_format = false; _scroll_unread = -1; _scroll_px = _scroll_tgt = 0; _scroll_next = 0; _th_total = _th_n = 0; _th_sel = -1; _th_new = -1; _th_idx = NULL; _th_h = NULL; _bt_boot_done = false; _wifi_bars = -1; _wifi_sel = -1; _wifi_new[0] = 0; _wifi_scan_st = 0; _emo_edit = false; _emo_slot = -1; memset(_emo, 0, sizeof(_emo)); _quick_n = 0; _quick_sel = -1; memset(_quick, 0, sizeof(_quick));
   _nh_n = 0; _nh_next = _nh_slot_end = 0; _nh_min = 1; _bh_n = _bh_seg = 0; _bh_next = 30000; _bh_chg = false;
   _sp_tab = _sp_range = 0; _sp_pause = _sp_have = false; _sp_next = 0; _sp_ms = 0; _sp_wf_n = 0;
   memset(_sp_cur, -128, sizeof(_sp_cur)); memset(_sp_peak, -128, sizeof(_sp_peak)); memset(_sp_wf, -128, sizeof(_sp_wf));
@@ -299,6 +302,7 @@ void UITask::loadAll() {
   }
   _msg_loaded = _msg_n;
   loadEmo();
+  loadQuick();
 
   f = SPIFFS.open(FILE_WIFI, "r");
   if (f) {
@@ -1587,6 +1591,17 @@ void UITask::submitInput() {
       return;
     }
     case IN_MAP_URL: scopy(_wifi.url, sizeof(_wifi.url), _input); saveWifi(); _input_mode = IN_MSG; pop(); return;
+    case IN_QUICK: {
+      char t[UI_QUICK_LEN]; scopy(t, sizeof(t), _input);
+      int n = strlen(t); while (n > 0 && t[n - 1] == ' ') t[--n] = 0;
+      _input_mode = IN_MSG; pop();
+      if (!t[0]) { _quick_sel = -1; return; }           // puste pole: bez zmian
+      if (_quick_sel >= 0 && _quick_sel < _quick_n) strcpy(_quick[_quick_sel], t);
+      else if (_quick_n < UI_QUICK_MAX) strcpy(_quick[_quick_n++], t);
+      _quick_sel = -1;
+      saveQuick(); popup("Zapisano", t);
+      return;
+    }
     case IN_LOCKPIN: {
       if (strlen(_input) < 4) { popup("Kod ma mieć 4–8 znaków", "litery lub cyfry", true); return; }
       for (int i = 0; i < 8; i++) _pin_salt[i] = (uint8_t)(esp_random_m9() >> (i % 3 * 8));
@@ -1664,13 +1679,14 @@ void UITask::keyThread(uint8_t k) {
     case IN_LAT: case IN_LON: limit = 11; digits = true; break;
     case IN_PIN: limit = 6; if (k < '0' || k > '9') return; break;
     case IN_LOCKPIN: limit = 8; if (k >= 'A' && k <= 'Z') k = (uint8_t)(k + 32); if (!((k >= 'a' && k <= 'z') || (k >= '0' && k <= '9'))) return; break;   // kod: litery i cyfry, bez rozróżniania wielkości
+    case IN_QUICK: limit = 48; break;
     case IN_WIFI_SSID: limit = 32; break;
     case IN_WIFI_PASS: limit = 63; break;
     case IN_MAP_URL: limit = 120; if (k == ' ') return; break;
   }
   if (digits && !((k >= '0' && k <= '9') || k == '.' || k == ',' || k == '-')) return;
   if (k >= 32 && k < 127 && _input_chars < limit) {
-    const char* pl = (_polish && mode != IN_PASS && mode != IN_CLI && mode < IN_WIFI_SSID) ? polishFor(k) : NULL;
+    const char* pl = (_polish && mode != IN_PASS && mode != IN_CLI && (mode < IN_WIFI_SSID || mode == IN_QUICK)) ? polishFor(k) : NULL;
     if (pl) strcat(_input, pl);
     else { int n = strlen(_input); _input[n] = (char)k; _input[n + 1] = 0; }
     _input_chars++;
@@ -1700,6 +1716,7 @@ int UITask::listCount(uint8_t s) {
     case S_HEARD: return the_mesh.ui_heard_n;
     case S_MENU: return _menu_n;
     case S_QUICK: return N_QUICK_TEXT + 2;
+    case S_QUICK_EDIT: return _quick_n + 1;
     case S_DISC: return the_mesh.ui_disc_n + 1;
     case S_LOGIN: return pwGet(_ck) ? 3 : 2;
     case S_ADMIN: return 5;
@@ -1714,7 +1731,7 @@ int UITask::listCount(uint8_t s) {
     case S_SET_POS: return 10;
     case S_SET_ADV: return 3;
     case S_SET_CT: return 6;
-    case S_SET_MSG: return 4;
+    case S_SET_MSG: return 5;
     case S_SET_SCR: return 11;
     case S_SET_SYS: return 7;
   }
@@ -1770,7 +1787,8 @@ void UITask::listHead(uint8_t s) {
       hint("Enter", "wybierz"); hint("Wstecz", m9dlActive() ? "zatrzymaj" : "");
       break;
     case S_PICK: scopy(v.title, sizeof(v.title), _pick_title); strcpy(v.title_right, "wybierz wartość"); hint("Enter", "wybierz"); hint("Wstecz", "bez zmian"); break;
-    case S_QUICK: strcpy(v.title, "Szybkie odpowiedzi"); snprintf(v.title_right, sizeof(v.title_right), "do: %s", _cur); hint("Enter", "wyślij"); hint("Wstecz", ""); break;
+    case S_QUICK: strcpy(v.title, "Szybkie odpowiedzi"); snprintf(v.title_right, sizeof(v.title_right), "do: %s", _cur); hint("Enter", "wyślij"); hint("Menu", "edytuj listę"); hint("Wstecz", ""); break;
+    case S_QUICK_EDIT: strcpy(v.title, "Szybkie wiadomości"); snprintf(v.title_right, sizeof(v.title_right), "%d z %d", _quick_n, UI_QUICK_MAX); hint("Enter", "wybierz"); hint("Wstecz", ""); break;
     case S_DISC: {
       strcpy(v.title, "Co tu słychać?");
       bool waiting = _disc_until && (long)(millis() - _disc_until) < 0;
@@ -1875,7 +1893,14 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
         case A_LOG: setRow(r, "Log pakietów", "wszystko, co odebrało radio", UII_SIGNAL); break;
       }
       return;
-    case S_QUICK: setRow(r, QUICK[i], "", i >= N_QUICK_TEXT ? UII_GPS : UII_NONE); return;
+    case S_QUICK:
+      if (i < _quick_n) setRow(r, _quick[i], "");
+      else setRow(r, i == _quick_n ? "Moja pozycja" : "Moja pozycja + link do mapy", "", UII_GPS);
+      return;
+    case S_QUICK_EDIT:
+      if (i < _quick_n) setRow(r, _quick[i], "");
+      else setRow(r, "Dodaj nową", _quick_n >= UI_QUICK_MAX ? "lista jest pełna" : "", UII_CHECK);
+      return;
     case S_PICK: setRow(r, _pick_opt[i], i == _pick_cur ? "teraz" : "", i == _pick_cur ? UII_CHECK : UII_NONE, true); return;
     case S_OTA: {
       int os = m9otaState();
@@ -2053,6 +2078,7 @@ void UITask::listRow(uint8_t s, int i, UiRow& r) {
       if (i == 0) setRow(r, "Trasa pod wiadomością", _cfg.show_path ? "identyfikatory repeaterów" : "tylko liczba skoków");
       else if (i == 1) setRow(r, "Dodatkowe potwierdzenia", _prefs->multi_acks ? "włączone (pewniej, więcej ruchu)" : "wyłączone");
       else if (i == 2) setRow(r, "Szybkie emotki", "24 do wstawiania (◄ w rozmowie)");
+      else if (i == 3) { snprintf(t, sizeof(t), "własnych tekstów: %d", _quick_n); setRow(r, "Szybkie wiadomości", t); }
       else { snprintf(t, sizeof(t), "zapisanych: %d", _msg_n); setRow(r, "Usuń wszystkie wiadomości", t); }
       return;
     case S_SET_SCR:
@@ -2157,7 +2183,7 @@ void UITask::listEnter(uint8_t s, int i) {
     }
     case S_QUICK: {
       char t[100];
-      if (i < N_QUICK_TEXT) scopy(t, sizeof(t), QUICK[i]);
+      if (i < N_QUICK_TEXT) scopy(t, sizeof(t), _quick[i]);
       else {
         double lat, lon; int sats;
         if (!gpsFix(&lat, &lon, &sats)) { popup("Brak pozycji GPS", "włącz GPS w Ustawieniach i wyjdź pod niebo"); return; }
@@ -2168,6 +2194,11 @@ void UITask::listEnter(uint8_t s, int i) {
       sendText(t);
       return;
     }
+    case S_QUICK_EDIT:
+      if (i < _quick_n) { _quick_sel = (int8_t)i; pickBegin(P_QUICK, _quick[i]); pickAdd("Edytuj"); pickAdd("Usuń"); pickOpen(-1); }
+      else if (_quick_n >= UI_QUICK_MAX) popup("Lista jest pełna", "najpierw usuń którąś", true);
+      else { _quick_sel = -1; openInput(IN_QUICK, ""); }
+      return;
     case S_DISC: {
       if (i == 0) { prepare(S_DISC); return; }
       MyMesh::UiDisc& d = the_mesh.ui_disc[i - 1];
@@ -2230,7 +2261,8 @@ void UITask::listEnter(uint8_t s, int i) {
       return;
     case S_SET_MSG:
       if (i == 2) { _emo_edit = true; push(S_EMOJI); }
-      else if (i == 3) ask(C_CLEAR_MSGS, "Usunąć wszystkie wiadomości?", "");
+      else if (i == 3) push(S_QUICK_EDIT);
+      else if (i == 4) ask(C_CLEAR_MSGS, "Usunąć wszystkie wiadomości?", "");
       else settingPick(s, i);
       return;
     case S_SET_SYS:
@@ -2360,6 +2392,16 @@ void UITask::applyPick(uint8_t id, int i) {
     case P_DIM: _cfg.dim_idx = i; saveCfg(); break;
     case P_CPU: _cfg.cpu_full = i == 1; saveCfg(); break;
     case P_BTAUTO: _cfg.bt_auto = i; saveCfg(); _bt_idle_since = 0; break;
+    case P_QUICK:
+      if (_quick_sel < 0 || _quick_sel >= _quick_n) break;
+      if (i == 0) openInput(IN_QUICK, _quick[_quick_sel]);
+      else {
+        for (int q = _quick_sel; q + 1 < _quick_n; q++) memcpy(_quick[q], _quick[q + 1], UI_QUICK_LEN);
+        _quick_n--; _quick_sel = -1;
+        saveQuick(); popup("Usunięto");
+        if (scr() == S_QUICK_EDIT && sel() > _quick_n) sel() = _quick_n;
+      }
+      break;
     case P_WIFINET:
       if (_wifi_sel < 0 || _wifi_sel >= _wifi.n) break;
       if (i == 0) openInput(IN_WIFI_PASS, "");
@@ -2431,6 +2473,9 @@ void UITask::applyPick(uint8_t id, int i) {
 bool UITask::listKey(uint8_t s, int i, uint8_t k) {
   int dir = k == M9K_LEFT ? -1 : k == M9K_RIGHT ? 1 : 0;
   switch (s) {
+    case S_QUICK:
+      if (k == M9K_F3) { push(S_QUICK_EDIT); return true; }
+      break;
     case S_MSGS:
       if (k == M9K_F3) { openMenuThread(i < _thread_n ? i : -1); return true; }
       if ((k == M9K_BKSP || k == M9K_BKSP_LONG) && i < _thread_n && _threads[i].chan) { ask(C_DEL_CHANNEL, "Usunąć kanał?", _threads[i].name); return true; }
@@ -3212,6 +3257,35 @@ static const uint32_t EMO_DEF[N_EMO_PICK] = {
   0x1F609, 0x1F60A, 0x1F60D, 0x1F60E, 0x1F914, 0x1F622, 0x1F621, 0x2764,
   0x2705, 0x26A0, 0x1F4CD, 0x1F4E1, 0x1F50B, 0x2615, 0x1F37A, 0x1F943 };
 
+void UITask::loadQuick() {
+  _quick_n = 0;
+  File f = SPIFFS.open(FILE_QUICK, "r");
+  if (f) {
+    uint8_t h[3];
+    bool ok = f.read(h, 3) == 3 && h[0] == 'Q' && h[1] == '1' && h[2] <= UI_QUICK_MAX && f.size() == 3 + (size_t)h[2] * UI_QUICK_LEN;
+    if (ok) {
+      for (int i = 0; i < h[2]; i++) {
+        if (f.read((uint8_t*)_quick[_quick_n], UI_QUICK_LEN) != UI_QUICK_LEN) break;
+        _quick[_quick_n][UI_QUICK_LEN - 1] = 0;
+        if (_quick[_quick_n][0]) _quick_n++;
+      }
+      f.close();
+      return;                                           // także pusta lista: użytkownik usunął wszystkie
+    }
+    f.close();
+  }
+  for (int i = 0; i < N_QUICK_DEF; i++) scopy(_quick[_quick_n++], UI_QUICK_LEN, QUICK_DEF[i]);
+}
+
+void UITask::saveQuick() {
+  File f = SPIFFS.open(FILE_QUICK, "w");
+  if (!f) return;
+  uint8_t h[3] = { 'Q', '1', _quick_n };
+  f.write(h, 3);
+  for (int i = 0; i < _quick_n; i++) f.write((const uint8_t*)_quick[i], UI_QUICK_LEN);
+  f.close();
+}
+
 void UITask::loadEmo() {
   memcpy(_emo, EMO_DEF, sizeof(_emo));
   File f = SPIFFS.open(FILE_EMO, "r");
@@ -3428,10 +3502,10 @@ void UITask::fillThread() {
   UiView& v = *_v;
   v.screen = UIS_THREAD; v.tab = -1;
   if (_input_mode != IN_MSG) {                       // pole do wpisania czegoś innego niż wiadomość
-    static const char* const T[14] = { "", "Nowy kanał", "Częstotliwość", "Nazwa urządzenia", "Data i godzina", "Hasło repeatera", "Komenda", "Szerokość geograficzna", "Długość geograficzna", "PIN Bluetooth",
-                                       "Sieć WiFi", "Hasło WiFi", "Adres mapy", "Kod blokady ekranu" };
-    static const char* const R[14] = { "", "kanał z hasztagiem", "MHz", "do 22 znaków", "czas polski", "", "konsola repeatera", "stopnie", "stopnie", "6 cyfr", "nazwa sieci", "hasło sieci", "internet", "4–8 liter lub cyfr" };
-    static const char* const N[14] = { "", "Wpisz nazwę, np. #beskidy. Kto wpisze tę samą nazwę, ten jest na kanale.", "Wpisz częstotliwość w MHz, np. 869.618",
+    static const char* const T[15] = { "", "Nowy kanał", "Częstotliwość", "Nazwa urządzenia", "Data i godzina", "Hasło repeatera", "Komenda", "Szerokość geograficzna", "Długość geograficzna", "PIN Bluetooth",
+                                       "Sieć WiFi", "Hasło WiFi", "Adres mapy", "Kod blokady ekranu", "Szybka wiadomość" };
+    static const char* const R[15] = { "", "kanał z hasztagiem", "MHz", "do 22 znaków", "czas polski", "", "konsola repeatera", "stopnie", "stopnie", "6 cyfr", "nazwa sieci", "hasło sieci", "internet", "4–8 liter lub cyfr", "do 48 znaków" };
+    static const char* const N[15] = { "", "Wpisz nazwę, np. #beskidy. Kto wpisze tę samą nazwę, ten jest na kanale.", "Wpisz częstotliwość w MHz, np. 869.618",
       "Pod tą nazwą widzą Cię inni w sieci. Polskie litery: ctrl, potem litera.",
       "Format: RRRR-MM-DD GG:MM. Zegar ustawia się też sam po połączeniu z aplikacją w telefonie i z GPS po złapaniu pozycji.",
       "Hasło administratora albo gościa. Po udanym logowaniu zostanie zapamiętane w urządzeniu. Puste = gość.",
@@ -3441,7 +3515,8 @@ void UITask::fillThread() {
       "Nazwa sieci WiFi, przez którą urządzenie pobierze mapę: domowa albo hotspot z telefonu. Wielkość liter ma znaczenie.",
       "Hasło do sieci WiFi. Zostanie zapisane zaszyfrowane i nie będzie pokazywane. Przy zmianie hasła puste pole = bez zmian.",
       "Adres w internecie, spod którego urządzenie pobiera pliki mapy (musi tam być plik lista.txt).",
-      "Nowy kod do odblokowania ekranu: litery lub cyfry (wielkość liter nie ma znaczenia). Zapamiętaj go: bez kodu pomoże tylko wgranie firmware kablem z kasowaniem pamięci." };
+      "Nowy kod do odblokowania ekranu: litery lub cyfry (wielkość liter nie ma znaczenia). Zapamiętaj go: bez kodu pomoże tylko wgranie firmware kablem z kasowaniem pamięci.",
+      "Tekst, który wyślesz jednym Enterem z pustego pola w rozmowie. Polskie litery: ctrl, potem litera." };
     strcpy(v.title, T[_input_mode]); strcpy(v.title_right, R[_input_mode]); strcpy(v.line1, N[_input_mode]);
     scopy(v.input, sizeof(v.input), _input);
     v.input_chars = _input_chars;
