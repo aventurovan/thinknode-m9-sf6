@@ -6,7 +6,7 @@ i oglądasz mapę bez telefonu. Przez Bluetooth łączy się z aplikacjami **Mes
 
 Domyślny preset radia: **SF6 — 869,618 MHz · BW 62,5 kHz · SF6 · CR 4/8**. Do wyboru jest też **EU/UK Narrow (SF8)**.
 
-Aktualna wersja: **0.25.0** (numer jest też na ekranie startowym i w Ustawieniach).
+Aktualna wersja: **0.25.0** (numer jest też w nagłówku ekranów Narzędzia i Ustawienia).
 
 ---
 
@@ -54,14 +54,12 @@ Stały PIN można ustawić w **Ustawieniach › Bluetooth**.
 
 Aktualizacja bez poprawnego podpisu nie zostanie zainstalowana, a starszej wersji urządzenie nie wgra.
 
-Gdy kilka nadajników (AP) ma tę samą nazwę sieci, urządzenie przed połączeniem skanuje otoczenie i wybiera najmocniejszy. W wierszu „Sieci WiFi” widać wtedy, z czym się połączyło: nazwę, kanał, siłę sygnału i liczbę AP.
-
 Na czas WiFi Bluetooth jest wyłączony (oba naraz nie mieszczą się w pamięci). Wraca po restarcie.
 
 ### 6. Mapa
 
 Mapa całej Polski (zoom 6–13, ok. 330 MB) leży na wbudowanej karcie SD. Pobiera ją samo urządzenie:
-klawisz **Mapa**, potem **Menu**, potem **„Pobierz z internetu”**. Szczegóły opisuje [`mapa/README.md`](mapa/README.md).
+**Narzędzia › Mapa › Pobierz z internetu** (albo klawisz **Mapa**, potem **Menu**). Sieć WiFi wybiera się tak samo jak przy aktualizacji. Szczegóły opisuje [`mapa/README.md`](mapa/README.md).
 
 ---
 
@@ -94,7 +92,7 @@ Na początku widać sześć pierwszych.
 
 ### Wiadomości
 
-- **Lista:** kanały i rozmowy prywatne, nieprzeczytane są na górze. Menu na liście: otwórz, info o kanale, wycisz, oznacz jako przeczytane, usuń, **dodaj kanał** (z hasztagiem, np. `#beskidy`).
+- **Lista:** kolejność jest stała – kanał **Public** zawsze pierwszy, pozostałe kanały alfabetycznie, pod nimi rozmowy prywatne (nieprzeczytane wyżej, potem najnowsze). Nowa wiadomość nie przestawia kanałów. Menu na liście: otwórz, info o kanale, wycisz, oznacz jako przeczytane, usuń, **dodaj kanał** (z hasztagiem, np. `#beskidy`).
 - **Rozmowa:**
   - dymki, płynne przewijanie ▲▼ z suwakiem; po wejściu widok staje na pierwszej nieprzeczytanej, a kreska „nowe wiadomości” oddziela ją od starszych;
   - pod wysłaną wiadomością na kanale licznik powtórzeń i identyfikator pierwszego repeatera, przy prywatnej „Doręczono”;
@@ -104,6 +102,28 @@ Na początku widać sześć pierwszych.
 - **Szybkie odpowiedzi:** Enter na pustym polu, m.in. „Test” i pozycja.
 - **Wyciszanie:** pojedyncze kanały i rozmowy.
 - **Pamięć:** do 300 wiadomości, zostają po restarcie.
+
+### Narzędzia
+
+Ikona klucza na dolnym pasku, przed Ustawieniami. Sześć kafelków w układzie ekranu startowego, z wartościami na żywo:
+
+| Kafelek | Pokazuje | Enter |
+|---|---|---|
+| Widmo | szum na naszym kanale, zajętość, ostatni pakiet | ekran Widmo |
+| Log pakietów | pakiety na minutę, typ ostatniego, liczba zapisanych | log pakietów |
+| Discovery | ilu sąsiadów odpowiedziało na ostatni ping | ping do sąsiadów |
+| Mapa | zakres zoomów, liczba plików, rozmiar karty | pobieranie mapy, sieci WiFi, adres mapy, karta SD |
+| Aktualizacja | wersja, czy jest nowsza, zapisane sieci WiFi | aktualizacja przez WiFi |
+| Bateria | procent, czas pracy, napięcie | szczegóły baterii |
+
+### Sieci WiFi
+
+WiFi służy tylko do aktualizacji i pobierania mapy. Ekran **Sieci WiFi** jest w Aktualizacji i w Mapie.
+
+- **Szukaj sieci** pokazuje sieci w zasięgu od najmocniejszej: siła w dBm, kłódka przy zabezpieczonych, liczba nadajników (AP) o tej samej nazwie.
+- Enter na sieci pyta o hasło i ją zapisuje; sieć otwarta zapisuje się od razu. **Inna sieć** pozwala wpisać nazwę ręcznie (sieć ukryta).
+- Zapisanych sieci może być **do 4** (np. dom, firma, hotspot). Enter na zapisanej: zmień hasło albo zapomnij.
+- Przed każdym połączeniem urządzenie skanuje otoczenie i łączy się z **najmocniejszym nadajnikiem** spośród zapisanych sieci. Wiersz „Sieci WiFi” pokazuje wtedy nazwę, kanał, dBm i liczbę AP.
 
 ### Kontakty i repeatery
 
@@ -118,6 +138,8 @@ Na początku widać sześć pierwszych.
 - **Dodawanie z advertów:** wybór, jakie typy dodawać i z jak daleka (**Ustawienia › Kontakty**).
 
 ### Widmo i log pakietów
+
+Oba ekrany otwiera się z **Narzędzi** albo z kafelka na Starcie.
 
 - **Widmo › Pasmo:** słupki poziomu w paśmie LoRa **867–870 MHz** (▲▼ przełącza na zbliżenie 869,3–869,9 MHz), szczyty i wodospad.
   - Nasza częstotliwość jest zaznaczona jako „SF6”. Enter wstrzymuje pomiar.
@@ -136,6 +158,7 @@ Klawisz **Mapa** pokazuje mapę z karty SD z Twoją pozycją (GPS), repeaterami 
 
 - Strzałki przesuwają mapę, **I / O** zmieniają zoom, Enter wraca do pozycji GPS.
 - „Trasa na mapie” z menu wiadomości rysuje drogę wiadomości przez repeatery.
+- „Pokaż na mapie” z menu repeatera, kontaktu albo pakietu w logu otwiera mapę w tym miejscu; Wstecz wraca tam, skąd przyszedłeś.
 
 ### Oszczędzanie baterii
 
@@ -151,7 +174,6 @@ Kafelek Bateria pokazuje, jak spada napięcie i ile czasu zostało. Pierwsze osz
 
 ### Pozostałe
 
-- **Narzędzia** (klucz na dolnym pasku, przed Ustawieniami): sześć kafelków z wartościami na żywo – Widmo, Log pakietów, Discovery, Mapa, Aktualizacja, Bateria.
 - **Ustawienia** w ośmiu działach: Radio, Bluetooth, Pozycja i prywatność, Advert, Kontakty, Wiadomości, Ekran i dźwięk, System. Każdą wartość wybiera się z listy.
 - **Radio:** presety SF6 i EU/UK Narrow, własne parametry, moc nadawania, bajty trasy (1 / 2 / 3), limit nadawania.
 - **Blokada ekranu:** włącza się z wygaszeniem ekranu. Do wyboru zwykła (Wstecz, potem Enter) albo z **kodem** (opis niżej).
@@ -180,7 +202,7 @@ Kafelek Bateria pokazuje, jak spada napięcie i ile czasu zostało. Pierwsze osz
 | Pinezka | Repeatery |
 | Mapa | Mapa |
 | Mała wiadomość pod Home („Menu”) | opcje na bieżącym ekranie (rozmowy, wiadomości, kontaktu, mapy, Startu) |
-| ▼ z dolnego rzędu | zejście na dolny pasek ikon (◄ ► wybór, ▲ powrót) |
+| ▼ z dolnego rzędu | zejście na dolny pasek ikon: Start, Wiadomości, Kontakty, Repeatery, Narzędzia, Ustawienia (◄ ► wybór, ▲ powrót) |
 | ctrl, potem litera | ą ć ę ł ń ó ś ż (ź pod X) |
 | litery na liście Kontakty | szukanie po nazwie (Del kasuje) |
 
@@ -188,7 +210,8 @@ Kafelek Bateria pokazuje, jak spada napięcie i ile czasu zostało. Pierwsze osz
 
 ## Znane ograniczenia
 
-- WiFi i Bluetooth nie działają jednocześnie. Po użyciu WiFi (mapa, aktualizacja) Bluetooth wraca dopiero po restarcie.
+- WiFi i Bluetooth nie działają jednocześnie. Po użyciu WiFi (mapa, aktualizacja, szukanie sieci) Bluetooth wraca dopiero po restarcie.
+- WiFi działa tylko w paśmie 2,4 GHz.
 - Pomiar pasma w Widmie na chwilę przerywa odbiór pakietów, dlatego działa tylko przy otwartym ekranie.
 - Nazwy telefonu przez Bluetooth nie da się odczytać. Kafelek Sieć pokazuje nazwę aplikacji (np. „MeshSpeed”).
 - Blokada z kodem chroni ekran. Kto ma urządzenie w ręku i odczyta całą pamięć kablem, nadal może dostać się do danych (pamięć urządzenia nie jest szyfrowana).

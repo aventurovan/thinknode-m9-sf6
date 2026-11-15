@@ -4,11 +4,11 @@ Urządzenie rysuje mapę z plików `.mcm` w folderze **`/mapa`** na karcie SD.
 
 ## Wgrywanie na kartę
 
-Karta w M9 jest wbudowana, dlatego pliki wgrywa samo urządzenie. Na M9: klawisz **Mapa**, potem **Menu** (mała wiadomość pod Home).
+Karta w M9 jest wbudowana, dlatego pliki wgrywa samo urządzenie. Na M9: **Narzędzia › Mapa** albo klawisz **Mapa**, potem **Menu** (mała wiadomość pod Home).
 
 **Z internetu, bez komputera**
 
-1. „Sieć WiFi” i „Hasło WiFi” — wpisz sieć domową albo hotspot z telefonu.
+1. „Sieci WiFi” — „Szukaj sieci”, wybierz z listy sieć domową albo hotspot z telefonu i wpisz hasło (można zapisać do 4 sieci).
 2. „Pobierz z internetu” — urządzenie łączy się z WiFi, czyta `lista.txt` spod „Adresu mapy” i pobiera brakujące pliki na kartę.
    Przerwane pobieranie wznawia się od miejsca przerwania po ponownym wybraniu tej pozycji.
 3. Mapa obejmuje całą Polskę w zoomach 6–13 (ok. 330 MB). Pliki idą od najmniejszego zoomu.
